@@ -1,0 +1,22 @@
+# 只在"这台 Mac + colima"这个具体环境需要——k3s 里的 Pod 不会自动继承宿主机的
+# 代理环境变量,导致 repo-server 连不上 GitHub/GitLab。云服务器或公司 IDC 如果
+# 网络能直连 git 仓库,不要用这个文件,直接用 argocd-values.yaml 就够了。
+#
+# 代理地址来自 colima 虚拟机内部看到的宿主机代理:
+#   colima ssh -- env | grep -i proxy
+# 换了网络或者重启 colima 后如果又连不上 git 仓库,先重新跑一遍这条命令确认地址
+# 没变,再更新下面这两个 value。
+#
+# 只给 repoServer 配代理,不要给 controller/server 也配:controller 连
+# repo-server 内部 gRPC 用的是不带 .svc.cluster.local 后缀的短域名,NO_PROXY
+# 按后缀匹配罩不住这种短名,请求会被错误地也走一遍代理,表现为 controller 和
+# repo-server 之间 "authentication handshake failed: EOF"。这是本项目实际踩过
+# 的坑,细节见 docs/operations/troubleshooting.md。
+repoServer:
+  env:
+    - name: HTTP_PROXY
+      value: "http://192.168.5.2:1087"
+    - name: HTTPS_PROXY
+      value: "http://192.168.5.2:1087"
+    - name: NO_PROXY
+      value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"

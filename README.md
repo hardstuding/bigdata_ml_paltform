@@ -19,7 +19,7 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 
 | Profile | 用途 | 位置 |
 |---|---|---|
-| `local-lite` | 本机验证 GitOps 流程 + 存储/元数据打通 | Mac (M2/16GB, OrbStack) |
+| `local-lite` | 本机验证 GitOps 流程 + 存储/元数据打通 | Mac (M2/16GB, colima + k3s) |
 | `cloud-full` | 功能完整的开发与集成环境 | 云服务器 |
 | `prod` | 替换现有遗留大数据平台 | 生产环境 |
 
@@ -32,3 +32,35 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 - ⏳ Phase 1 完整退出标准(Spark/Trino 各自读写同一张 Iceberg 表)要等 Phase 2 引入 Spark Operator 后才补验证,现在的范围是"存储 + 元数据服务健康",还没有计算引擎接进来
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
+
+## 从零拉起整套服务(新集群 / 迁移到 GitLab / 生产 IDC)
+
+前提:已经有一个能用的 Kubernetes 集群,`kubectl`/`helm` 能连上它,本机装了 `git`。
+
+```bash
+# 1. 把仓库同步过去(如果目标环境要从 GitLab 拉,先在那边 git clone)
+git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
+
+# 2. 如果仓库地址换了(比如从这个 GitHub demo 迁移到你的 GitLab),
+#    先把 ArgoCD Application 里硬编码的 repoURL 换掉,改完记得 commit + push
+./scripts/set-repo-url.sh https://gitlab.com/<你的路径>/bigdata_ml_paltform.git
+git add -A && git commit -m "chore: 迁移仓库地址" && git push
+
+# 3. 生成各组件的管理员密码,建好对应的 Secret(幂等,重复跑不会轮换已有密码)
+./scripts/00-generate-secrets.sh
+
+# 4. 装 ArgoCD 本身(唯一一次手动 helm install,之后全部交给 GitOps)
+#    本机+colima 这种需要过代理才能出网的环境,前面加 NEEDS_LOCAL_PROXY=1
+./scripts/01-bootstrap-argocd.sh
+
+# 5. 把两个 app-of-apps 交给 ArgoCD,后面所有组件的增删改都是 git push
+./scripts/02-bootstrap-root-apps.sh
+
+# 6. kube-prometheus-stack 的 CRD 太大,ArgoCD 应付不了,单独装一次
+#    (只在第一次装、或者升级这个组件版本时需要跑)
+./scripts/install-kube-prometheus-crds.sh
+```
+
+跑完用 `kubectl get applications -n argocd` 看所有组件是不是 `Synced`/`Healthy`。卡住了先查 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md),这台机器踩过的坑基本都记在那了。
+
+**后续所有变更**(加组件、改配置、升级版本)都是:改 `platform/apps/*.yaml` 或 `apps/definitions/*.yaml` → commit → push,ArgoCD 自动同步,不需要再手动跑脚本或 `kubectl apply`。上面 6 步只在"一个全新的空集群"上需要做一次。
