@@ -18,6 +18,9 @@
 #   colima ssh -- free -h        # 看内存
 #   colima ssh -- uptime         # 看 load average,持续大幅高于核数就该收手
 set -euo pipefail
+cd "$(dirname "$0")/.."
+mkdir -p logs
+LOG_FILE="logs/toggle-heavy.log"
 
 PENDING_DIR="environments/cloud-full/pending-definitions"
 ACTIVE_DIR="apps/definitions"
@@ -29,13 +32,14 @@ if [ "$ACTION" != "on" ] && [ "$ACTION" != "off" ]; then
   exit 1
 fi
 
+echo "=== toggle ${ACTION} $(date -u +%FT%TZ) ===" >> "$LOG_FILE"
 for f in $FILES; do
   if [ "$ACTION" = "on" ] && [ -f "${PENDING_DIR}/${f}" ]; then
     git mv "${PENDING_DIR}/${f}" "${ACTIVE_DIR}/${f}"
-    echo "启用: ${f}"
+    echo "启用: ${f}" | tee -a "$LOG_FILE"
   elif [ "$ACTION" = "off" ] && [ -f "${ACTIVE_DIR}/${f}" ]; then
     git mv "${ACTIVE_DIR}/${f}" "${PENDING_DIR}/${f}"
-    echo "收回: ${f}"
+    echo "收回: ${f}" | tee -a "$LOG_FILE"
   fi
 done
 
@@ -43,4 +47,8 @@ echo
 echo "改完了,还没提交。检查一下 git status,确认没问题再:"
 echo "  git commit -m 'toggle heavy components: ${ACTION}'"
 echo "  git push"
-echo "然后照上面注释里的命令触发同步、看状态。"
+echo "然后触发同步:"
+echo "  kubectl -n argocd patch application apps-root --type merge -p '{\"metadata\":{\"annotations\":{\"argocd.argoproj.io/refresh\":\"hard\"}}}'"
+echo
+echo "建议顺手在后台起一个状态记录(重开 Claude 后我能看到这段时间发生了什么):"
+echo "  nohup ./scripts/local-lite-watch.sh > /dev/null 2>&1 &"
