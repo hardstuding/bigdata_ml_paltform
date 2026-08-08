@@ -1,0 +1,16 @@
+# 首次启动时建 hive metastore 专用库和用户。密码从环境变量读(来自 Secret,
+# 见 statefulset.yaml 里的 HIVE_DB_PASSWORD),这个文件本身不含任何密钥,
+# 可以放心提交到公开仓库。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: data
+data:
+  01-create-hive-metastore-db.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+      CREATE USER hive WITH PASSWORD '${HIVE_DB_PASSWORD}';
+      CREATE DATABASE metastore OWNER hive;
+    EOSQL

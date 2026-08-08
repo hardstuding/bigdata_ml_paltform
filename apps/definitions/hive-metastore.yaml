@@ -1,0 +1,24 @@
+# 依赖 postgres(metastore 库由 postgres 的 init 脚本建好,见 apps/postgres/)。
+# ArgoCD 的 sync wave 没配也没关系:metastore 建表用的是 datanucleus 的
+# autoCreateSchema,postgres 没起来之前 hive-metastore 会 CrashLoop 重试,
+# 自愈之后能追上,不需要显式排队。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hive-metastore
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/hive-metastore/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

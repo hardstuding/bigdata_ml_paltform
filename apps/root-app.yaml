@@ -1,0 +1,31 @@
+# apps 层的 app-of-apps,和 platform/root-app.yaml 是同一模式,分开是为了让
+# "平台底座"和"业务组件"在 ArgoCD UI 里分组清楚。只扫 apps/definitions/ 这一层
+# (非递归也没关系,里面不放子目录),各组件自己的原始 manifest 放在
+# apps/<name>/manifests/ 下,靠对应的 Application 资源单独引用,不会被这个
+# app-of-apps 重复扫到。
+#
+# 和 platform/root-app.yaml 一样,是唯一允许手动 kubectl apply 的例外(ADR-005)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: apps-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/definitions
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

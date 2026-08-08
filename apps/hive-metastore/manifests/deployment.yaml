@@ -1,0 +1,75 @@
+# 官方 apache/hive 镜像不带 Postgres JDBC 驱动,用 initContainer 下载一份放进
+# 共享的 emptyDir,再挂到主容器的 /opt/hive/lib/postgres.jar(参考
+# https://github.com/apache/hive/blob/master/standalone-metastore/packaging/src/docker/README.md)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hive-metastore
+  namespace: data
+  labels:
+    app: hive-metastore
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hive-metastore
+  template:
+    metadata:
+      labels:
+        app: hive-metastore
+    spec:
+      initContainers:
+        - name: fetch-postgres-driver
+          image: curlimages/curl:8.11.0
+          command:
+            - sh
+            - -c
+            - curl -fsSL -o /drivers/postgres.jar https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.13/postgresql-42.7.13.jar
+          volumeMounts:
+            - name: jdbc-driver
+              mountPath: /drivers
+      containers:
+        - name: hive-metastore
+          image: apache/hive:standalone-metastore-4.2.0
+          ports:
+            - containerPort: 9083
+              name: thrift
+          env:
+            - name: SERVICE_NAME
+              value: metastore
+            - name: DB_DRIVER
+              value: postgres
+            - name: HIVE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-metastore-db
+                  key: password
+            - name: SERVICE_OPTS
+              value: >-
+                -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
+                -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://postgres.data.svc.cluster.local:5432/metastore
+                -Djavax.jdo.option.ConnectionUserName=hive
+                -Djavax.jdo.option.ConnectionPassword=$(HIVE_DB_PASSWORD)
+          volumeMounts:
+            - name: jdbc-driver
+              mountPath: /opt/hive/lib/postgres.jar
+              subPath: postgres.jar
+          resources:
+            requests:
+              cpu: 150m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+          readinessProbe:
+            tcpSocket:
+              port: 9083
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9083
+            initialDelaySeconds: 60
+            periodSeconds: 20
+      volumes:
+        - name: jdbc-driver
+          emptyDir: {}

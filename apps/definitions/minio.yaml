@@ -1,0 +1,44 @@
+# local-lite: standalone 单节点单盘,chart 默认是 16 副本分布式模式(16Gi 内存起),
+# 本地资源画像必须整体覆盖,不能只调 replicas。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: minio
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.min.io/
+    chart: minio
+    targetRevision: 5.4.0
+    helm:
+      valuesObject:
+        mode: standalone
+        replicas: 1
+        existingSecret: minio-root
+        persistence:
+          enabled: true
+          size: 8Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+        consoleService:
+          type: ClusterIP
+        service:
+          type: ClusterIP
+        buckets:
+          - name: lakehouse
+            policy: none
+            purge: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: minio
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
