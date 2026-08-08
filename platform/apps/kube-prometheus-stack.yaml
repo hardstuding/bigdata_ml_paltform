@@ -14,6 +14,8 @@ spec:
     targetRevision: 88.2.0
     helm:
       valuesObject:
+        crds:
+          enabled: false
         alertmanager:
           enabled: false
         prometheus:
