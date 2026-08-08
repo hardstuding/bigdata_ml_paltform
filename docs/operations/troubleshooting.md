@@ -61,6 +61,13 @@
 - **这是 local-lite 专属的临时方案**,不是架构的一部分——上了真实域名/ingress 之后,
   `apps/keycloak-local-access/` 整个目录、`global.hostAliases`、这条 issuer 配置全部
   可以删掉,换成真实的对外域名(浏览器和集群内部走同一个真实域名,天然没有这个问题)。
+- **域名问题解决之后还会踩一个协议不一致的坑**:Keycloak 报 `We are sorry... Invalid
+  parameter: redirect_uri`(注意这是 Keycloak 自己吐的错,和上面 ArgoCD 吐的
+  "Invalid redirect URL" 是两个不同的检查点)。原因是 client 在 Keycloak 里注册的
+  `redirectUris` 写的是 `http://`,但 `configs.cm.url` 改成 `https://` 之后 ArgoCD
+  实际发起的回调请求是 `https://`,两边对不上。用 `kcadm.sh update clients/<id>`
+  把 `redirectUris` 也改成 `https://` 就好,`scripts/03-configure-keycloak.sh`
+  已经改成一开始就注册 https,不会再重现这个坑。
 
 ### ArgoCD 卡在 "waiting for healthy state of ..." 不动,手动改了 values 也没用
 
