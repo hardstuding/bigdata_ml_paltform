@@ -3,14 +3,18 @@
 # init-configmap.yaml 的用法)。用一个 Job 在已运行的实例上补建 airflow
 # 专用库/用户,SQL 本身写成幂等的(存在就跳过),可以放心让 ArgoCD 每次
 # sync 都重新跑一次。
+#
+# 注意:不要给这个 Job 加 argocd.argoproj.io/hook 之类的 hook 注解——
+# 这个 Application 里只有这一个资源,没有"其他常规资源同步完成"这个前提,
+# hook 触发条件永远不满足,Job 实际上从来不会执行,但 Application 会因为
+# "没有资源不健康"而误报 Healthy。踩过这个坑,细节见
+# docs/operations/troubleshooting.md。就用普通资源,靠上面的幂等 SQL +
+# backoffLimit 重试保证正确性。
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: airflow-create-db
   namespace: data
-  annotations:
-    argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 3
   template:

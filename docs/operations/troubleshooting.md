@@ -69,6 +69,26 @@
   把 `redirectUris` 也改成 `https://` 就好,`scripts/03-configure-keycloak.sh`
   已经改成一开始就注册 https,不会再重现这个坑。
 
+### ArgoCD Application 显示 Healthy,但里面唯一的 Job 其实从来没跑过
+
+- **现象**:一个 Application 只包含一个 Job(比如 `airflow-db-init`),Application 状态是
+  `Synced`/`Healthy`,但 `kubectl get jobs -n <ns>` 什么都没有,该 Job 要做的事
+  (比如建数据库用户)根本没发生。下游依赖这个 Job 结果的组件(比如 Airflow 的
+  Postgres 认证)会报"密码认证失败"之类的错,排查半天以为是密码不对,其实是
+  Job 压根没跑过。
+- **原因**:给这个 Job 加了 `argocd.argoproj.io/hook: PostSync` 注解。PostSync
+  hook 的触发条件是"这个 Application 里的常规(非 hook)资源先同步完成",但如果
+  Application 里**只有这一个 hook 资源、没有别的常规资源**,这个触发条件永远
+  不成立,hook 实际上从来不会执行。ArgoCD 判断 Application 是否 Healthy 时,
+  没有常规资源可评估,于是直接报 Healthy——一个空转的假健康状态,不代表任何
+  东西真的跑成功了。
+- **处理**:如果一个 Application 就是为了跑一个独立的 Job(不依赖同一
+  Application 里其他资源的同步顺序),不要加 hook 注解,当成普通资源交给
+  ArgoCD 管理就行,靠 Job 自身的幂等逻辑 + `backoffLimit` 重试保证正确性。
+  hook 只在"这个动作必须发生在同一 Application 内其他资源同步之前/之后"
+  这种真实依赖关系时才需要。
+- **涉及文件**:`apps/airflow/manifests/create-db-job.yaml`
+
 ### ArgoCD 卡在 "waiting for healthy state of ..." 不动,手动改了 values 也没用
 
 - **现象**:改了 Application 的 `helm.valuesObject`(比如换镜像源)、push 到 git、hard refresh、甚至手动触发 sync,Application 状态一直是 `OutOfSync` + `Running`,`operationState.message` 显示 `waiting for healthy state of apps/Deployment/xxx`,但 `kubectl get deploy -o yaml` 看那个 Deployment 的镜像还是旧的,根本没被更新过。
