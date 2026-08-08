@@ -1,0 +1,23 @@
+# local-lite 专用的辅助 Service,解决 ArgoCD OIDC 回调"浏览器和集群内部
+# 要用同一个域名"的问题。见 apps/keycloak-local-access/manifests/service.yaml
+# 顶部注释。上了真实域名/ingress 之后整个删掉。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak-local-access
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/keycloak-local-access/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

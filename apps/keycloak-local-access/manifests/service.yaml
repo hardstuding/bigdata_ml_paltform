@@ -1,0 +1,22 @@
+# 只在 local-lite 需要:浏览器(你的 Mac)和集群内部(ArgoCD server pod)
+# 必须用同一个域名才能让 OIDC 回调正常工作,但两边能到达的地址完全不同
+# (浏览器只能走 kubectl port-forward,集群内部只能走 service DNS)。
+# 用 hostAliases + 这个专门开的端口,让两边都用 "keycloak.local-lite.test:8180"
+# 这个名字,分别解析到各自能到达的地方。
+#
+# 不是 Keycloak Helm release 的一部分,是额外补的 Service,避免和 chart
+# 管理的资源冲突/被覆盖。cloud-full/prod 有真实域名/ingress 之后这一整个
+# 目录都不需要了,直接删掉、issuer 换成真实域名即可。
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-local-lite
+  namespace: keycloak
+spec:
+  selector:
+    app.kubernetes.io/instance: keycloak
+    app.kubernetes.io/name: keycloakx
+  ports:
+    - port: 8180
+      targetPort: 8080
+      name: http-local
