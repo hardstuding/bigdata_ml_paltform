@@ -33,6 +33,28 @@ spec:
             existingSecret: grafana-admin
             userKey: admin-user
             passwordKey: admin-password
+          envValueFrom:
+            GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+              secretKeyRef:
+                name: grafana-oidc-secret
+                key: clientSecret
+          grafana.ini:
+            auth.generic_oauth:
+              enabled: true
+              name: Keycloak
+              client_id: grafana
+              client_secret: $__env{GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET}
+              scopes: "openid profile email"
+              # auth_url 是浏览器要跳转去的地址,必须是你电脑能访问到的地址
+              # (本地端口转发是 localhost:8180);token_url/api_url 是 Grafana
+              # 后端自己在集群内部发起的请求,走的是 service 的集群内域名,
+              # 两者不一样是正常的,不是配置错了。
+              auth_url: http://localhost:8180/auth/realms/platform/protocol/openid-connect/auth
+              token_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/token
+              api_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/userinfo
+              # local-lite 简化:第一个登录的人自动拿 Admin,人多起来之前要换成
+              # 按 Keycloak group 映射角色(和 ArgoCD RBAC 那条同一个待办)。
+              role_attribute_path: "'Admin'"
           persistence:
             enabled: false
           resources:
