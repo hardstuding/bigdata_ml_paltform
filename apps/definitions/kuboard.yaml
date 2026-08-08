@@ -1,0 +1,22 @@
+# 通用集群浏览器(看全局 Pod/Deployment/日志/exec),补 ArgoCD 只看 GitOps
+# 状态、不够"看全貌"的短板。清单本身在 apps/kuboard/manifests/。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kuboard
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/kuboard/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kuboard
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

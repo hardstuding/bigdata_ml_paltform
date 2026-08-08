@@ -58,7 +58,7 @@ git add -A && git commit -m "chore: 迁移仓库地址" && git push
 
 # 6. kube-prometheus-stack 的 CRD 太大,ArgoCD 应付不了,单独装一次
 #    (只在第一次装、或者升级这个组件版本时需要跑)
-./scripts/install-kube-prometheus-crds.sh
+./scripts/04-install-kube-prometheus-crds.sh
 ```
 
 跑完用 `kubectl get applications -n argocd` 看所有组件是不是 `Synced`/`Healthy`。卡住了先查 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md),这台机器踩过的坑基本都记在那了。
