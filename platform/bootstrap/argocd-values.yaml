@@ -1,0 +1,27 @@
+# ArgoCD 是唯一允许手动 helm install/upgrade 的组件(GitOps 引擎本身,见 ADR-005)。
+# 这份 values 记录了那次手动操作实际用的配置,保证可重放,不是只存在于某次命令行历史里。
+#
+# 代理设置是本机网络环境的限制,不是平台架构的一部分:这台 Mac 访问 GitHub 等站点需要过
+# 代理,但 k3s 里的 Pod 不会自动继承宿主机的代理环境变量,所以 repo-server/controller
+# 连不上 GitHub。如果 cloud-full/prod 的网络能直连,把这两段 env 删掉即可。
+# 代理地址来自 colima 虚拟机内部看到的宿主机代理(colima ssh -- env | grep -i proxy),
+# 理论上重启 colima 后网段不变,但如果这里的值失效了,重新跑一遍那条命令确认。
+#
+# 只给 repoServer 配代理:它是唯一真正需要出网拉取 Git/Helm chart 的组件。
+# controller/server 只和集群内部服务通信,给它们也配代理反而会出问题——
+# gRPC dial 内部服务时用的是不带 .svc.cluster.local 后缀的短域名(比如
+# "argocd-repo-server:8081"),NO_PROXY 按后缀匹配根本罩不住这种短名,
+# 请求会被错误地也走一遍代理,导致 controller 连 repo-server 内部 gRPC
+# 握手失败(表现为 "authentication handshake failed: EOF")。踩过一次,
+# 结论就是:代理只加在真正需要出网的组件上,不要图省事全局加。
+repoServer:
+  env:
+    - name: HTTP_PROXY
+      value: "http://192.168.5.2:1087"
+    - name: HTTPS_PROXY
+      value: "http://192.168.5.2:1087"
+    - name: NO_PROXY
+      value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+server:
+  service:
+    type: ClusterIP
