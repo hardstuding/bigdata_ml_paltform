@@ -9,7 +9,8 @@
 set -euo pipefail
 
 NS="airflow"
-DEPLOY="deploy/airflow-webserver"
+# Airflow 3.x 把这个组件从 "webserver" 改名成了 "api-server"。
+DEPLOY="deploy/airflow-api-server"
 
 echo "==> 等待 webserver 就绪"
 kubectl -n "$NS" rollout status "$DEPLOY" --timeout=180s
