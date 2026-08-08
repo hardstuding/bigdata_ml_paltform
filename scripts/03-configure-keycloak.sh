@@ -66,6 +66,9 @@ create_client_if_absent() {
 echo "==> argocd client"
 # ArgoCD 比较特殊:它只认自己 argocd-secret 里的 key 做变量替换(见
 # configs.cm.oidc.config 里的 $oidc.keycloak.clientSecret),不是独立 Secret。
+# 注意 redirectUris 是 https——ArgoCD server 默认自带 TLS(自签证书),写成
+# http 会导致登录报 "Invalid parameter: redirect_uri"(踩过一次,见
+# docs/operations/troubleshooting.md)。
 existing=$(kcadm get clients -r platform -q clientId=argocd --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')
 if [ -n "$existing" ]; then
   echo "client argocd 已存在,跳过创建"
@@ -74,7 +77,7 @@ else
   kcadm create clients -r platform \
     -s clientId=argocd -s enabled=true -s protocol=openid-connect -s publicClient=false \
     -s secret="$ARGOCD_SECRET" \
-    -s 'redirectUris=["http://localhost:8080/auth/callback","http://localhost:8080/*"]' \
+    -s 'redirectUris=["https://localhost:8080/auth/callback","https://localhost:8080/*"]' \
     -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
   kubectl -n argocd patch secret argocd-secret --type merge \
     -p "{\"stringData\":{\"oidc.keycloak.clientSecret\":\"${ARGOCD_SECRET}\"}}"
