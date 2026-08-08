@@ -27,7 +27,7 @@
 │ Kubernetes   │   ├─────────────────────────────────────────┤
 │ GitOps(ArgoCD)│  │ L1 · 数据工程与管道                          │
 │ Ingress+TLS  │   │ Airflow · SeaTunnel · Spark Operator ·   │
-│ 身份(Keycloak)│   │ Redpanda · Flink*                        │
+│ 身份(Keycloak)│   │ Kafka · Flink*                           │
 │ 镜像仓库(Harbor)│ ├─────────────────────────────────────────┤
 │ 可观测性      │   │ L0 · 湖仓核心(存储与元数据)                    │
 │              │   │ MinIO · Postgres · Hive Metastore ·      │
@@ -47,7 +47,7 @@
 
 | 层 | 组件 | 作用 | 资源权重 | local-lite | cloud-full | prod | 阶段 |
 |---|---|---|---|---|---|---|---|
-| 底座 | Kubernetes(OrbStack) | 统一调度层 | 中 | ✅ | ✅ | ✅ | Phase 0 |
+| 底座 | Kubernetes(colima + k3s) | 统一调度层 | 中 | ✅ | ✅ | ✅ | Phase 0 |
 | 底座 | ArgoCD | GitOps 持续部署 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
 | 底座 | ingress-nginx + cert-manager | 统一入口与证书 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
 | 底座 | Keycloak | 统一身份 / OIDC | 中 | ✅ | ✅ | ✅ | Phase 0 |
@@ -65,7 +65,7 @@
 | 数据工程 | Airflow | 批处理编排 | 中 | — | ✅ | ✅ | Phase 2 |
 | 数据工程 | SeaTunnel | 批流一体数据集成 | 中 | — | ✅ | ✅ | Phase 2 |
 | 数据工程 | Spark Operator | k8s 原生 Spark 作业 | 重 | — | ✅ | ✅ | Phase 2 |
-| 数据工程 | Redpanda | 消息队列(Kafka 协议兼容) | 中 | — | ✅ | ✅ | Phase 2 |
+| 数据工程 | Kafka | 消息队列,公司现有生产环境同款 | 中 | — | ✅ | ✅ | Phase 2 |
 | 数据工程 | Flink | 实时计算 / CDC | 重 | — | — | ✅ | Phase 4 |
 | AI/ML | JupyterHub | 多用户 Notebook | 中 | — | ✅ | ✅ | Phase 3 |
 | AI/ML | MLflow | 实验跟踪 / 模型注册 | 轻 | — | ✅ | ✅ | Phase 3 |
@@ -76,8 +76,8 @@
 
 ## 环境画像
 
-- **local-lite**(本机 M2/16GB/OrbStack):Kubernetes + ArgoCD + Ingress + Keycloak + Prometheus/Grafana + MinIO + Postgres + Hive Metastore + Iceberg。目标是验证 GitOps 流程和存储/元数据打通,不追求性能。
-- **cloud-full**(云服务器,建议 ≥32GB):local-lite 全部 + Trino/Superset/OpenMetadata + Airflow/SeaTunnel/Spark Operator/Redpanda + JupyterHub/MLflow/Argo Workflows/KServe。目标是功能完整的开发与集成验证环境。
+- **local-lite**(本机 M2/16GB/colima + k3s):Kubernetes + ArgoCD + Ingress + Keycloak + Prometheus/Grafana + MinIO + Postgres + Hive Metastore + Iceberg。目标是验证 GitOps 流程和存储/元数据打通,不追求性能。
+- **cloud-full**(公有云或公司 IDC 机房,建议 ≥32GB;demo 跑通后再接入,生产大概率落在自有 IDC):local-lite 全部 + Trino/Superset/OpenMetadata + Airflow/SeaTunnel/Spark Operator/Kafka + JupyterHub/MLflow/Argo Workflows/KServe。目标是功能完整的开发与集成验证环境。
 - **prod**:cloud-full 全部 + Harbor + Ranger + 接入现有遗留 Hadoop 集群(Trino 联邦)+ 按需 Flink/Feast/HBase/Doris。目标是替换掉现有的旧平台。
 
 ## 路线图
