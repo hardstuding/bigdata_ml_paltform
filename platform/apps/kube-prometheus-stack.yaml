@@ -1,0 +1,60 @@
+# local-lite: 关掉 Alertmanager、缩短 retention、去掉持久化,只求验证指标链路能跑通。
+# cloud-full/prod 起需要打开 Alertmanager + 持久化存储,到时候用 environments/
+# 里的 values 覆盖,不改这个文件的结构。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 88.2.0
+    helm:
+      valuesObject:
+        alertmanager:
+          enabled: false
+        prometheus:
+          prometheusSpec:
+            retention: 6h
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                memory: 1024Mi
+            storageSpec: {}
+        grafana:
+          admin:
+            existingSecret: grafana-admin
+            userKey: admin-user
+            passwordKey: admin-password
+          persistence:
+            enabled: false
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+        prometheus-node-exporter:
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+        kube-state-metrics:
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,53 @@
+# local-lite: 用 start-dev 模式(内置临时 H2 数据库),够用来验证 OIDC 打通。
+# cloud-full/prod 起需要切到外部 Postgres + start(生产模式),到时候在
+# environments/ 里覆盖这份 values,不改这个文件的结构。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://codecentric.github.io/helm-charts
+    chart: keycloakx
+    targetRevision: 7.2.2
+    helm:
+      valuesObject:
+        replicas: 1
+        command:
+          - "/opt/keycloak/bin/kc.sh"
+        args:
+          - "start-dev"
+        extraEnv: |
+          - name: KEYCLOAK_ADMIN
+            valueFrom:
+              secretKeyRef:
+                name: keycloak-admin
+                key: username
+          - name: KEYCLOAK_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: keycloak-admin
+                key: password
+          - name: KC_HOSTNAME_STRICT
+            value: "false"
+          - name: KC_PROXY_HEADERS
+            value: "xforwarded"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            memory: 1024Mi
+        ingress:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
