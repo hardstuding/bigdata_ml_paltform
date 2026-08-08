@@ -1,0 +1,41 @@
+# Postgres 已经在跑了(不是首次启动),没法再靠 docker-entrypoint-initdb.d
+# 建库(那套只在数据目录第一次初始化时执行,见 apps/postgres/manifests/
+# init-configmap.yaml 的用法)。用一个 Job 在已运行的实例上补建 airflow
+# 专用库/用户,SQL 本身写成幂等的(存在就跳过),可以放心让 ArgoCD 每次
+# sync 都重新跑一次。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-create-db
+  namespace: data
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: create-db
+          image: postgres:16.6
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-root
+                  key: password
+            - name: AIRFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-db
+                  key: password
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              psql -h postgres -U postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='airflow'" | grep -q 1 \
+                || psql -h postgres -U postgres -c "CREATE USER airflow WITH PASSWORD '${AIRFLOW_DB_PASSWORD}';"
+              psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='airflow'" | grep -q 1 \
+                || psql -h postgres -U postgres -c "CREATE DATABASE airflow OWNER airflow;"

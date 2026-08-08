@@ -1,0 +1,57 @@
+# 基于 Strimzi 官方最小单节点示例(https://strimzi.io/examples/latest/kafka/
+# kafka-single-node.yaml)改的,KRaft 模式(不需要 ZooKeeper),controller/broker
+# 合一节点,存储从官方示例的 100Gi 降到 local-lite 能接受的 5Gi。
+# 依赖 kafka-operator 先把 CRD 装好,Job/CR 会自动重试直到 CRD 就绪,不需要
+# 手动排队(和 hive-metastore 依赖 postgres 是同一个处理方式)。
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: dual-role
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: platform-kafka
+spec:
+  replicas: 1
+  roles:
+    - controller
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        kraftMetadata: shared
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1024Mi
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: platform-kafka
+  namespace: kafka
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 4.3.0
+    metadataVersion: 4.3-IV0
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}

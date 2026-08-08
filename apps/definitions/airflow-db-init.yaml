@@ -1,0 +1,22 @@
+# 在已运行的 Postgres 实例上补建 airflow 库/用户,见
+# apps/airflow/manifests/create-db-job.yaml 顶部注释。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: airflow-db-init
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/airflow/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

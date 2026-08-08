@@ -1,0 +1,41 @@
+# kubeflow/spark-operator(原 GoogleCloudPlatform/spark-on-k8s-operator,现由
+# Kubeflow 社区维护)。管 SparkApplication CRD,提交 Spark 作业不用手写
+# spark-submit + 一堆 k8s 资源。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: spark-operator
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://kubeflow.github.io/spark-operator
+    chart: spark-operator
+    targetRevision: 2.5.2
+    helm:
+      valuesObject:
+        controller:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+        webhook:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: spark-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

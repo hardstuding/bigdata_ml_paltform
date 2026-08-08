@@ -1,0 +1,78 @@
+# 官方 apache-airflow chart 默认自带 postgresql(Bitnami 的,见 ADR-008)和
+# redis(CeleryExecutor 用的)子 chart,两个都关掉:数据库用我们自己已经在跑
+# 的 Postgres 实例(apps/postgres,库由 airflow-db-init 那个 Job 建好),
+# executor 用 KubernetesExecutor 就不需要 Celery/Redis 这层broker了,任务
+# 天然是 k8s 原生调度,也更符合"组件独立、不多背一层"的原则。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: airflow
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://airflow.apache.org
+    chart: airflow
+    targetRevision: 1.22.0
+    helm:
+      valuesObject:
+        executor: KubernetesExecutor
+        postgresql:
+          enabled: false
+        redis:
+          enabled: false
+        data:
+          metadataSecretName: airflow-metadata
+        fernetKeySecretName: airflow-fernet-key
+        apiSecretKeySecretName: airflow-api-secret
+        jwtSecretName: airflow-jwt-secret
+        # 内置的 createUserJob 要把初始密码明文写进 values(会进公开仓库的 git
+        # 历史),关掉改用 scripts/05-configure-airflow.sh 走 Secret 建管理员账号。
+        createUserJob:
+          enabled: false
+        migrateDatabaseJob:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+        webserver:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 150m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+        scheduler:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 150m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+        triggerer:
+          replicas: 1
+          persistence:
+            enabled: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+        statsd:
+          enabled: false
+        dags:
+          gitSync:
+            enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: airflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -49,7 +49,7 @@ ensure_secret() {
 }
 
 echo "==> 建命名空间"
-for ns in keycloak monitoring minio data; do
+for ns in keycloak monitoring minio data airflow; do
   ensure_ns "$ns"
 done
 
@@ -61,6 +61,38 @@ ensure_secret monitoring  grafana-admin     admin-user=admin  admin-password=RAN
 ensure_secret minio       minio-root        rootUser=admin    rootPassword=RANDOM
 ensure_secret data        postgres-root     username=postgres password=RANDOM
 ensure_secret data        hive-metastore-db username=hive     password=RANDOM
+ensure_secret data        airflow-db        username=airflow  password=RANDOM
+ensure_secret airflow     airflow-webserver-admin username=admin password=RANDOM
+
+# Airflow 的几个密钥格式有特殊要求,不能用通用的 ensure_secret 随便生成:
+# - fernet-key 必须是 urlsafe-base64 编码的 32 字节(Fernet.generate_key() 格式)
+# - metadata 连接串依赖 airflow-db 的密码,要在那个 Secret 建好之后再拼
+if kubectl -n airflow get secret airflow-fernet-key >/dev/null 2>&1; then
+  echo "已存在,跳过: airflow/airflow-fernet-key"
+else
+  FERNET_KEY="$(openssl rand -base64 32 | tr '+/' '-_')"
+  kubectl -n airflow create secret generic airflow-fernet-key --from-literal=fernet-key="$FERNET_KEY"
+  echo "已创建: airflow/airflow-fernet-key"
+fi
+
+for s in airflow-api-secret:api-secret-key airflow-jwt-secret:jwt-secret; do
+  name="${s%%:*}"; key="${s##*:}"
+  if kubectl -n airflow get secret "$name" >/dev/null 2>&1; then
+    echo "已存在,跳过: airflow/${name}"
+  else
+    kubectl -n airflow create secret generic "$name" --from-literal="${key}=$(gen_password)"
+    echo "已创建: airflow/${name}"
+  fi
+done
+
+if kubectl -n airflow get secret airflow-metadata >/dev/null 2>&1; then
+  echo "已存在,跳过: airflow/airflow-metadata"
+else
+  AF_DB_PW=$(kubectl -n data get secret airflow-db -o jsonpath='{.data.password}' | base64 -d)
+  CONN="postgresql+psycopg2://airflow:${AF_DB_PW}@postgres.data.svc.cluster.local:5432/airflow"
+  kubectl -n airflow create secret generic airflow-metadata --from-literal=connection="$CONN"
+  echo "已创建: airflow/airflow-metadata"
+fi
 
 echo
 echo "完成。新生成的凭据(如果有)已追加到: ${OUT_FILE}"
