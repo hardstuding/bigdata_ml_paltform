@@ -35,6 +35,33 @@
 - **原因**:本机代理对不同站点的连通性不一致,quay.io 这类站点即使走代理也可能连不上,不是配置错误,是这条网络对特定站点没有稳定路由。
 - **处理**:很多镜像(包括 MinIO)官方会同时发布到 docker hub 和 quay.io,遇到这种情况直接把 chart/manifest 里的 `image.repository` 换成 docker hub 上的同名镜像,不用死磕代理配置。以后新组件如果也卡在拉镜像,先用 `colima ssh -- curl` 测一下目标 registry 通不通,别默认怀疑是 k8s 配置问题。
 
+### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
+
+- **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似
+  `http://keycloak-keycloakx-http.keycloak.svc.cluster.local/...` 的地址,浏览器报
+  `DNS_PROBE_FINISHED_NXDOMAIN`(这个域名只有集群内部能解析)。
+- **原因**:ArgoCD 的 OIDC 配置只有一个 `issuer` 字段,浏览器跳转登录页、和
+  ArgoCD server pod 自己做 token 交换,都是用这一个地址——不像 Grafana 的
+  `auth.generic_oauth` 那样能把 `auth_url`(浏览器用)和 `token_url`/`api_url`
+  (后端用)分开配。本地用 port-forward 访问集群时,浏览器能到达的地址
+  (`localhost:端口`)和集群内部 pod 能到达的地址(service DNS)根本不是一回事,
+  一个 issuer 两头顾不上。
+- **处理**:让两边用同一个域名、分别解析到各自能到达的地方(split-horizon DNS 的土办法)——
+  1. `apps/keycloak-local-access/manifests/service.yaml` 建一个额外的 Service(不是
+     Helm chart管理的那个,避免冲突),暴露一个固定端口。
+  2. ArgoCD 这边用 `global.hostAliases`(注意不是顶层的 `hostAliases`,那个 key
+     在 chart 里不生效,必须是 `global.hostAliases`)把这个域名在 pod 里解析到
+     上面那个 Service 的 ClusterIP。
+  3. 你自己的 Mac 上把同一个域名加进 `/etc/hosts` 指向 `127.0.0.1`:
+     ```
+     sudo sh -c 'echo "127.0.0.1 keycloak.local-lite.test" >> /etc/hosts'
+     ```
+  4. 浏览器这边的 `kubectl port-forward` 也转发到那个新 Service(端口和上面的域名对应上)。
+  5. `issuer` 改成 `http://keycloak.local-lite.test:8180/auth/realms/platform`。
+- **这是 local-lite 专属的临时方案**,不是架构的一部分——上了真实域名/ingress 之后,
+  `apps/keycloak-local-access/` 整个目录、`global.hostAliases`、这条 issuer 配置全部
+  可以删掉,换成真实的对外域名(浏览器和集群内部走同一个真实域名,天然没有这个问题)。
+
 ### ArgoCD 卡在 "waiting for healthy state of ..." 不动,手动改了 values 也没用
 
 - **现象**:改了 Application 的 `helm.valuesObject`(比如换镜像源)、push 到 git、hard refresh、甚至手动触发 sync,Application 状态一直是 `OutOfSync` + `Running`,`operationState.message` 显示 `waiting for healthy state of apps/Deployment/xxx`,但 `kubectl get deploy -o yaml` 看那个 Deployment 的镜像还是旧的,根本没被更新过。

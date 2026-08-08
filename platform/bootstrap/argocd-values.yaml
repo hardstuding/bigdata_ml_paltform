@@ -6,6 +6,20 @@ server:
   service:
     type: ClusterIP
 
+# 只在 local-lite 需要:ArgoCD 的 OIDC 只支持配一个 issuer,浏览器和集群内部的
+# ArgoCD server pod 都会用它(浏览器用来跳转登录页,pod 自己用来做 token 交换)。
+# 但这两者能到达的地址不一样(浏览器只能走 port-forward,pod 只能走集群内部
+# service)。用 hostAliases 让 "keycloak.local-lite.test" 这个域名在 pod 里解析
+# 到 apps/keycloak-local-access/manifests/service.yaml 建的那个 Service,同时
+# 你自己在 Mac 上把同一个域名指向 127.0.0.1(/etc/hosts),两边用同一个名字
+# 各自解析到各自能到达的地方。
+# cloud-full/prod 有真实域名后,这段 hostAliases 和下面的 issuer 都要删掉/换掉。
+global:
+  hostAliases:
+    - ip: 10.43.180.107 # apps/keycloak-local-access 里那个 Service 的 ClusterIP,变了要同步改
+      hostnames:
+        - keycloak.local-lite.test
+
 configs:
   cm:
     # 本地调试用 localhost,注意协议是 https——ArgoCD server 默认自带 TLS
@@ -15,7 +29,7 @@ configs:
     url: https://localhost:8080
     oidc.config: |
       name: Keycloak
-      issuer: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform
+      issuer: http://keycloak.local-lite.test:8180/auth/realms/platform
       clientID: argocd
       clientSecret: $oidc.keycloak.clientSecret
       requestedScopes: ["openid", "profile", "email"]
