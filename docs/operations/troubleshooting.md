@@ -93,7 +93,7 @@
 - **排查方法**:改之前先跑 `helm template <chart> --set ... | grep -B20 "name: <initContainer名>"`
   看它的 `envFrom` 实际引用的是哪个 Secret 名字,不要靠猜。
 
-### Superset 报 ModuleNotFoundError: No module named 'psycopg2'
+### Superset 报 ModuleNotFoundError: No module named 'psycopg2'(或 'authlib')
 
 - **现象**:Superset 主容器 CrashLoopBackOff,日志里是
   `ModuleNotFoundError: No module named 'psycopg2'`,发生在初始化数据库连接的时候。
@@ -108,6 +108,15 @@
   `/app/docker/pip-install.sh psycopg2-binary`。排查这类"装了但还是
   ModuleNotFoundError"的问题时,先进容器找官方有没有现成的安装脚本
   (`find /app -iname "*install*"`),不要瞎猜 pip 在哪。
+- **2026-08-09 复现,换了个包**:接 Keycloak OAuth2 时(`AUTH_TYPE =
+  AUTH_OAUTH`),同样的报错又出现一次,这次缺的是 `authlib`——
+  Flask-AppBuilder 的 OAuth 支持依赖它,基础镜像同样不带,只有真正启用
+  `AUTH_TYPE = AUTH_OAUTH` 这条 import 路径才会暴露,启动阶段测不出来。
+  处理方式一样,`pip-install.sh` 后面多加一个包名就行:
+  `/app/docker/pip-install.sh psycopg2-binary authlib`。**教训**:这个镜像
+  "按需装包"的模式下,每接一个新功能(数据库驱动、认证方式、以后可能的
+  缓存后端)都可能暴露一个新的缺包,不是一次装完就一劳永逸,踩到就加,
+  不用因为"上次刚修过一个"就觉得这次不该出现同类问题。
 
 ### Helm Application 手动 patch 过 Deployment 之后,ArgoCD 卡住不再应用新的 git 变更
 
