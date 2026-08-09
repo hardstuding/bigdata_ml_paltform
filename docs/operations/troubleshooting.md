@@ -102,7 +102,10 @@
   Bitnami 的镜像/流程不一样;一旦按 ADR-008 换成外部 Postgres,这个驱动缺失
   就暴露出来了——接外部 Postgres 时的已知通用问题,不是这个项目特有的配置错误。
 - **处理**:覆盖 `bootstrapScript`,在原有内容基础上加一行
-  `pip install psycopg2-binary`。
+  `/app/.venv/bin/pip install psycopg2-binary`——注意不能用裸的 `pip install`,
+  这个镜像的 Superset 实际跑在 `/app/.venv` 这个虚拟环境里,裸 `pip` 命令装到了
+  别的 Python 环境,装完之后应用还是照样 `ModuleNotFoundError`,得显式用
+  `/app/.venv/bin/pip`。
 
 ### Helm Application 手动 patch 过 Deployment 之后,ArgoCD 卡住不再应用新的 git 变更
 
