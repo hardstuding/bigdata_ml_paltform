@@ -72,7 +72,7 @@ print(json.dumps(out))
 }
 
 echo "==> 建命名空间"
-for ns in keycloak monitoring minio data airflow trino superset; do
+for ns in keycloak monitoring minio data airflow trino superset openmetadata; do
   ensure_ns "$ns"
 done
 
@@ -146,6 +146,17 @@ else
     --from-literal=REDIS_CELERY_DB=0 \
     --from-literal=REDIS_PROTO=redis
   echo "已创建: superset/superset-db-secrets"
+fi
+
+# OpenMetadata 的 database.auth.password 引用这个 Secret,key 名字是
+# chart 自己约定的 "openmetadata-postgresql-password",不能随便改。
+if kubectl -n openmetadata get secret openmetadata-postgresql-secrets >/dev/null 2>&1; then
+  echo "已存在,跳过: openmetadata/openmetadata-postgresql-secrets"
+else
+  OM_DB_PW="$(gen_password)"
+  kubectl -n openmetadata create secret generic openmetadata-postgresql-secrets \
+    --from-literal=openmetadata-postgresql-password="$OM_DB_PW"
+  echo "已创建: openmetadata/openmetadata-postgresql-secrets"
 fi
 
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"

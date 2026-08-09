@@ -1,0 +1,39 @@
+# 和 apps/airflow、apps/superset 下的 create-db-job.yaml 同样的模式。
+# 注意这个 Job 建在 openmetadata 命名空间(不是 data)——它要读的密码
+# 存在 openmetadata-postgresql-secrets 里,那个 Secret 是给 openmetadata
+# 命名空间用的,放这里避免又踩一次跨命名空间引用不了的坑(见
+# troubleshooting.md 里 Trino 连 MinIO 那次)。Job 本身通过网络连
+# postgres.data.svc.cluster.local,不需要和 Postgres 同命名空间。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openmetadata-create-db
+  namespace: openmetadata
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: create-db
+          image: postgres:16.6
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-root
+                  key: password
+            - name: OM_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openmetadata-postgresql-secrets
+                  key: openmetadata-postgresql-password
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              psql -h postgres -U postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='openmetadata_user'" | grep -q 1 \
+                || psql -h postgres -U postgres -c "CREATE USER openmetadata_user WITH PASSWORD '${OM_DB_PASSWORD}';"
+              psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='openmetadata_db'" | grep -q 1 \
+                || psql -h postgres -U postgres -c "CREATE DATABASE openmetadata_db OWNER openmetadata_user;"
