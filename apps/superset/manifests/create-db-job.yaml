@@ -1,0 +1,36 @@
+# 和 apps/airflow/manifests/create-db-job.yaml 同样的模式:在已运行的 Postgres
+# 实例上补建 superset 专用库/用户。不要加 argocd hook 注解,原因见那个文件的
+# 注释和 troubleshooting.md。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: superset-create-db
+  namespace: data
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: create-db
+          image: postgres:16.6
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-root
+                  key: password
+            - name: SUPERSET_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: superset-db
+                  key: password
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              psql -h postgres -U postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='superset'" | grep -q 1 \
+                || psql -h postgres -U postgres -c "CREATE USER superset WITH PASSWORD '${SUPERSET_DB_PASSWORD}';"
+              psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='superset'" | grep -q 1 \
+                || psql -h postgres -U postgres -c "CREATE DATABASE superset OWNER superset;"

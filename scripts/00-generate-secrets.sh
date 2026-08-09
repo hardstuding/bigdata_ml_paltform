@@ -72,7 +72,7 @@ print(json.dumps(out))
 }
 
 echo "==> 建命名空间"
-for ns in keycloak monitoring minio data airflow trino; do
+for ns in keycloak monitoring minio data airflow trino superset; do
   ensure_ns "$ns"
 done
 
@@ -115,6 +115,26 @@ else
   CONN="postgresql+psycopg2://airflow:${AF_DB_PW}@postgres.data.svc.cluster.local:5432/airflow"
   kubectl -n airflow create secret generic airflow-metadata --from-literal=connection="$CONN"
   echo "已创建: airflow/airflow-metadata"
+fi
+
+ensure_secret data superset-db username=superset password=RANDOM
+
+# Superset chart 默认把 DB_USER/DB_PASS/SUPERSET_SECRET_KEY 这些当明文写进
+# values(会进公开仓库的 git 历史)。改成建一个独立 Secret,通过 chart 的
+# envFromSecrets 机制引用,不写死在 Application 的 valuesObject 里。
+if kubectl -n superset get secret superset-config >/dev/null 2>&1; then
+  echo "已存在,跳过: superset/superset-config"
+else
+  SUPERSET_DB_PW=$(kubectl -n data get secret superset-db -o jsonpath='{.data.password}' | base64 -d)
+  SUPERSET_SECRET_KEY=$(openssl rand -base64 42)
+  kubectl -n superset create secret generic superset-config \
+    --from-literal=DB_USER=superset \
+    --from-literal=DB_PASS="$SUPERSET_DB_PW" \
+    --from-literal=DB_HOST=postgres.data.svc.cluster.local \
+    --from-literal=DB_PORT=5432 \
+    --from-literal=DB_NAME=superset \
+    --from-literal=SUPERSET_SECRET_KEY="$SUPERSET_SECRET_KEY"
+  echo "已创建: superset/superset-config"
 fi
 
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"

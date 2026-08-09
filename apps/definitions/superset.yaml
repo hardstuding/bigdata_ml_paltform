@@ -1,0 +1,70 @@
+# 官方 apache/superset chart,默认自带的 postgresql/redis 子 chart 是
+# bitnamilegacy 镜像(见 ADR-008),关掉换成我们自己的 Postgres(库由
+# apps/superset/manifests/create-db-job.yaml 建)。Redis 也关了(local-lite
+# 简化,没有它 Superset 能跑,只是缺异步查询/告警这些高级功能)。
+#
+# 数据库连接和 SECRET_KEY 不写在这份 values 里——chart 默认行为是从
+# DB_USER/DB_PASS/DB_HOST/DB_PORT/DB_NAME 这几个环境变量读连接串
+# (`database.uri` 不设置时的默认逻辑),用 envFromSecrets 引用我们自己建的
+# superset-config Secret 注入这些变量,值不会出现在这个文件里。
+#
+# init.adminUser.password 是 chart 自己的硬编码默认值("admin"),不是我们
+# 写的——这个值不会出现在我们的 git 历史里(是 helm template 渲染时才展开的),
+# 但运行时的实际密码确实很弱,cloud-full/prod 之前要处理掉(改 init.command
+# 或者关掉 init.createAdmin 自己建,和 Airflow 那次一样)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: superset
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://apache.github.io/superset
+    chart: superset
+    targetRevision: 0.22.4
+    helm:
+      valuesObject:
+        postgresql:
+          enabled: false
+        redis:
+          enabled: false
+        cache:
+          enabled: false
+        envFromSecrets:
+          - superset-config
+        init:
+          loadExamples: false
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+        supersetNode:
+          replicas:
+            replicaCount: 1
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+        supersetWorker:
+          # 没有 Redis/Celery broker,worker 起来也没用。replicaCount 压到 0
+          # (Deployment 对象还在,但不占资源,比强行让 enabled:false 生效更可靠)。
+          replicas:
+            replicaCount: 0
+        supersetCeleryBeat:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: superset
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
