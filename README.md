@@ -31,6 +31,8 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 - ✅ Phase 1(湖仓核心):MinIO + Postgres + Hive Metastore + Trino,已验证端到端建表/写入/读出 Iceberg 表,数据真实落盘到 MinIO(Spark 侧读写还未验证,留到 Spark Operator 真正跑作业时一起做)+ **Superset**,已验证 `/health` 和登录页正常
 - ✅ Phase 2(数据工程,配置已验证、当前收在 `environments/cloud-full/pending-definitions/`):Kafka(Strimzi)、Spark Operator、Airflow、SeaTunnel、Trino、Superset
 - ✅ OpenMetadata + OpenSearch:已验证 web 应用正常响应。Postgres 后端(不用默认 MySQL),采集编排用官方 k8s 模式(不用 Airflow,见 ADR)
+- ✅ MLflow:官方 OCI chart,已验证 health check + 真实建实验 API 调用,Postgres 后端 + MinIO 存 artifact
+- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分)——当前优先级转向"打通已验证组件之间的关系"而不是继续加新组件,见 `docs/decisions/`
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 

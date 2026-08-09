@@ -164,6 +164,31 @@
   管理"的资源,清理的时候要连带检查有没有卡住的 finalizer,不能假设
   `kubectl delete namespace` 一定能干净收尾。
 
+### git push 之后,ArgoCD 迟迟不应用新配置——标准排查步骤
+
+这个问题这次反复出现了好几次(不只是某一个组件的特例),整理成一套标准检查
+顺序,以后遇到直接按这个走,不用每次重新摸索:
+
+1. `git -C <repo> log -1 --format=%H` 拿到本地最新 commit
+2. `kubectl -n argocd get application apps-root -o jsonpath='{.status.sync.revision}'`
+   看 app-of-apps 本身同步到了哪个 commit——**先确认这一层对了,再往下查**,
+   这一层没追上,底下所有子 Application 的配置都不可能是最新的
+3. 如果 apps-root 没追上:hard refresh(
+   `kubectl -n argocd patch application apps-root --type merge -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'`),
+   等几秒后重新比对 revision;如果连着刷新几次都不动,重启 repo-server
+   (`kubectl -n argocd delete pod -l app.kubernetes.io/name=argocd-repo-server`)
+4. apps-root 追上之后,再检查具体那个子 Application 的 spec 是不是最新值:
+   `kubectl -n argocd get application <name> -o jsonpath='{.spec.source.helm.valuesObject.<字段路径>}'`
+   ——**这一步经常被跳过,以为 apps-root 追上了子 Application 就一定跟着更新了,
+   实际不是,子 Application 自己也可能要再刷新一次**
+5. 确认 Application 的 spec 是最新的之后,再检查实际部署的 Deployment/StatefulSet
+   有没有跟上(`kubectl get deploy <name> -o jsonpath='{.spec.template.spec...}'`)——
+   同样可能卡在"等待健康"死锁(前面几条已经讲过),需要手动删掉旧的
+   Deployment/Pod 强制重建
+
+不要只做"改一下 git、hard refresh 一次"就假设生效了去看 Pod 状态——Pod 起不来
+的时候,先按上面 1-5 步确认问题出在哪一层,再决定下一步怎么修,能省很多来回。
+
 ### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
 
 - **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似
