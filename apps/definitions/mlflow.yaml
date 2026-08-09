@@ -24,7 +24,9 @@ spec:
           value_options:
             host: "0.0.0.0"
             port: 5000
-            workers: 4
+            # 默认 4 个 gunicorn worker 在 local-lite 的内存画像下跑不住
+            # (OOMKilled),local-lite 用不到那么高的并发,降到 2。
+            workers: 2
             # MLflow 3.x 加了个安全中间件,默认只认 localhost 发起的请求,
             # k8s 的健康检查是从 pod IP 直接访问,会被这层拒绝
             # (readiness probe 报 connection refused,其实进程是正常起来
