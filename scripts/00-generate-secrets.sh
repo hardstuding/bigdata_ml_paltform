@@ -192,6 +192,25 @@ else
   echo "已创建: mlflow/mlflow-db-secret"
 fi
 
+# MLflow 本身没有原生 OIDC/SSO 支持(开源版只有本地用户名密码的 basic-auth
+# app,不接 Keycloak),接 SSO 用 oauth2-proxy 挡在前面(见
+# apps/definitions/mlflow-oauth2-proxy.yaml)。cookie-secret 不能用
+# gen_password(那个函数会剔除 +/= 字符,破坏 base64 编码,oauth2-proxy 要求
+# 解码后正好是 16/24/32 字节,和当初 airflow-fernet-key 同样的坑)。
+# client-id 不是真的密钥,但 chart 的 existingSecret 机制要求这三个 key 都在
+# 同一个 Secret 里,直接存字面量 "mlflow"。client-secret 由
+# 03-configure-keycloak.sh 建 Keycloak client 之后 patch 进来。
+if kubectl -n mlflow get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  echo "已存在,跳过: mlflow/oauth2-proxy-secret"
+else
+  COOKIE_SECRET="$(openssl rand -base64 32)"
+  kubectl -n mlflow create secret generic oauth2-proxy-secret \
+    --from-literal=client-id=mlflow \
+    --from-literal=cookie-secret="$COOKIE_SECRET" \
+    --from-literal=client-secret=PLACEHOLDER
+  echo "已创建: mlflow/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
+fi
+
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 MINIO_CONSUMER_NAMESPACES="trino data mlflow"
 for ns in $MINIO_CONSUMER_NAMESPACES; do

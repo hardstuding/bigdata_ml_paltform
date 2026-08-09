@@ -24,7 +24,7 @@ LOG_FILE="logs/toggle-heavy.log"
 
 PENDING_DIR="environments/cloud-full/pending-definitions"
 ACTIVE_DIR="apps/definitions"
-FILES="kafka-operator.yaml kafka-cluster.yaml spark-operator.yaml airflow.yaml airflow-db-init.yaml seatunnel.yaml trino.yaml trino-tls.yaml superset.yaml superset-db-init.yaml opensearch.yaml openmetadata.yaml openmetadata-db-init.yaml mlflow.yaml mlflow-db-init.yaml"
+FILES="kafka-operator.yaml kafka-cluster.yaml spark-operator.yaml airflow.yaml airflow-db-init.yaml seatunnel.yaml trino.yaml trino-tls.yaml superset.yaml superset-db-init.yaml opensearch.yaml openmetadata.yaml openmetadata-db-init.yaml mlflow.yaml mlflow-db-init.yaml mlflow-oauth2-proxy.yaml"
 
 ACTION="${1:-}"
 if [ "$ACTION" != "on" ] && [ "$ACTION" != "off" ]; then

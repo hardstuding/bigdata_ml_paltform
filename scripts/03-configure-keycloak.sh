@@ -126,6 +126,27 @@ else
   echo "已创建 client openmetadata,密钥写入 openmetadata/openmetadata-oidc-secret"
 fi
 
+echo "==> mlflow client(给挡在前面的 oauth2-proxy 用,MLflow 自己不接 OIDC)"
+# oauth2-proxy 的回调路径固定是 /oauth2/callback。这里不能用
+# create_client_if_absent——密钥要 patch 进 mlflow/oauth2-proxy-secret 的
+# client-secret 这个 key,不是建一个新 Secret。
+MLFLOW_REDIRECT_URIS='["http://mlflow.local-lite.test/oauth2/callback"]'
+mlflow_client_id=$(kcadm get clients -r platform -q clientId=mlflow --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+if [ -n "$mlflow_client_id" ]; then
+  echo "client mlflow 已存在,只同步 redirectUris,不轮换密钥"
+  kcadm update "clients/${mlflow_client_id}" -r platform -s "redirectUris=${MLFLOW_REDIRECT_URIS}"
+else
+  MLFLOW_OAUTH_SECRET="$(gen_password)"
+  kcadm create clients -r platform \
+    -s clientId=mlflow -s enabled=true -s protocol=openid-connect -s publicClient=false \
+    -s secret="$MLFLOW_OAUTH_SECRET" \
+    -s "redirectUris=${MLFLOW_REDIRECT_URIS}" \
+    -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
+  kubectl -n mlflow patch secret oauth2-proxy-secret --type merge \
+    -p "{\"stringData\":{\"client-secret\":\"${MLFLOW_OAUTH_SECRET}\"}}"
+  echo "已创建 client mlflow,密钥写入 mlflow/oauth2-proxy-secret 的 client-secret"
+fi
+
 echo "==> 初始登录用户: ${INITIAL_USER}"
 if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/null | grep -q '"id"'; then
   echo "已存在,跳过(不会重置密码)"

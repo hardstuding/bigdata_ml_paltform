@@ -1,0 +1,61 @@
+# MLflow 开源版没有原生 OIDC/SSO 支持(只有本地用户名密码的 basic-auth app,
+# 不接 Keycloak;有个社区插件 mlflow-oidc-auth 能做到,但要求自己重新 build
+# 镜像装这个 pip 包,和这个项目"尽量用官方镜像、不自己维护镜像构建"的取舍
+# 冲突,见 docs/decisions/ 里 ADR-008 反对 Bitnami 的同一条理由——多维护一条
+# 镜像构建流水线的成本,不比省下来的东西划算)。
+#
+# 改用 oauth2-proxy 挡在前面(官方 quay.io/oauth2-proxy 项目,不是我们自己的
+# hack):浏览器先经 oauth2-proxy 走完 Keycloak 登录,登录成功后才把请求代理
+# 给 MLflow 本身,MLflow 完全不需要知道 OIDC 这回事。这是给"应用本身没有原生
+# SSO"这类组件的通用解法,不只是 MLflow 专属,以后遇到类似情况可以复用同一个
+# 模式。
+#
+# 官方 chart 默认用"legacy config"(config.configFile 是一段 oauth2-proxy 自己
+# 的 ini 格式配置),没用更新的 alphaConfig(那个格式更啰嗦,legacy 格式够用)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mlflow-oauth2-proxy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://oauth2-proxy.github.io/manifests
+    chart: oauth2-proxy
+    targetRevision: 10.7.0
+    helm:
+      valuesObject:
+        config:
+          existingSecret: oauth2-proxy-secret
+          configFile: |
+            provider = "oidc"
+            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
+            redirect_url = "http://mlflow.local-lite.test/oauth2/callback"
+            upstreams = [ "http://mlflow.mlflow.svc.cluster.local:5000/" ]
+            email_domains = [ "*" ]
+            # local-lite 没有 TLS(见 ADR-016),浏览器和 ingress-nginx 之间是
+            # 明文 HTTP,cookie_secure 默认要求 HTTPS 才会真正下发 cookie,
+            # 不关掉的话登录会一直"成功"又立刻被弹回登录页(cookie 没存住)。
+            cookie_secure = false
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - mlflow.local-lite.test
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mlflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
