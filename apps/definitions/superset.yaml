@@ -36,7 +36,7 @@ spec:
         bootstrapScript: |
           #!/bin/bash
           if [ ! -f ~/bootstrap ]; then
-            /app/.venv/bin/pip install psycopg2-binary
+            /app/docker/pip-install.sh psycopg2-binary
             echo "Running Superset with uid 0" > ~/bootstrap
           fi
         postgresql:

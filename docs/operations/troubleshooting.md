@@ -101,11 +101,13 @@
   `bootstrapScript` 也不会装。用 Bitnami 那套(chart 默认依赖)时不会遇到,因为
   Bitnami 的镜像/流程不一样;一旦按 ADR-008 换成外部 Postgres,这个驱动缺失
   就暴露出来了——接外部 Postgres 时的已知通用问题,不是这个项目特有的配置错误。
-- **处理**:覆盖 `bootstrapScript`,在原有内容基础上加一行
-  `/app/.venv/bin/pip install psycopg2-binary`——注意不能用裸的 `pip install`,
-  这个镜像的 Superset 实际跑在 `/app/.venv` 这个虚拟环境里,裸 `pip` 命令装到了
-  别的 Python 环境,装完之后应用还是照样 `ModuleNotFoundError`,得显式用
-  `/app/.venv/bin/pip`。
+- **处理**:不要猜 pip 路径(试过裸 `pip install`、试过 `/app/.venv/bin/pip`,
+  都不对——镜像实际用 `uv` 管理虚拟环境,不是标准 venv 布局)。**镜像自带官方
+  脚本 `/app/docker/pip-install.sh`**,专门用来在这个环境里装额外的 Python
+  包(内部调用 `uv pip install`),用这个才是对的:
+  `/app/docker/pip-install.sh psycopg2-binary`。排查这类"装了但还是
+  ModuleNotFoundError"的问题时,先进容器找官方有没有现成的安装脚本
+  (`find /app -iname "*install*"`),不要瞎猜 pip 在哪。
 
 ### Helm Application 手动 patch 过 Deployment 之后,ArgoCD 卡住不再应用新的 git 变更
 
