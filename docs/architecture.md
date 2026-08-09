@@ -96,3 +96,22 @@
 - 云服务器什么时候接入、大概配置 —— 决定 Phase 2 什么时候能开始
 - GitHub 仓库建在个人账号还是组织下,是否私有
 - Ranger 的插拔式授权点现在要不要在 Trino/Hive 配置里提前占位
+- **Superset 查 Trino 用什么身份**(2026-08-09 接完 Trino OAuth2 SSO 之后
+  冒出来的新问题,还没做决定,先记下来):Trino 现在所有访问都要走 Keycloak
+  OAuth2(`http-server.authentication.type=OAUTH2`,见 ADR-017),这对着
+  浏览器里的人没问题,但 Superset 的 SQL Lab 要拿一个"服务账号"身份连
+  Trino(不是每次都跳一遍人工登录),OAuth2 的 Authorization Code 模式
+  天生就是给人在浏览器里操作设计的,不适合这种后端到后端的场景。两条
+  路可选:(a) 给 Trino 加一个并存的 PASSWORD 认证方式(`file` 类型的密码
+  文件,建一个专门给 Superset 用的服务账号,人类还是走 OAUTH2,Trino 原生
+  支持多种认证方式并存),(b) 换个思路,数据经 SeaTunnel/dbt 之类的批处理
+  提前算好、落到 Superset 能直接连的地方,SQL Lab 不直接查 Trino。倾向于
+  (a)(改动小,而且是更常见的生产模式:BI 工具用服务账号,人用 SSO),
+  但还没验证过,做的时候按这个方向试,不行再换。
+- **端到端 demo 具体要展示什么**:目前只是"各个组件分别验证过、Keycloak
+  SSO 打通了",还没有一条完整的数据链路真正跑通给人看。候选:
+  (a) 湖仓核心路径——建一张 Iceberg 表、Trino 查、Superset 出图(依赖上面
+  那条"服务账号"问题先解决);(b) 训练脚本 -> MLflow 记录实验 -> 模型注册
+  (不依赖 Trino 认证问题,风险更低,但没体现湖仓这条主线)。倾向于先做
+  (a),因为路线图里 Phase 1/2 的退出标准本来就是这个,但两条都不复杂,
+  条件允许可以都做。
