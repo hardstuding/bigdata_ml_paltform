@@ -6,6 +6,11 @@
 # 里连 S3 的实现(s3a://),元数据服务本身建 schema/表的时候要验证/创建
 # S3 上的目录,所以也需要这份凭据,不是只有 Trino 需要,见
 # docs/decisions/003-no-hdfs-on-k8s.md。
+#
+# 连接参数用 core-site.xml(ConfigMap 挂载),不是 SERVICE_OPTS 里的 -D 参数:
+# Hadoop 的 Configuration 只认 XML 配置文件,不会读 JVM 系统属性,-D 传
+# fs.s3a.* 完全不生效,报错还很含糊("... : null"),踩过一次坑,细节见
+# docs/operations/troubleshooting.md。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -76,12 +81,6 @@ spec:
                 -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://postgres.data.svc.cluster.local:5432/metastore
                 -Djavax.jdo.option.ConnectionUserName=hive
                 -Djavax.jdo.option.ConnectionPassword=$(HIVE_DB_PASSWORD)
-                -Dfs.s3a.endpoint=http://minio.minio.svc.cluster.local:9000
-                -Dfs.s3a.access.key=$(MINIO_ACCESS_KEY)
-                -Dfs.s3a.secret.key=$(MINIO_SECRET_KEY)
-                -Dfs.s3a.path.style.access=true
-                -Dfs.s3a.connection.ssl.enabled=false
-                -Dfs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
           volumeMounts:
             - name: jdbc-driver
               mountPath: /opt/hive/lib/postgres.jar
@@ -92,6 +91,9 @@ spec:
             - name: jdbc-driver
               mountPath: /opt/hive/lib/awssdk-bundle.jar
               subPath: awssdk-bundle.jar
+            - name: core-site
+              mountPath: /opt/hive/conf/core-site.xml
+              subPath: core-site.xml
           resources:
             requests:
               cpu: 150m
@@ -111,3 +113,6 @@ spec:
       volumes:
         - name: jdbc-driver
           emptyDir: {}
+        - name: core-site
+          configMap:
+            name: hive-metastore-core-site

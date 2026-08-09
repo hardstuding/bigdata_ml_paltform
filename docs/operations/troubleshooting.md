@@ -35,6 +35,25 @@
 - **原因**:本机代理对不同站点的连通性不一致,quay.io 这类站点即使走代理也可能连不上,不是配置错误,是这条网络对特定站点没有稳定路由。
 - **处理**:很多镜像(包括 MinIO)官方会同时发布到 docker hub 和 quay.io,遇到这种情况直接把 chart/manifest 里的 `image.repository` 换成 docker hub 上的同名镜像,不用死磕代理配置。以后新组件如果也卡在拉镜像,先用 `colima ssh -- curl` 测一下目标 registry 通不通,别默认怀疑是 k8s 配置问题。
 
+### Hive Metastore 建 Iceberg schema 报错 "Failed to create external path ... : null"
+
+- **现象**:Trino 里 `CREATE SCHEMA iceberg.xxx WITH (location = 's3://...')` 报
+  `Failed to create external path s3://... for database xxx. This may result in
+  access not being allowed if the StorageBasedAuthorizationProvider is enabled: null`,
+  错误信息里那个 `null` 没有任何有用的堆栈信息。
+- **原因**:以为给 Hive Metastore 的 `SERVICE_OPTS` 加 `-Dfs.s3a.endpoint=...`
+  这类 JVM 系统属性就能配置 S3A 客户端,结果完全不生效——**Hadoop 的
+  `Configuration` 类只从 XML 配置文件(`core-site.xml`)读取 `fs.s3a.*` 这类
+  属性,不会读 JVM 的 `-D` 系统属性**。SQL 层面的报错信息把真正原因盖住了,
+  得去 Hive Metastore 自己的日志(`grep -i "s3a\|MetaException"`)才能看到
+  `Failed to create external path` 这条更具体的 metastore 侧报错。
+- **处理**:改用 ConfigMap 挂载真正的 `core-site.xml` 到
+  `/opt/hive/conf/core-site.xml`,`fs.s3a.access.key`/`fs.s3a.secret.key`
+  这类敏感值用 `${env.VAR}` 语法引用容器环境变量(Hadoop 配置支持这个
+  插值语法),不直接写死在 ConfigMap 里。
+- **涉及文件**:`apps/hive-metastore/manifests/deployment.yaml`、
+  `apps/hive-metastore/manifests/core-site-configmap.yaml`
+
 ### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
 
 - **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似
