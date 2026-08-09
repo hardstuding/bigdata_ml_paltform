@@ -38,7 +38,7 @@ spec:
               enabled: true
               port: 8443
               keystore:
-                path: /etc/trino/tls/tls-combined.pem
+                path: /secrets/trino-tls/tls-combined.pem
         additionalConfigProperties:
           - http-server.http.enabled=false
           - http-server.authentication.oauth2.issuer=http://keycloak.local-lite.test/auth/realms/platform
@@ -47,10 +47,16 @@ spec:
           - http-server.authentication.oauth2.oidc.discovery=true
           - http-server.authentication.oauth2.principal-field=preferred_username
           - internal-communication.shared-secret=${ENV:INTERNAL_SHARED_SECRET}
+        # 证书文件故意不放在 /etc/trino/ 底下:那整个目录已经是 chart 自己的
+        # ConfigMap(config-volume)挂载点,再往它下面嵌套挂一个 Secret 的
+        # subPath 文件会导致 kubelet 创建目录失败(实测报 runc "mounting a
+        # directory onto a file (or vice-versa)"),两个不同来源的卷不能这样
+        # 嵌套挂载。放一个独立的顶层路径,keystore.path 允许指向任意绝对路径,
+        # 不要求必须在 /etc/trino/ 下面。
         secretMounts:
           - name: trino-tls
             secretName: trino-tls
-            path: /etc/trino/tls/tls-combined.pem
+            path: /secrets/trino-tls/tls-combined.pem
             subPath: tls-combined.pem
         coordinator:
           jvm:
