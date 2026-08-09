@@ -22,12 +22,16 @@ troubleshooting.md 里已标记废弃的那条记录)。组件一多,端口转�
   标准姿势之一,不是本地专用的临时妥协。cert-manager 已经装了但一直没真正用起来,
   留到 cloud-full 接真实域名 + ACME(Let's Encrypt 或内部 CA)时再启用,不在
   local-lite 用自签证书折腾 Mac 的信任链(收益低,还要碰系统信任设置)。
-- **OIDC 域名解析**:浏览器端靠 `/etc/hosts`;集群内部需要主动发起 OIDC
-  discovery/token 交换的 pod(目前只有 ArgoCD server,Grafana 走的是
-  `auth_url`/`token_url` 分离配置,不需要这个)用 `global.hostAliases` 指向
-  `ingress-nginx-controller` 的 ClusterIP——和浏览器走同一个 Ingress 入口,
-  只是各自到达 Service 的路径不同,不再需要给 Keycloak 单独开一个"浏览器/集群
-  内部各解析一次"的专用 Service。
+- **OIDC 域名解析**:浏览器端靠 `/etc/hosts`。集群内部需要主动发起 OIDC
+  discovery/token 交换的 pod(ArgoCD、Trino,后续 Superset/OpenMetadata/MLflow
+  大概率也需要)一开始给 ArgoCD 用的是 `global.hostAliases` 指向
+  `ingress-nginx-controller` 的 ClusterIP,但装 Trino 时发现它的官方 chart不
+  支持 hostAliases(per-pod 加不了),这条路对所有组件都通用不了。改成在
+  **CoreDNS 层面**一次性解决:`platform/coredns-custom/` 用 k3s 自带的
+  `coredns-custom` 扩展点开一个专门服务 `local-lite.test` 这个 zone 的
+  server block(细节和踩的坑见 ADR-017),所有 pod 不用任何额外配置就能解析
+  `*.local-lite.test`。ArgoCD 那条 `global.hostAliases` 配置目前还留着
+  (不冲突,只是冗余),后续可以清掉统一成这一种机制。
 
 ## 连带修的问题
 
@@ -39,12 +43,13 @@ troubleshooting.md 里已标记废弃的那条记录)。组件一多,端口转�
 
 ## 后果
 
-- Trino/Superset/OpenMetadata/MLflow 重新启用时,应该同步接上各自的 Ingress
-  域名,而不是继续用 port-forward——统一域名也是给它们接 Keycloak SSO 的前提
-  (原因同 ArgoCD:回调地址要是浏览器和后端都能达成一致的固定地址)。
-- cloud-full 起,`hostAliases`、`server.insecure`、`http://` 协议这些 local-lite
-  特有的配置都要换成真实域名 + TLS,届时这个 ADR 里描述的接线方式整体替换,
-  不是在此基础上叠加。
-- cert-manager 目前仍然是"装了但没用"的状态,cloud-full 阶段第一次真正启用时
-  需要验证 ACME 流程本身能不能跑通(取决于 cloud-full 环境能不能被 Let's
-  Encrypt 挑战验证到,还是要用内部 CA)。
+- Superset/OpenMetadata/MLflow 重新启用时,应该同步接上各自的 Ingress 域名,
+  而不是继续用 port-forward——统一域名也是给它们接 Keycloak SSO 的前提
+  (原因同 ArgoCD:回调地址要是浏览器和后端都能达成一致的固定地址)。Trino
+  已经这么做了,见 ADR-017。
+- cloud-full 起,`hostAliases`、`coredns-custom`、`server.insecure`、`http://`
+  协议这些 local-lite 特有的配置都要换成真实域名 + TLS,届时这个 ADR 里描述的
+  接线方式整体替换,不是在此基础上叠加。
+- cert-manager 已经在 Trino 身上第一次真正用起来了(自签证书给它的 OAuth2
+  内部 HTTPS 监听器用,见 ADR-017),cloud-full 阶段要换成真正的 ACME 流程,
+  需要验证能不能被 Let's Encrypt 挑战验证到,还是要用内部 CA。

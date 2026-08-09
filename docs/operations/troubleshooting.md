@@ -310,3 +310,26 @@
 - **教训**:`set -euo pipefail` 是好习惯,但每次写 `x=$(cmd_a | grep ... | cmd_b)`
   这种"grep 可能合理地找不到东西"的管道时,要主动想一下"找不到"算不算失败,
   算的话让它正常报错退出,不算的话显式 `|| true`,不要让它随机地看运气。
+
+### 改 coredns-custom 加自定义域名解析,CoreDNS 直接 CrashLoopBackOff(集群 DNS 短暂中断)
+
+- **现象**:给 `kube-system/coredns-custom` 这个 ConfigMap(k3s 官方留的自定义
+  DNS 扩展点)加一段 `hosts { ... }` 配置,重启 coredns 之后整个 CoreDNS
+  Deployment 起不来,一直 `CrashLoopBackOff`,期间集群里所有 DNS 解析
+  (包括 `xxx.svc.cluster.local`)全部失效,是一次真正会波及全局的中断,
+  不是某个业务组件自己的问题。
+- **原因**:`crictl logs` 显示 `plugin/hosts: this plugin can only be used
+  once per Server Block`。k3s 默认的 Corefile 主 `.:53` block 里已经有一个
+  `hosts /etc/coredns/NodeHosts {...}`,我们的自定义配置又在同一个 block 里
+  加了第二个 `hosts {...}`,CoreDNS 不允许这样。
+- **处理**:k3s 的自定义扩展点其实有两种导入方式,效果完全不同——
+  `*.override` 文件是导入到主 `.:53` block **里面**(会和已有插件冲突);
+  `*.server` 文件是导入到主 block **外面**,相当于新开一个独立的 server
+  block。要新增 `hosts` 这类"整个 server block 只能有一份"的插件,必须用
+  `*.server`,给它配一个专门的 zone(比如 `local-lite.test:53 { hosts {...}
+  fallthrough } }`),不要用 `*.override`。
+- **教训**:改跟 CoreDNS/DNS 相关的集群基础设施配置,风险等级和改业务组件的
+  配置不是一个量级——一旦搞错会让整个集群短暂失明(所有靠 service DNS
+  互相找对方的组件都会连不上),动手前最好先本地/文档确认清楚扩展机制,
+  改完立刻验证(`kubectl get pods -n kube-system -l k8s-app=kube-dns`),
+  别的组件跟着重启排查之前先确认 CoreDNS 自己是不是先健康的。
