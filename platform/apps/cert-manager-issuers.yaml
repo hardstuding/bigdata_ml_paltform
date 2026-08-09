@@ -1,0 +1,25 @@
+# 独立于 cert-manager.yaml(那个只装 chart 本身,CRD 装完才能建 ClusterIssuer/
+# Certificate 这些自定义资源)。ArgoCD 的 selfHeal 会在 CRD 还没装好时自动重试
+# 同步,不需要显式 sync wave 排队,和 hive-metastore 等 CrashLoop 重试的模式一样。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-issuers
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/cert-manager-issuers/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
