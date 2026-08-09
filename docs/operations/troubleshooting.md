@@ -75,6 +75,24 @@
   通过显式设置 `hive.metastore.warehouse.dir=s3a://lakehouse/warehouse/`
   来清理,不紧急。
 
+### Helm chart 的 envFromSecrets(复数)不一定覆盖所有容器,initContainer 可能读不到
+
+- **现象**:用 `envFromSecrets: [my-secret]`(追加一个额外 Secret)想覆盖数据库连接信息,
+  主容器能读到,但某个 initContainer(比如 Superset chart 的 `wait-for-postgres`)
+  一直卡在 `Init:0/1`、不断重试连接一个不存在的默认 host,像是完全没读到新配置。
+- **原因**:chart 的模板作者经常只在"主容器"或者"部分资源"上接了
+  `envFromSecrets`(复数,追加语义),initContainer 的 `envFrom` 可能是硬编码
+  只引用 `envFromSecret`(单数,chart 自己生成的那一个默认 Secret)的名字,
+  不会去遍历 `envFromSecrets` 列表。这不是 bug,是 chart 实现细节,不同 chart
+  的处理方式可能不一样,不能默认"加一个 secret 全局都能覆盖"。
+- **处理**:遇到这种情况,直接**覆盖 `envFromSecret`(单数)这个值本身**,让它
+  指向自己建的 Secret,而不是用复数形式"追加"——相当于完全替换 chart 默认
+  生成的那个 Secret,而不是叠加一个新的。前提是自己的 Secret 要把默认 Secret
+  里所有会被引用到的 key 都补全(哪怕用不上的功能对应的 key 也要给个占位值,
+  比如关掉 Redis 后 `REDIS_*` 这几个 key 还是要存在,只是不会被用到)。
+- **排查方法**:改之前先跑 `helm template <chart> --set ... | grep -B20 "name: <initContainer名>"`
+  看它的 `envFrom` 实际引用的是哪个 Secret 名字,不要靠猜。
+
 ### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
 
 - **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似

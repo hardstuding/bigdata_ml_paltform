@@ -5,8 +5,11 @@
 #
 # 数据库连接和 SECRET_KEY 不写在这份 values 里——chart 默认行为是从
 # DB_USER/DB_PASS/DB_HOST/DB_PORT/DB_NAME 这几个环境变量读连接串
-# (`database.uri` 不设置时的默认逻辑),用 envFromSecrets 引用我们自己建的
-# superset-config Secret 注入这些变量,值不会出现在这个文件里。
+# (`database.uri` 不设置时的默认逻辑)。注意用的是 envFromSecret(单数,
+# 覆盖主 Secret 的名字),不是 envFromSecrets(复数,追加一个)——踩过一次
+# 坑:initContainer(wait-for-postgres)的 envFrom 硬编码只引用 envFromSecret
+# 指向的那一个 Secret,用复数形式追加进去的内容它读不到,会一直连不上
+# 卡在 Init 状态。
 #
 # init.adminUser.password 是 chart 自己的硬编码默认值("admin"),不是我们
 # 写的——这个值不会出现在我们的 git 历史里(是 helm template 渲染时才展开的),
@@ -33,8 +36,7 @@ spec:
           enabled: false
         cache:
           enabled: false
-        envFromSecrets:
-          - superset-config
+        envFromSecret: superset-config
         init:
           loadExamples: false
           resources:

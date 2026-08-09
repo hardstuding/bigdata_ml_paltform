@@ -120,8 +120,12 @@ fi
 ensure_secret data superset-db username=superset password=RANDOM
 
 # Superset chart 默认把 DB_USER/DB_PASS/SUPERSET_SECRET_KEY 这些当明文写进
-# values(会进公开仓库的 git 历史)。改成建一个独立 Secret,通过 chart 的
-# envFromSecrets 机制引用,不写死在 Application 的 valuesObject 里。
+# values(会进公开仓库的 git 历史)。改成建一个独立 Secret,通过覆盖 chart
+# 的 envFromSecret(单数,chart 主 Secret 的名字)机制整个换成我们自己的,
+# 不写死在 Application 的 valuesObject 里。REDIS_* 几个 key 是占位值——
+# Redis/Celery 整体关掉了(local-lite 简化),但 wait-for-postgres 这类
+# initContainer 的 envFrom 是硬编码引用这一个 Secret 的,缺了 key 数量不对
+# 也无所谓,占位值不会被用到。
 if kubectl -n superset get secret superset-config >/dev/null 2>&1; then
   echo "已存在,跳过: superset/superset-config"
 else
@@ -133,7 +137,14 @@ else
     --from-literal=DB_HOST=postgres.data.svc.cluster.local \
     --from-literal=DB_PORT=5432 \
     --from-literal=DB_NAME=superset \
-    --from-literal=SUPERSET_SECRET_KEY="$SUPERSET_SECRET_KEY"
+    --from-literal=SUPERSET_SECRET_KEY="$SUPERSET_SECRET_KEY" \
+    --from-literal=REDIS_HOST=unused \
+    --from-literal=REDIS_PORT=6379 \
+    --from-literal=REDIS_USER= \
+    --from-literal=REDIS_PASSWORD= \
+    --from-literal=REDIS_DB=1 \
+    --from-literal=REDIS_CELERY_DB=0 \
+    --from-literal=REDIS_PROTO=redis
   echo "已创建: superset/superset-config"
 fi
 
