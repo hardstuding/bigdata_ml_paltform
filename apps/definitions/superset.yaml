@@ -30,6 +30,15 @@ spec:
     targetRevision: 0.22.4
     helm:
       valuesObject:
+        # apache/superset 官方镜像默认不带 postgres 驱动(psycopg2),chart
+        # 默认的 bootstrapScript 也不装,踩过一次坑(ModuleNotFoundError:
+        # No module named 'psycopg2'),这是接外部 Postgres 时的常见已知问题。
+        bootstrapScript: |
+          #!/bin/bash
+          if [ ! -f ~/bootstrap ]; then
+            pip install psycopg2-binary
+            echo "Running Superset with uid 0" > ~/bootstrap
+          fi
         postgresql:
           enabled: false
         redis:

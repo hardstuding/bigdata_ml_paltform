@@ -93,6 +93,32 @@
 - **排查方法**:改之前先跑 `helm template <chart> --set ... | grep -B20 "name: <initContainer名>"`
   看它的 `envFrom` 实际引用的是哪个 Secret 名字,不要靠猜。
 
+### Superset 报 ModuleNotFoundError: No module named 'psycopg2'
+
+- **现象**:Superset 主容器 CrashLoopBackOff,日志里是
+  `ModuleNotFoundError: No module named 'psycopg2'`,发生在初始化数据库连接的时候。
+- **原因**:官方 `apache/superset` 镜像不自带 Postgres 驱动,chart 默认的
+  `bootstrapScript` 也不会装。用 Bitnami 那套(chart 默认依赖)时不会遇到,因为
+  Bitnami 的镜像/流程不一样;一旦按 ADR-008 换成外部 Postgres,这个驱动缺失
+  就暴露出来了——接外部 Postgres 时的已知通用问题,不是这个项目特有的配置错误。
+- **处理**:覆盖 `bootstrapScript`,在原有内容基础上加一行
+  `pip install psycopg2-binary`。
+
+### Helm Application 手动 patch 过 Deployment 之后,ArgoCD 卡住不再应用新的 git 变更
+
+- **现象**:直接 `kubectl apply` 手动改过一个由 ArgoCD 管理的 Deployment(比如
+  为了打破"等待健康"死锁),之后即使改了 git 里的配置、hard refresh、强制
+  sync,Application 一直卡在 `OutOfSync`/`Progressing`,Deployment 的实际内容
+  长时间不更新,新的修复迟迟不生效。
+- **原因**:手动 patch 制造的"实际状态"和 Git 期望状态之间的 diff,再加上
+  Deployment 本身处于不健康状态(旧问题还没解决),会让 ArgoCD 的多阶段同步
+  逻辑卡在评估"这一步健康了没"上,新变更迟迟排不上号——是前面几条"死锁"类
+  问题的复合叠加,不是单一原因。
+- **处理**:与其反复等 ArgoCD 自己收敛,不如直接把"这一轮手动 patch 应该长
+  什么样子"想清楚,一次性 `kubectl apply` 到位(包括所有相关的 env/volume 引用
+  都要改对,不要只改一半),用真实运行的报错(`crictl logs`)一步步验证,
+  而不是干等 ArgoCD 的状态機自己转过来。
+
 ### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
 
 - **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似
