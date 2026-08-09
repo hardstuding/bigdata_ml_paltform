@@ -1,0 +1,57 @@
+# 单节点 Zeta 集群,Hybrid 模式(master+worker 合一)。用 StatefulSet 是因为
+# hazelcast.yaml 里 member-list 引用了固定的 pod hostname
+# (seatunnel-0.seatunnel-headless...),StatefulSet 才能保证这个名字稳定。
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: seatunnel
+  namespace: seatunnel
+spec:
+  serviceName: seatunnel-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seatunnel
+  template:
+    metadata:
+      labels:
+        app: seatunnel
+    spec:
+      containers:
+        - name: seatunnel
+          image: apache/seatunnel:2.3.13
+          command:
+            - /bin/sh
+            - -c
+            - |
+              mkdir -p /opt/seatunnel/logs
+              cp /config/hazelcast.yaml /opt/seatunnel/config/hazelcast.yaml
+              cp /config/hazelcast-client.yaml /opt/seatunnel/config/hazelcast-client.yaml
+              cp /config/seatunnel.yaml /opt/seatunnel/config/seatunnel.yaml
+              exec /opt/seatunnel/bin/seatunnel-cluster.sh
+          ports:
+            - containerPort: 5801
+              name: cluster
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+          readinessProbe:
+            tcpSocket:
+              port: 5801
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5801
+            initialDelaySeconds: 60
+            periodSeconds: 20
+      volumes:
+        - name: config
+          configMap:
+            name: seatunnel-config

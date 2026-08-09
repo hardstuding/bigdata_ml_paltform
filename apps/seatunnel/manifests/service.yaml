@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: seatunnel-headless
+  namespace: seatunnel
+spec:
+  clusterIP: None
+  selector:
+    app: seatunnel
+  ports:
+    - port: 5801
+      name: cluster
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seatunnel
+  namespace: seatunnel
+spec:
+  selector:
+    app: seatunnel
+  ports:
+    - port: 5801
+      name: cluster

@@ -1,0 +1,25 @@
+# Zeta 引擎单节点 Hybrid 模式,配置细节见 apps/seatunnel/manifests/configmap.yaml
+# 顶部注释——官方没有完整配置示例,这是照文档片段 + 社区实践拼的,先验证能不能
+# 起得来,不代表是钉死的最终配置。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: seatunnel
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/seatunnel/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: seatunnel
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

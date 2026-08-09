@@ -1,0 +1,58 @@
+# SeaTunnel 没有官方 Helm chart(2024年底就有人提issue要求加,到现在还没做,
+# 见 ADR-011),这两个配置文件也没有官方发布的完整示例——官方文档
+# (https://seatunnel.apache.org/docs/2.3.13/engines/zeta/hybrid-cluster-deployment/)
+# 只给了字段片段,不是完整文件。下面内容是照着文档给的字段 + 社区部署实践拼的
+# 单节点 Hybrid 模式配置(master/worker 合一,适合 local-lite;生产规模建议
+# 换成 Separated 模式,官方文档也建议 Hybrid 模式稳定性不如 Separated)。
+# 真正开始跑数据同步任务时,这份配置大概率需要跟着实际负载调整,不要当成
+# 钉死不变的标准答案。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seatunnel-config
+  namespace: seatunnel
+data:
+  hazelcast.yaml: |
+    hazelcast:
+      cluster-name: seatunnel
+      network:
+        rest-api:
+          enabled: true
+          endpoint-groups:
+            CLUSTER_WRITE:
+              enabled: true
+        join:
+          tcp-ip:
+            enabled: true
+            member-list:
+              - seatunnel-0.seatunnel-headless.seatunnel.svc.cluster.local
+        port:
+          auto-increment: false
+          port: 5801
+      properties:
+        hazelcast.logging.type: log4j2
+        hazelcast.invocation.max.retry.count: 20
+        hazelcast.tcp.join.port.try.count: 30
+        hazelcast.logging.details.enabled: true
+        hazelcast.operation.generic.thread.count: 50
+        hazelcast.operation.thread.count: 50
+
+  hazelcast-client.yaml: |
+    hazelcast-client:
+      cluster-name: seatunnel
+      network:
+        cluster-members:
+          - localhost:5801
+
+  seatunnel.yaml: |
+    # checkpoint 相关配置故意没写:它的 storage.plugin-config 具体怎么接
+    # MinIO/S3,官方文档没给完整例子,不确定的东西不瞎猜,先用引擎默认值把
+    # 集群跑起来,等真正要跑同步任务、需要 checkpoint 的时候再单独查证补上。
+    seatunnel:
+      engine:
+        history-job-expire-minutes: 1440
+        backup-count: 1
+        queue-type: blockingqueue
+        print-execution-info-interval: 60
+        slot-service:
+          dynamic-slot: true
