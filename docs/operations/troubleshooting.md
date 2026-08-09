@@ -124,6 +124,26 @@
   都要改对,不要只改一半),用真实运行的报错(`crictl logs`)一步步验证,
   而不是干等 ArgoCD 的状态機自己转过来。
 
+### 从 apps/definitions 挪走一个组件后,ArgoCD 里那个 Application 卡在 Missing 删不掉
+
+- **现象**:把某个组件的 `.yaml` 从 `apps/definitions/` 挪到
+  `environments/cloud-full/pending-definitions/`(按标准流程收起来)之后,
+  `kubectl get applications -n argocd` 里那个 Application 一直显示
+  `OutOfSync`/`Missing`,删不掉,`apps-root` 自己也跟着卡在 `OutOfSync`/
+  `Progressing` 不收敛,hard refresh、重启 repo-server 都没用。
+- **原因**:如果在组件还没在 git 里正式移除之前,已经手动清理过它的命名空间
+  (比如 `kubectl delete namespace xxx`),这个 Application 的 `finalizers`
+  (`resources-finalizer.argocd.argoproj.io`)在真正被 apps-root 判定要删除时,
+  会尝试去确认"所管理的资源都清理干净了"才肯放行删除——但它认的资源列表
+  可能是不完整/过期的,导致这个确认过程卡住,finalizer 一直移不掉,对象就
+  一直卡在"正在删除"状态出不来。
+- **处理**:确认这个组件真的没有任何残留资源在集群里之后(不确定就
+  `kubectl get all -n <那个命名空间>` 查一遍),直接把这个 Application 的
+  finalizers 清空来放行:
+  `kubectl -n argocd patch application <名字> --type merge -p '{"metadata":{"finalizers":[]}}'`。
+  这是"确认没有东西要清理,只是卡住了"这个前提下的合理操作,不是绕过安全检查
+  ——如果还没确认清楚集群里没有残留资源就这么干,可能会漏删东西。
+
 ### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
 
 - **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似
