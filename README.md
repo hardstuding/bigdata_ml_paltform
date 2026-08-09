@@ -28,8 +28,9 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 ## 当前状态
 
 - ✅ Phase 0(平台底座):ArgoCD + ingress-nginx + cert-manager + Keycloak + kube-prometheus-stack,全部 Synced/Healthy
-- ✅ Phase 1(湖仓核心):MinIO + Postgres + Hive Metastore + **Trino**,已验证端到端建表/写入/读出 Iceberg 表,数据真实落盘到 MinIO(Spark 侧读写还未验证,留到 Spark Operator 真正跑作业时一起做)
-- ✅ Phase 2(数据工程,配置已验证、当前收在 `environments/cloud-full/pending-definitions/`):Kafka(Strimzi)、Spark Operator、Airflow、SeaTunnel
+- ✅ Phase 1(湖仓核心):MinIO + Postgres + Hive Metastore + Trino,已验证端到端建表/写入/读出 Iceberg 表,数据真实落盘到 MinIO(Spark 侧读写还未验证,留到 Spark Operator 真正跑作业时一起做)+ **Superset**,已验证 `/health` 和登录页正常
+- ✅ Phase 2(数据工程,配置已验证、当前收在 `environments/cloud-full/pending-definitions/`):Kafka(Strimzi)、Spark Operator、Airflow、SeaTunnel、Trino、Superset
+- ⏳ 还没碰的:OpenMetadata(血缘/目录)——预计是目前所有组件里最复杂的一个(默认自带 OpenSearch + 自己的 MySQL/Airflow,需要单独规划)
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 
