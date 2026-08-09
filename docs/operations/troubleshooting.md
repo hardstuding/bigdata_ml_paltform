@@ -380,3 +380,28 @@
   自动建表在第一次启动时偶发没跟上(不确定是不是这台机器内存紧张、
   swap 严重时 JVM 启动变慢导致的时序问题),不是每次都复现,遇到先重启
   一次 Pod 看看,不用一开始就当成需要深入排查的硬故障。
+
+### 组件重新拉起来报 "password authentication failed",Postgres 密码"变了"
+
+- **现象**:一个之前验证过、收进 `pending-definitions` 又重新启用的组件
+  (这次是 OpenMetadata 和 MLflow,各出现一次),报
+  `FATAL: password authentication failed for user "xxx"`,但对应的 Secret
+  (比如 `mlflow-db-secret`)看起来内容正常,没有被意外改过。
+- **原因**:各组件的 `create-db-job.yaml` 都是"角色不存在才创建"
+  (`SELECT ... FROM pg_roles ... || CREATE USER ...`),不会更新已存在角色的
+  密码。这台共享 Postgres 从很早的会话开始就一直在跑、数据一直没清过,
+  Postgres 里的用户角色早就存在了,是用**当时**Secret 里的密码创建的;如果
+  那个组件后来因为任何原因(重新生成过 Secret、手动改过、或者这次同一类
+  bug)导致 Secret 里的密码值和 Postgres 里实际存的密码不一致,新 Pod 拿
+  **当前** Secret 的密码去连接,自然连不上——这不是 Postgres 或者组件本身
+  的 bug,是"创建型"幂等脚本天然覆盖不到"密码漂移"这种情况。
+- **处理**:确认是这个原因后(报错信息里的用户名对得上,Secret 内容看着
+  正常),直接把 Postgres 里那个角色的密码改成和当前 Secret 一致:
+  ```sql
+  ALTER USER <角色名> WITH PASSWORD '<Secret 里当前的密码>';
+  ```
+  不用碰 Secret,也不用重建数据库(除非像 OpenMetadata 那次一样,问题根本
+  不是密码,是数据库里存的应用设置本身就是旧的)。
+- **教训**:这次在 OpenMetadata 和 MLflow 上各踩了一次,同一个原因、同一个
+  修法——凡是"组件在 pending-definitions 和 apps/definitions 之间来回搬动、
+  但共享 Postgres 从不重置"这种场景,都要预期可能撞上这个问题,不是特例。
