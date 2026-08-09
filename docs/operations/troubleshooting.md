@@ -144,6 +144,26 @@
   这是"确认没有东西要清理,只是卡住了"这个前提下的合理操作,不是绕过安全检查
   ——如果还没确认清楚集群里没有残留资源就这么干,可能会漏删东西。
 
+### 手动 `helm template | kubectl apply` 绕过 ArgoCD 之后,命名空间删不掉,卡在 Terminating
+
+- **现象**:为了绕开 ArgoCD 卡住的同步问题(前面几条提到的死锁),直接用
+  `helm template | kubectl apply` 手动把资源怼上去。后续要清理这个命名空间时,
+  一直卡在 `Terminating`,`kubectl get all -n <ns>` 显示还有个 Job 也卡在
+  `Terminating`,而且这个 Job 根本不是我们自己写的(是 chart 自带的 init job)。
+- **原因**:chart 自带的资源里,有些标了 `helm.sh/hook: post-install,post-upgrade`
+  这类注解(通常配合 `init.jobAnnotations` 这种字段,本意是给 ArgoCD/Helm 的
+  hook 机制用)。手动 `kubectl apply` 把这种资源怼进一个 ArgoCD 正在管理的
+  命名空间时,ArgoCD 会给它加上 `argocd.argoproj.io/hook-finalizer` 这个
+  finalizer,但因为这个资源根本没有经过 ArgoCD 自己的 sync 流程,ArgoCD 的
+  控制器永远不会去"确认 hook 执行完毕"从而清掉这个 finalizer——变成一个
+  永久卡住、删不掉的资源,拖着整个命名空间没法终止。
+- **处理**:确认没有需要保留的东西之后,直接清空这个资源的 finalizers 放行:
+  `kubectl -n <ns> patch job <name> --type merge -p '{"metadata":{"finalizers":[]}}'`。
+- **更根本的教训**:手动 `helm template | kubectl apply` 是排查问题时的应急
+  手段,不是常规操作——用完之后要意识到可能留下这类"ArgoCD 认识但没法正常
+  管理"的资源,清理的时候要连带检查有没有卡住的 finalizer,不能假设
+  `kubectl delete namespace` 一定能干净收尾。
+
 ### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
 
 - **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似
