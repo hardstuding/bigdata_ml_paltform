@@ -159,6 +159,17 @@ else
   echo "已创建: openmetadata/openmetadata-postgresql-secrets"
 fi
 
+# OpenSearch 2.12+ 起,自带的 security 插件强制要求设置初始 admin 密码,不设
+# 直接拒绝启动。同一个密码也要喂给 OpenMetadata 的 elasticsearch.auth 配置,
+# 两边必须一致。
+if kubectl -n openmetadata get secret opensearch-admin >/dev/null 2>&1; then
+  echo "已存在,跳过: openmetadata/opensearch-admin"
+else
+  kubectl -n openmetadata create secret generic opensearch-admin \
+    --from-literal=password="$(gen_password)A1!"
+  echo "已创建: openmetadata/opensearch-admin"
+fi
+
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 MINIO_CONSUMER_NAMESPACES="trino data"
 for ns in $MINIO_CONSUMER_NAMESPACES; do

@@ -23,6 +23,15 @@ spec:
         replicas: 1
         sysctlInit:
           enabled: true
+        # OpenSearch 2.12+ 的 security 插件强制要求这个,不设直接拒绝启动。
+        # 这个密码要和 openmetadata.yaml 里 elasticsearch.auth 配的一致
+        # (都引用同一个 opensearch-admin Secret)。
+        extraEnvs:
+          - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: opensearch-admin
+                key: password
         resources:
           requests:
             cpu: 300m

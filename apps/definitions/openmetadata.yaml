@@ -26,6 +26,13 @@ spec:
           config:
             elasticsearch:
               host: opensearch
+              scheme: https
+              auth:
+                enabled: true
+                username: admin
+                password:
+                  secretRef: opensearch-admin
+                  secretKey: password
             database:
               host: postgres.data.svc.cluster.local
               port: 5432
