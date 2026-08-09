@@ -1,0 +1,112 @@
+# 官方 open-metadata/openmetadata chart。数据库用 Postgres(官方支持,不是
+# 只能 MySQL,chart 默认值是 MySQL),接我们已有的共享 Postgres 实例,不额外
+# 起一个。采集任务编排用官方的 k8s 模式(pipelineServiceClientConfig.type:
+# k8s),不需要 Airflow——认真比较过"复用现有业务 Airflow" vs "拆分一个独立
+# Airflow" vs "用 k8s 原生模式"之后选的:复用会把 OpenMetadata 的升级节奏和
+# 承载核心业务调度的 Airflow 耦合在一起(采集插件版本要跟 OpenMetadata 对齐,
+# 意味着升级 OpenMetadata 可能要连带重建业务 Airflow 镜像),拆分又要多背一个
+# Airflow 实例的运维成本;k8s 模式两个问题都不存在,采集任务就是原生 k8s Job,
+# 官方支持,不是变通方案。
+#
+# Keycloak SSO:OpenMetadata 的 OIDC 支持两种 clientType——public(SPA 直接
+# 找 IdP 换 token,不需要 client secret)和 confidential(后端代持 client
+# secret 做 code 换 token,和我们给 Trino/Superset 用的是同一套模式)。选
+# confidential,更安全,也和其他组件的接入方式保持一致。provider 要填
+# "custom-oidc"(Keycloak 不是 chart 内置的具名 provider 之一,通用 OIDC
+# 走这个)。注意 authentication 顶层的 publicKeys/authority/clientId 这些
+# 字段依然要填(不是只填 oidcConfiguration 那一段)——即使是 confidential
+# 模式,OpenMetadata 后端自己签发的会话 JWT 也要用同一套 JWKS 校验,两段
+# 配置都不能省,见 open-metadata/openmetadata-helm-charts#316 这个已知的
+# 社区坑(publicKeys 漏配会报 SigningKeyNotFoundException)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openmetadata
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://helm.open-metadata.org/
+    chart: openmetadata
+    targetRevision: 1.13.3
+    helm:
+      valuesObject:
+        openmetadata:
+          config:
+            elasticsearch:
+              host: opensearch
+              scheme: https
+              auth:
+                enabled: true
+                username: admin
+                password:
+                  secretRef: opensearch-admin
+                  secretKey: password
+            database:
+              host: postgres.data.svc.cluster.local
+              port: 5432
+              driverClass: org.postgresql.Driver
+              dbScheme: postgresql
+              databaseName: openmetadata_db
+              auth:
+                username: openmetadata_user
+                password:
+                  secretRef: openmetadata-postgresql-secrets
+                  secretKey: openmetadata-postgresql-password
+              dbParams: ""
+            pipelineServiceClientConfig:
+              type: "k8s"
+              k8s:
+                namespace: openmetadata
+            authentication:
+              enabled: true
+              clientType: confidential
+              provider: "custom-oidc"
+              publicKeys:
+                - "http://openmetadata:8585/api/v1/system/config/jwks"
+                - "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
+              authority: "http://keycloak.local-lite.test/auth/realms/platform"
+              clientId: "openmetadata"
+              callbackUrl: "http://openmetadata.local-lite.test/callback"
+              jwtPrincipalClaims:
+                - "email"
+                - "preferred_username"
+                - "sub"
+              oidcConfiguration:
+                enabled: true
+                oidcType: "Keycloak"
+                clientId:
+                  secretRef: openmetadata-oidc-secret
+                  secretKey: clientId
+                clientSecret:
+                  secretRef: openmetadata-oidc-secret
+                  secretKey: clientSecret
+                scope: "openid email profile"
+                discoveryUri: "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration"
+                callbackUrl: "http://openmetadata.local-lite.test/callback"
+                serverUrl: "http://openmetadata.local-lite.test"
+        resources:
+          requests:
+            cpu: 300m
+            memory: 1024Mi
+          limits:
+            memory: 2048Mi
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - host: openmetadata.local-lite.test
+              paths:
+                - path: /
+                  pathType: ImplementationSpecific
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openmetadata
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

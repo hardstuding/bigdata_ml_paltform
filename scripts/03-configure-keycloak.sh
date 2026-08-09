@@ -103,6 +103,29 @@ echo "==> superset client"
 # "keycloak",不能改一边不改另一边。
 create_client_if_absent superset '["http://superset.local-lite.test/oauth-authorized/keycloak"]' superset superset-oidc-secret clientSecret
 
+echo "==> openmetadata client"
+# 不能直接用 create_client_if_absent——OpenMetadata chart 的
+# oidcConfiguration.clientId 也是 secretRef(不像其他组件那样直接在 values
+# 里写字面量 client_id),这个 Secret 要同时装 clientId 和 clientSecret 两个
+# key,helper 函数只管一个 key,这里单独写。
+OM_REDIRECT_URIS='["http://openmetadata.local-lite.test/callback"]'
+om_client_id=$(kcadm get clients -r platform -q clientId=openmetadata --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+if [ -n "$om_client_id" ]; then
+  echo "client openmetadata 已存在,只同步 redirectUris,不轮换密钥"
+  kcadm update "clients/${om_client_id}" -r platform -s "redirectUris=${OM_REDIRECT_URIS}"
+else
+  OM_SECRET="$(gen_password)"
+  kcadm create clients -r platform \
+    -s clientId=openmetadata -s enabled=true -s protocol=openid-connect -s publicClient=false \
+    -s secret="$OM_SECRET" \
+    -s "redirectUris=${OM_REDIRECT_URIS}" \
+    -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
+  kubectl -n openmetadata create secret generic openmetadata-oidc-secret \
+    --from-literal=clientId=openmetadata \
+    --from-literal=clientSecret="$OM_SECRET"
+  echo "已创建 client openmetadata,密钥写入 openmetadata/openmetadata-oidc-secret"
+fi
+
 echo "==> 初始登录用户: ${INITIAL_USER}"
 if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/null | grep -q '"id"'; then
   echo "已存在,跳过(不会重置密码)"
