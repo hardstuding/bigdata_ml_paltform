@@ -12,6 +12,12 @@
 # server->kubelet 这条路径,不受本机代理影响。cloud-full/IDC 网络环境正常的话
 # 两种方式都能用,但既然这种方式更不依赖网络环境、更贴近生产常见做法,直接
 # 保留这个,不用等以后再切回去。
+#
+# mounts.dockercontainers 也要开:/var/log/pods/.../0.log 实际是个符号链接,
+# 指向 /var/lib/docker/containers/<容器id>/<容器id>-json.log(colima 这个
+# profile 的容器运行时是 docker,不是纯 containerd,日志走的是 docker 的
+# json-file 日志驱动)。只挂 /var/log 的话这个符号链接在容器里指向一个不存在
+# 的路径,读不到任何内容,报 "no such file or directory" 但看起来文件明明在。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -30,6 +36,7 @@ spec:
         alloy:
           mounts:
             varlog: true
+            dockercontainers: true
           configMap:
             content: |
               discovery.kubernetes "pod" {
