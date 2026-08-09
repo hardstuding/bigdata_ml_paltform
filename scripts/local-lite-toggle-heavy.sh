@@ -24,7 +24,7 @@ LOG_FILE="logs/toggle-heavy.log"
 
 PENDING_DIR="environments/cloud-full/pending-definitions"
 ACTIVE_DIR="apps/definitions"
-FILES="kafka-operator.yaml kafka-cluster.yaml spark-operator.yaml airflow.yaml airflow-db-init.yaml seatunnel.yaml"
+FILES="kafka-operator.yaml kafka-cluster.yaml spark-operator.yaml airflow.yaml airflow-db-init.yaml seatunnel.yaml trino.yaml"
 
 ACTION="${1:-}"
 if [ "$ACTION" != "on" ] && [ "$ACTION" != "off" ]; then
