@@ -72,7 +72,7 @@ print(json.dumps(out))
 }
 
 echo "==> 建命名空间"
-for ns in keycloak monitoring minio data airflow trino superset openmetadata; do
+for ns in keycloak monitoring minio data airflow trino superset openmetadata mlflow; do
   ensure_ns "$ns"
 done
 
@@ -170,8 +170,22 @@ else
   echo "已创建: openmetadata/opensearch-admin"
 fi
 
+# MLflow chart 的 backendStoreUriFrom 要的是完整连接串(带 key "uri"),
+# 不是分开的 host/user/pass,自己拼。密码单独存一份(key "password")给
+# create-db-job 用,两边都从这一个 Secret 读,不重复生成密码。
+if kubectl -n mlflow get secret mlflow-db-secret >/dev/null 2>&1; then
+  echo "已存在,跳过: mlflow/mlflow-db-secret"
+else
+  MLFLOW_DB_PW="$(gen_password)"
+  MLFLOW_DB_URI="postgresql://mlflow:${MLFLOW_DB_PW}@postgres.data.svc.cluster.local:5432/mlflow"
+  kubectl -n mlflow create secret generic mlflow-db-secret \
+    --from-literal=password="$MLFLOW_DB_PW" \
+    --from-literal=uri="$MLFLOW_DB_URI"
+  echo "已创建: mlflow/mlflow-db-secret"
+fi
+
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"
-MINIO_CONSUMER_NAMESPACES="trino data"
+MINIO_CONSUMER_NAMESPACES="trino data mlflow"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done
@@ -180,7 +194,7 @@ echo "==> 复制 Postgres 管理员凭据到需要建库的命名空间"
 # 各组件的 create-db-job 都是"在自己的命名空间里跑,通过网络连
 # postgres.data.svc.cluster.local",但要用 postgres-root 的密码建库/建用户,
 # 这个 Secret 本身在 data 命名空间,同样跨不过去,复制一份过去。
-POSTGRES_ROOT_CONSUMER_NAMESPACES="openmetadata"
+POSTGRES_ROOT_CONSUMER_NAMESPACES="openmetadata mlflow"
 for ns in $POSTGRES_ROOT_CONSUMER_NAMESPACES; do
   copy_secret data "$ns" postgres-root
 done

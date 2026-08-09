@@ -1,0 +1,56 @@
+# 官方 MLflow 项目自己发布的 chart(ghcr.io/mlflow/charts/mlflow,OCI 格式),
+# 不是社区维护的。backendStoreUriFrom 直接支持引用 Secret,不用把连接串明文
+#写进 values——这是这次几个 chart 里设计最干净的一个。
+#
+# artifact 存储用 MinIO(S3 兼容),defaultArtifactRoot 模式下客户端(以后的
+# JupyterHub/训练任务)直接写 S3,不经过 MLflow server 代理,所以要给
+# MLFLOW_S3_ENDPOINT_URL 指向我们的 MinIO,不是真实 AWS S3。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mlflow
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: oci://ghcr.io/mlflow/charts/mlflow
+    chart: mlflow
+    targetRevision: 0.1.0
+    helm:
+      valuesObject:
+        mlflow:
+          backendStoreUriFrom:
+            secretKeyRef:
+              name: mlflow-db-secret
+              key: uri
+          defaultArtifactRoot: "s3://mlflow/"
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootUser
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootPassword
+          - name: MLFLOW_S3_ENDPOINT_URL
+            value: "http://minio.minio.svc.cluster.local:9000"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            memory: 1024Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mlflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

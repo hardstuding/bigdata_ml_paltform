@@ -44,6 +44,9 @@ spec:
           - name: lakehouse
             policy: none
             purge: false
+          - name: mlflow
+            policy: none
+            purge: false
   destination:
     server: https://kubernetes.default.svc
     namespace: minio

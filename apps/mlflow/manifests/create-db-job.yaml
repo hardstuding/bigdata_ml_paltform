@@ -1,0 +1,35 @@
+# 和其他组件的 create-db-job.yaml 同样的模式,跑在 mlflow 命名空间(不是
+# data),连 Postgres 用完整域名,见 troubleshooting.md。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mlflow-create-db
+  namespace: mlflow
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: create-db
+          image: postgres:16.6
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-root
+                  key: password
+            - name: MLFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-db-secret
+                  key: password
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              psql -h postgres.data.svc.cluster.local -U postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='mlflow'" | grep -q 1 \
+                || psql -h postgres.data.svc.cluster.local -U postgres -c "CREATE USER mlflow WITH PASSWORD '${MLFLOW_DB_PASSWORD}';"
+              psql -h postgres.data.svc.cluster.local -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='mlflow'" | grep -q 1 \
+                || psql -h postgres.data.svc.cluster.local -U postgres -c "CREATE DATABASE mlflow OWNER mlflow;"
