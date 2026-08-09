@@ -97,6 +97,12 @@ echo "==> trino client"
 # Trino OAuth2 的回调路径固定是 /oauth2/callback,不能改。
 create_client_if_absent trino '["http://trino.local-lite.test/oauth2/callback"]' trino trino-oidc-secret clientSecret
 
+echo "==> superset client"
+# Flask-AppBuilder 的 OAuth 回调路径是 /oauth-authorized/<provider name>,
+# provider name 是 apps/definitions/superset.yaml 里 OAUTH_PROVIDERS 配的
+# "keycloak",不能改一边不改另一边。
+create_client_if_absent superset '["http://superset.local-lite.test/oauth-authorized/keycloak"]' superset superset-oidc-secret clientSecret
+
 echo "==> 初始登录用户: ${INITIAL_USER}"
 if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/null | grep -q '"id"'; then
   echo "已存在,跳过(不会重置密码)"

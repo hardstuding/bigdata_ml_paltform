@@ -15,6 +15,14 @@
 # 写的——这个值不会出现在我们的 git 历史里(是 helm template 渲染时才展开的),
 # 但运行时的实际密码确实很弱,cloud-full/prod 之前要处理掉(改 init.command
 # 或者关掉 init.createAdmin 自己建,和 Airflow 那次一样)。
+#
+# Keycloak SSO:和 Trino 不一样,Superset(Flask-AppBuilder)的 OAuth 不要求
+# 自己起 HTTPS,直接走 configOverrides 加 AUTH_OAUTH 就行,踩坑成本低很多
+# (见 ADR-017 记的 Trino 那堆坑,Superset 这边基本不适用)。用
+# server_metadata_url 走 OIDC discovery,不用手动拼 auth/token/jwks 各个
+# endpoint。AUTH_USER_REGISTRATION_ROLE=Admin 是 local-lite 简化(第一个登录
+# 的人自动拿 Admin),和 ArgoCD/Grafana 那两条待办一样,以后要换成按 Keycloak
+# group 映射角色。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -46,6 +54,38 @@ spec:
         cache:
           enabled: false
         envFromSecret: superset-db-secrets
+        extraEnvRaw:
+          - name: OAUTH2_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: superset-oidc-secret
+                key: clientSecret
+        configOverrides:
+          enable_oauth: |
+            from flask_appbuilder.security.manager import AUTH_OAUTH
+            AUTH_TYPE = AUTH_OAUTH
+            OAUTH_PROVIDERS = [
+                {
+                    "name": "keycloak",
+                    "icon": "fa-key",
+                    "token_key": "access_token",
+                    "remote_app": {
+                        "client_id": "superset",
+                        "client_secret": os.environ.get("OAUTH2_CLIENT_SECRET"),
+                        "client_kwargs": {"scope": "openid profile email"},
+                        "server_metadata_url": "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration",
+                    },
+                }
+            ]
+            AUTH_ROLE_ADMIN = "Admin"
+            AUTH_ROLE_PUBLIC = "Public"
+            AUTH_USER_REGISTRATION = True
+            AUTH_USER_REGISTRATION_ROLE = "Admin"
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts:
+            - superset.local-lite.test
         init:
           loadExamples: false
           resources:
