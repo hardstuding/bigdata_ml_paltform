@@ -1,0 +1,31 @@
+# k3s 自带的 CoreDNS Corefile 里已经有 `import /etc/coredns/custom/*.override`
+# (kube-system/coredns ConfigMap,不用我们管),这是 k3s 官方留的自定义 DNS
+# 入口,不用改动 CoreDNS 主配置。
+#
+# 背景:*.local-lite.test 这些域名只在 Mac 的 /etc/hosts 里配了,集群内部的
+# pod 完全不认识,任何需要主动发起 OIDC discovery(fetch
+# /.well-known/openid-configuration)的组件(目前是 ArgoCD、接下来是
+# Trino/Superset/OpenMetadata/MLflow)都会 UnknownHostException。一开始给
+# ArgoCD 用的是 chart 自己的 `global.hostAliases`(见
+# platform/bootstrap/argocd-values.yaml),但不是所有 chart 都支持
+# hostAliases(Trino 官方 chart 就不支持,实测确认过),per-pod hostAliases
+# 这条路走不通。改成在集群 DNS 层面一次性解决,所有 pod 都能解析,不用每个
+# chart 单独想办法。
+#
+# 全部指向 ingress-nginx-controller 的 ClusterIP——和浏览器走同一个 Ingress
+# 入口,只是浏览器经 127.0.0.1,pod 内部经集群网络到达同一个 Service。
+# cloud-full/prod 用真实 DNS 后,这个 ConfigMap 整个删掉。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  local-lite.override: |
+    hosts {
+      10.43.102.204 argocd.local-lite.test
+      10.43.102.204 keycloak.local-lite.test
+      10.43.102.204 grafana.local-lite.test
+      10.43.102.204 trino.local-lite.test
+      fallthrough
+    }
