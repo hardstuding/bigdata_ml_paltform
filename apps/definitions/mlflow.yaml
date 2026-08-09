@@ -25,8 +25,10 @@ spec:
             host: "0.0.0.0"
             port: 5000
             # 默认 4 个 gunicorn worker 在 local-lite 的内存画像下跑不住
-            # (OOMKilled),local-lite 用不到那么高的并发,降到 2。
-            workers: 2
+            # (OOMKilled),降到 2 还是不够(chart 默认拉的是 "-full" 标签
+            # 镜像,自带一堆 ML 库,光 import 阶段的基础内存需求就不小,
+            # 5 秒内就被 OOMKilled,不是慢慢涨上去的),local-lite 降到 1。
+            workers: 1
             # MLflow 3.x 加了个安全中间件,默认只认 localhost 发起的请求,
             # k8s 的健康检查是从 pod IP 直接访问,会被这层拒绝
             # (readiness probe 报 connection refused,其实进程是正常起来
@@ -55,9 +57,9 @@ spec:
         resources:
           requests:
             cpu: 200m
-            memory: 512Mi
+            memory: 768Mi
           limits:
-            memory: 1024Mi
+            memory: 1536Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: mlflow
