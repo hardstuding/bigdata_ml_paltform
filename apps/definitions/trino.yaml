@@ -38,7 +38,7 @@ spec:
               enabled: true
               port: 8443
               keystore:
-                path: /etc/trino/tls/key+crt.pem
+                path: /etc/trino/tls/tls-combined.pem
         additionalConfigProperties:
           - http-server.http.enabled=false
           - http-server.authentication.oauth2.issuer=http://keycloak.local-lite.test/auth/realms/platform
@@ -49,8 +49,8 @@ spec:
         secretMounts:
           - name: trino-tls
             secretName: trino-tls
-            path: /etc/trino/tls/key+crt.pem
-            subPath: key+crt.pem
+            path: /etc/trino/tls/tls-combined.pem
+            subPath: tls-combined.pem
         coordinator:
           jvm:
             maxHeapSize: "1536m"
