@@ -48,8 +48,31 @@ ensure_secret() {
   echo "${record[*]}" >> "$OUT_FILE"
 }
 
+# copy_secret <源namespace> <目标namespace> <secret名>
+# k8s Secret 是按命名空间隔离的,跨命名空间不能直接引用(踩过一次坑:Trino
+# 连 MinIO 时 secretKeyRef 指向 minio 命名空间的 minio-root,报 not found)。
+# 每多一个需要连 MinIO 的组件,就在下面 MINIO_CONSUMER_NAMESPACES 里加它的
+# 命名空间,这个函数负责把凭据复制过去,保持一份来源(minio-root)、多份副本。
+copy_secret() {
+  local src_ns="$1" dst_ns="$2" name="$3"
+  if kubectl -n "$dst_ns" get secret "$name" >/dev/null 2>&1; then
+    echo "已存在,跳过: ${dst_ns}/${name}(复制自 ${src_ns})"
+    return
+  fi
+  kubectl -n "$src_ns" get secret "$name" -o json \
+    | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+out = {'apiVersion':'v1','kind':'Secret','type':d.get('type','Opaque'),
+       'metadata':{'name':d['metadata']['name'],'namespace':'$dst_ns'},
+       'data':d.get('data',{})}
+print(json.dumps(out))
+" | kubectl apply -f - >/dev/null
+  echo "已复制: ${src_ns}/${name} -> ${dst_ns}/${name}"
+}
+
 echo "==> 建命名空间"
-for ns in keycloak monitoring minio data airflow; do
+for ns in keycloak monitoring minio data airflow trino; do
   ensure_ns "$ns"
 done
 
@@ -93,6 +116,12 @@ else
   kubectl -n airflow create secret generic airflow-metadata --from-literal=connection="$CONN"
   echo "已创建: airflow/airflow-metadata"
 fi
+
+echo "==> 复制 MinIO 凭据到需要连它的命名空间"
+MINIO_CONSUMER_NAMESPACES="trino"
+for ns in $MINIO_CONSUMER_NAMESPACES; do
+  copy_secret minio "$ns" minio-root
+done
 
 echo
 echo "完成。新生成的凭据(如果有)已追加到: ${OUT_FILE}"
