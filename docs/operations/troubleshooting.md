@@ -54,6 +54,27 @@
 - **涉及文件**:`apps/hive-metastore/manifests/deployment.yaml`、
   `apps/hive-metastore/manifests/core-site-configmap.yaml`
 
+### Trino 建 Iceberg schema 时指定 location 会报错,不指定就正常
+
+- **现象**:`CREATE SCHEMA iceberg.xxx WITH (location = 's3://lakehouse/xxx/')`
+  报和上一条一样的 `Failed to create external path ... : null`,但把
+  `WITH (location = ...)` 去掉、直接 `CREATE SCHEMA iceberg.xxx`(用 Hive
+  Metastore 默认的 warehouse 路径)就能成功建表、写入、读出,完全正常。
+- **结论**:S3A 连接本身没问题(能证明,因为默认路径的读写全部成功,数据
+  真的落到了 MinIO 的 `opt/hive/data/warehouse/xxx.db/...` 下),问题窄化到
+  "显式指定 external location"这一条特定路径上,具体是 HMS 侧对显式路径
+  多做的存在性校验/权限检查(错误信息里提到的
+  `StorageBasedAuthorizationProvider`)出了什么问题,还没深挖。
+- **现状**:**不指定 location,用默认路径** 是当前的可行方案,没有继续深究
+  显式 location 这条路径——已经达成"验证 Trino/Iceberg/Hive Metastore/MinIO
+  能端到端工作"这个目标,显式指定 bucket 内子路径这个需求不紧急,不值得
+  为此无限排查下去。真的需要显式控制表的物理路径时再回来查。
+- **附带发现**:默认路径会带上 `opt/hive/data/warehouse/` 这一截前缀(来自
+  Hive 的 `hive.metastore.warehouse.dir` 默认值,被当成 s3a 路径里的 key
+  前缀),不是干净的 `s3://lakehouse/xxx.db/...`。能用,但不好看,以后可以
+  通过显式设置 `hive.metastore.warehouse.dir=s3a://lakehouse/warehouse/`
+  来清理,不紧急。
+
 ### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
 
 - **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似

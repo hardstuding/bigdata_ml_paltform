@@ -28,8 +28,8 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 ## 当前状态
 
 - ✅ Phase 0(平台底座):ArgoCD + ingress-nginx + cert-manager + Keycloak + kube-prometheus-stack,全部 Synced/Healthy
-- ✅ Phase 1(湖仓核心,local-lite 范围):MinIO(`lakehouse` bucket)+ Postgres(单实例)+ Hive Metastore,已验证 Thrift 端口连通、metastore 库建好
-- ⏳ Phase 1 完整退出标准(Spark/Trino 各自读写同一张 Iceberg 表)要等 Phase 2 引入 Spark Operator 后才补验证,现在的范围是"存储 + 元数据服务健康",还没有计算引擎接进来
+- ✅ Phase 1(湖仓核心):MinIO + Postgres + Hive Metastore + **Trino**,已验证端到端建表/写入/读出 Iceberg 表,数据真实落盘到 MinIO(Spark 侧读写还未验证,留到 Spark Operator 真正跑作业时一起做)
+- ✅ Phase 2(数据工程,配置已验证、当前收在 `environments/cloud-full/pending-definitions/`):Kafka(Strimzi)、Spark Operator、Airflow、SeaTunnel
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 
