@@ -165,6 +165,15 @@ for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done
 
+echo "==> 复制 Postgres 管理员凭据到需要建库的命名空间"
+# 各组件的 create-db-job 都是"在自己的命名空间里跑,通过网络连
+# postgres.data.svc.cluster.local",但要用 postgres-root 的密码建库/建用户,
+# 这个 Secret 本身在 data 命名空间,同样跨不过去,复制一份过去。
+POSTGRES_ROOT_CONSUMER_NAMESPACES="openmetadata"
+for ns in $POSTGRES_ROOT_CONSUMER_NAMESPACES; do
+  copy_secret data "$ns" postgres-root
+done
+
 echo
 echo "完成。新生成的凭据(如果有)已追加到: ${OUT_FILE}"
 echo "这个文件不会被提交到 git(在 .gitignore 里),自己保管好。"
