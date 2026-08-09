@@ -2,11 +2,16 @@
 # EOL(2026-03-02 停止维护,官方明确建议迁移到 Alloy),这时候再新装一个
 # Promtail 等于一上线就是要迁移的技术债,没有理由不直接用 Alloy。
 #
-# 用 loki.source.kubernetes(不是 loki.source.file + hostPath 挂载 /var/log/pods
-# 那种传统做法)——它是通过 Kubernetes API 拉日志,不需要 hostPath,也就不用
-# 处理"这台 colima 虚拟机的日志文件实际路径和 chart 默认假设的路径对不对得上"
-# 这类环境细节。default RBAC(chart 自带)已经包含这个组件需要的
-# pods/log 权限,不用额外加。
+# 2026-08-09 实测:官方更推荐的 loki.source.kubernetes(通过 K8s API 的
+# containerLogs 接口拉日志,不需要 hostPath)在这台机器上完全拉不到数据——
+# 报同一个这次调试全程反复出现的 "Internal Privoxy Error"(API server 转发
+# 到 kubelet 的路径上被本机代理拦截,和 kubectl logs/exec 是同一个坑,见
+# troubleshooting.md)。这不是 Alloy 或者配置的问题,是这台机器的网络环境。
+# 改用传统的 hostPath 挂载 /var/log/pods 直接读日志文件(discovery.kubernetes
+# 只用来拿 pod 元数据做 relabel,不通过它的日志接口),完全绕开 API
+# server->kubelet 这条路径,不受本机代理影响。cloud-full/IDC 网络环境正常的话
+# 两种方式都能用,但既然这种方式更不依赖网络环境、更贴近生产常见做法,直接
+# 保留这个,不用等以后再切回去。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -23,6 +28,8 @@ spec:
     helm:
       valuesObject:
         alloy:
+          mounts:
+            varlog: true
           configMap:
             content: |
               discovery.kubernetes "pod" {
@@ -56,10 +63,22 @@ spec:
                   target_label = "job"
                   separator = "/"
                 }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+                  action = "replace"
+                  target_label = "__path__"
+                  separator = "/"
+                  replacement = "/var/log/pods/*$1/*.log"
+                }
               }
 
-              loki.source.kubernetes "pod_logs" {
-                targets    = discovery.relabel.pod_logs.output
+              local.file_match "pod_logs" {
+                path_targets = discovery.relabel.pod_logs.output
+              }
+
+              loki.source.file "pod_logs" {
+                targets    = local.file_match.pod_logs.targets
                 forward_to = [loki.write.default.receiver]
               }
 
