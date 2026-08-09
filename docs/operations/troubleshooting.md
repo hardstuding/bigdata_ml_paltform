@@ -189,7 +189,15 @@
 不要只做"改一下 git、hard refresh 一次"就假设生效了去看 Pod 状态——Pod 起不来
 的时候,先按上面 1-5 步确认问题出在哪一层,再决定下一步怎么修,能省很多来回。
 
-### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开
+### ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开(已废弃,仅存档)
+
+> **2026-08-09 更新**:下面这套 split-horizon DNS 土办法已经被真正的 Ingress
+> 方案替换掉了(`apps/keycloak-local-access/` 整个目录已删除),现在浏览器和
+> 集群内部都走 `http://keycloak.local-lite.test`,经 ingress-nginx 统一入口,
+> 差别只是浏览器经 `127.0.0.1`(colima 自动转发 80/443,见下面新增的条目),
+> pod 内部经 `hostAliases` 指向 ingress-nginx-controller 的 ClusterIP。这一段
+> 保留是因为如果以后哪个组件暂时没法用 Ingress、又要面对同样的"浏览器和
+> 集群内部地址不一致"问题,这个思路还有参考价值。
 
 - **现象**:点 ArgoCD 的 "LOG IN VIA KEYCLOAK",跳转到类似
   `http://keycloak-keycloakx-http.keycloak.svc.cluster.local/...` 的地址,浏览器报
@@ -248,3 +256,57 @@
 - **现象**:改了 Application 的 `helm.valuesObject`(比如换镜像源)、push 到 git、hard refresh、甚至手动触发 sync,Application 状态一直是 `OutOfSync` + `Running`,`operationState.message` 显示 `waiting for healthy state of apps/Deployment/xxx`,但 `kubectl get deploy -o yaml` 看那个 Deployment 的镜像还是旧的,根本没被更新过。
 - **原因**:组件的 Helm chart 里有依赖 Deployment 先变健康才继续执行的 hook(比如 MinIO 的 `makeBucketJob`,建 bucket 前要等 MinIO 本身跑起来)。如果 Deployment 当前就是坏的(比如镜像拉不下来),ArgoCD 的多阶段同步会卡在"等这一步健康"上,永远等不到,新的镜像值也就没机会被应用下去——典型的先有鸡还是先有蛋。
 - **处理**:先用 `kubectl set image deployment/<name> <container>=<新镜像>` 手动把 Deployment 改成能跑起来的状态,打破这个死锁。等它变健康,ArgoCD 的 selfHeal 会自动接管,后续的 hook(如建 bucket 的 Job)也能正常触发,不用手动全部做完——通常再手动 sync 一次让 hook Job 重跑就行,不需要额外处理。
+
+### colima 会自动把 k3s LoadBalancer 的 80/443 转发到 Mac 的 localhost
+
+- **发现**:装完 ingress-nginx 后,`kubectl get svc -n ingress-nginx` 显示
+  `EXTERNAL-IP` 是 `192.168.5.1`(colima VM 内部网关地址,Mac 直接访问不通),
+  一开始以为还要另外配端口转发才能从 Mac 访问 Ingress。实测发现 `curl
+  http://localhost/` 直接就有响应(404,ingress-nginx 默认后端)——colima 的
+  docker runtime 会自动把容器/k3s service 暴露的标准端口(80/443)转发到 Mac
+  的 `localhost`,不需要额外的 `kubectl port-forward` 或手动端口映射。
+- **意义**:local-lite 可以用"真实 Ingress + `/etc/hosts` 静态域名"的方式访问
+  所有走 Ingress 的组件,不再需要给每个组件单独开 `port-forward`。域名约定是
+  `<组件>.local-lite.test`,在 `/etc/hosts` 加一行 `127.0.0.1 <组件>.local-lite.test`
+  即可,见 `docs/decisions/016-ingress-domains-local-lite.md`。
+- **调试技巧**:不想每次都改 `/etc/hosts` 也能验证 Ingress 路由对不对,直接用
+  `curl -H "Host: <域名>" http://localhost/<path>` 伪造 Host 头,效果和真的
+  配了 DNS 一样,不影响 Mac 系统配置。
+
+### Keycloak start-dev 自带的 H2 是内存/临时数据库,pod 重启就把 realm 全部丢光
+
+- **现象**:colima 停机重启一次(比如隔天再打开电脑),ArgoCD 显示所有
+  Application 都是 `Synced`/`Healthy`,包括 `keycloak`,但打开 ArgoCD/Grafana
+  的登录页,Keycloak 登录选项要么消失要么点了报错。用 `kcadm.sh get realms/platform`
+  查发现 realm 直接不存在了。
+- **原因**:`platform/apps/keycloak.yaml` 一开始为了图省事,只写了
+  `args: ["start-dev"]`,没配 `database`,keycloakx chart 默认落到自带的 H2
+  数据库,数据存在容器内存/临时文件系统里,pod 一重启(不管是 OOM、节点重启,
+  还是简单的 `colima stop` 再 `colima start`)就清空。ArgoCD 只关心
+  Deployment/StatefulSet 是不是 Ready,不知道"里面的业务数据被清空了"这种事,
+  所以看着一直是 Healthy,具有很强的欺骗性。
+- **处理**:改成接共享 Postgres(和 hive-metastore/mlflow 等组件一样,见
+  `apps/postgres/`),`database.vendor: postgres` + `existingSecret` 指向
+  `keycloak-db`(`apps/keycloak-db-init/` 负责建库建用户,模式和
+  `apps/mlflow/manifests/create-db-job.yaml` 一样)。落盘之后 pod 重启不再丢数据。
+- **教训**:任何"看起来只是跑个 demo"的组件,只要它自己攒了状态(realm、
+  用户、配置),就不能假设临时/内存存储没关系——`ArgoCD Healthy` 只保证
+  进程活着,不保证数据还在,这两者是完全不同层面的健康。
+
+### bash 脚本用 `set -euo pipefail`,给不存在的东西 `grep` 会让脚本"悄悄卡住"
+
+- **现象**:`scripts/03-configure-keycloak.sh` 跑到 `==> argocd client` 这一行
+  之后就没有任何输出了,也不报错,脚本进程已经退出(`$?` 是 0 是因为外层套了
+  `| tee`,拿到的是 `tee` 的退出码,不是脚本自己的)。
+- **原因**:`existing=$(kcadm get clients ... | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')`
+  这种写法,在 client 还不存在时(全新 realm 第一次跑),`grep -o` 找不到匹配会
+  返回非零。`pipefail` 让整条管道的退出码变成非零,而这个管道又是在给变量赋值
+  (`existing=$(...)`),`set -e` 对"命令替换赋值"整体是否失败也会生效——直接
+  终止脚本,且不打印任何错误信息,表现就是"卡在某一行不动了"。
+- **处理**:在这类"找不到是正常情况,不是错误"的管道末尾加 `|| true`,把
+  "没找到"和"真正的命令失败"区分开。这不是绕过错误检查,是本来就该有的
+  容错——`grep` 找不到匹配本身就是预期会发生的正常分支,不该被当成脚本级别
+  的致命错误。
+- **教训**:`set -euo pipefail` 是好习惯,但每次写 `x=$(cmd_a | grep ... | cmd_b)`
+  这种"grep 可能合理地找不到东西"的管道时,要主动想一下"找不到"算不算失败,
+  算的话让它正常报错退出,不算的话显式 `|| true`,不要让它随机地看运气。

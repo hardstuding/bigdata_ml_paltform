@@ -32,7 +32,8 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 - ✅ Phase 2(数据工程,配置已验证、当前收在 `environments/cloud-full/pending-definitions/`):Kafka(Strimzi)、Spark Operator、Airflow、SeaTunnel、Trino、Superset
 - ✅ OpenMetadata + OpenSearch:已验证 web 应用正常响应。Postgres 后端(不用默认 MySQL),采集编排用官方 k8s 模式(不用 Airflow,见 ADR)
 - ✅ MLflow:官方 OCI chart,已验证 health check + 真实建实验 API 调用,Postgres 后端 + MinIO 存 artifact
-- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分)——当前优先级转向"打通已验证组件之间的关系"而不是继续加新组件,见 `docs/decisions/`
+- ✅ 真实 Ingress + 域名(`<组件>.local-lite.test`,见 ADR-016):ArgoCD、Keycloak、Grafana 已切换,不再用 port-forward。Keycloak 顺手接上了共享 Postgres(之前的临时 H2 一重启就把 realm 全部丢光)
+- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);Trino/Superset/OpenMetadata/MLflow 的 Ingress 域名 + Keycloak SSO(下一步);端到端 demo 链路;用户行为日志分析——当前优先级是"打通已验证组件之间的关系",不是继续加新组件,见 `docs/decisions/`
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 
