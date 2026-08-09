@@ -41,10 +41,14 @@ spec:
         # apache/superset 官方镜像默认不带 postgres 驱动(psycopg2),chart
         # 默认的 bootstrapScript 也不装,踩过一次坑(ModuleNotFoundError:
         # No module named 'psycopg2'),这是接外部 Postgres 时的常见已知问题。
+        # authlib 是这次接 Keycloak OAuth2 才发现也不在基础镜像里——
+        # AUTH_TYPE = AUTH_OAUTH 这条路径 import 的时候才报
+        # ModuleNotFoundError: No module named 'authlib',启动阶段的
+        # bootstrapScript 之前完全测不出来,只有真的启用 OAuth 才会暴露。
         bootstrapScript: |
           #!/bin/bash
           if [ ! -f ~/bootstrap ]; then
-            /app/docker/pip-install.sh psycopg2-binary
+            /app/docker/pip-install.sh psycopg2-binary authlib
             echo "Running Superset with uid 0" > ~/bootstrap
           fi
         postgresql:
