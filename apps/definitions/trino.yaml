@@ -1,0 +1,72 @@
+# 官方 trinodb/charts,没有 Bitnami 依赖。local-lite 用 coordinator-only 模式
+# (server.workers: 0,coordinator 顺带干 worker 的活),真正给作业用的规模
+# 到 cloud-full 再拆成独立 worker。
+#
+# iceberg catalog 接的是 apps/hive-metastore + apps/minio,S3 密钥不写死在
+# values 里(公开仓库),通过 env 注入 + Trino 自带的 ${ENV:VAR} 语法引用,
+# 见 https://trino.io/docs/current/security/secrets.html。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trino
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://trinodb.github.io/charts
+    chart: trino
+    targetRevision: 1.42.2
+    helm:
+      valuesObject:
+        server:
+          workers: 0
+          config:
+            query:
+              maxMemory: "1GB"
+        coordinator:
+          jvm:
+            maxHeapSize: "1536m"
+          config:
+            nodeScheduler:
+              includeCoordinator: true
+            query:
+              maxMemoryPerNode: "1GB"
+          resources:
+            requests:
+              cpu: 300m
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+        env:
+          - name: MINIO_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootUser
+          - name: MINIO_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootPassword
+        catalogs:
+          iceberg: |
+            connector.name=iceberg
+            iceberg.catalog.type=hive_metastore
+            hive.metastore.uri=thrift://hive-metastore.data.svc.cluster.local:9083
+            fs.native-s3.enabled=true
+            s3.endpoint=http://minio.minio.svc.cluster.local:9000
+            s3.region=us-east-1
+            s3.path-style-access=true
+            s3.aws-access-key=${ENV:MINIO_ACCESS_KEY}
+            s3.aws-secret-key=${ENV:MINIO_SECRET_KEY}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trino
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
