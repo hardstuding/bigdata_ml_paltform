@@ -42,7 +42,10 @@ fi
 create_client_if_absent() {
   local client_id="$1" redirect_uris="$2" secret_ns="$3" secret_name="$4" secret_key="$5"
   local existing
-  existing=$(kcadm get clients -r platform -q clientId="$client_id" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')
+  # 客户端不存在时 grep 找不到匹配会返回非零,配合 pipefail 会直接把整个脚本
+  # 打断(而且不报错,看起来像是卡住了)。用 `|| true` 把"没找到"当成正常情况,
+  # 不是失败——这是本来就该有的容错,不是绕过真正的错误。
+  existing=$(kcadm get clients -r platform -q clientId="$client_id" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -n "$existing" ]; then
     echo "client ${client_id} 已存在,只同步 redirectUris,不轮换密钥"
     kcadm update "clients/${existing}" -r platform -s "redirectUris=${redirect_uris}"
@@ -71,7 +74,7 @@ echo "==> argocd client"
 # TLS,由 ingress-nginx 接 http 明文流量(见 platform/bootstrap/argocd-values.yaml),
 # 不是随手改的。
 ARGOCD_REDIRECT_URIS='["http://argocd.local-lite.test/auth/callback","http://argocd.local-lite.test/*"]'
-argocd_client_id=$(kcadm get clients -r platform -q clientId=argocd --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')
+argocd_client_id=$(kcadm get clients -r platform -q clientId=argocd --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
 if [ -n "$argocd_client_id" ]; then
   echo "client argocd 已存在,跳过创建(只同步 redirectUris,不轮换密钥)"
   kcadm update "clients/${argocd_client_id}" -r platform -s "redirectUris=${ARGOCD_REDIRECT_URIS}"
