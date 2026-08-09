@@ -20,6 +20,17 @@ spec:
     targetRevision: 0.1.0
     helm:
       valuesObject:
+        server:
+          value_options:
+            host: "0.0.0.0"
+            port: 5000
+            workers: 4
+            # MLflow 3.x 加了个安全中间件,默认只认 localhost 发起的请求,
+            # k8s 的健康检查是从 pod IP 直接访问,会被这层拒绝
+            # (readiness probe 报 connection refused,其实进程是正常起来
+            # 的,不是真的连不上)。开放所有 host 访问,local-lite 场景下
+            # 这层 pod 本来就只能在集群内部访问,不算暴露风险。
+            allowed_hosts: "*"
         mlflow:
           backendStoreUriFrom:
             secretKeyRef:
