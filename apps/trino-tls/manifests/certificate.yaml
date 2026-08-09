@@ -1,0 +1,21 @@
+# Trino OAuth2 认证硬性要求它自己的 HTTPS 监听器打开(不是浏览器可见的证书,
+# 只是 ingress-nginx 到 Trino coordinator 之间集群内部这一跳,ingress-nginx
+# 默认不校验后端证书,自签名够用)。additionalOutputFormats.CombinedPEM 让
+# cert-manager 直接生成一份 cert+key 拼在一起的 PEM 文件(key 名固定是
+# "key+crt.pem"),Trino 支持直接把这种合并 PEM 当 keystore 用,不用转成
+# JKS/PKCS12。
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: trino-tls
+  namespace: trino
+spec:
+  secretName: trino-tls
+  issuerRef:
+    name: local-lite-selfsigned
+    kind: ClusterIssuer
+  dnsNames:
+    - trino.local-lite.test
+    - trino.trino.svc.cluster.local
+  additionalOutputFormats:
+    - type: CombinedPEM

@@ -93,6 +93,10 @@ fi
 echo "==> grafana client"
 create_client_if_absent grafana '["http://grafana.local-lite.test/login/generic_oauth"]' monitoring grafana-oidc-secret clientSecret
 
+echo "==> trino client"
+# Trino OAuth2 的回调路径固定是 /oauth2/callback,不能改。
+create_client_if_absent trino '["http://trino.local-lite.test/oauth2/callback"]' trino trino-oidc-secret clientSecret
+
 echo "==> 初始登录用户: ${INITIAL_USER}"
 if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/null | grep -q '"id"'; then
   echo "已存在,跳过(不会重置密码)"

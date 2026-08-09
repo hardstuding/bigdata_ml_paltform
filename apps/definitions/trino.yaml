@@ -5,6 +5,14 @@
 # iceberg catalog 接的是 apps/hive-metastore + apps/minio,S3 密钥不写死在
 # values 里(公开仓库),通过 env 注入 + Trino 自带的 ${ENV:VAR} 语法引用,
 # 见 https://trino.io/docs/current/security/secrets.html。
+#
+# OAuth2 登录:Trino 的 OAuth2 认证硬性要求自己开 HTTPS 监听器(不像
+# ArgoCD/Grafana 可以完全交给 ingress 边缘终结),证书来自 apps/trino-tls/
+# (cert-manager 自签,见 docs/decisions/016)。Ingress 也在 apps/trino-tls/
+# 里手写(chart 自带的 ingress.enabled 硬编码只转发到 8080/http,没法指到
+# 我们要用的 8443/https,helm template 验证过),不用这份 chart 自己的
+# ingress 配置(留 false)。ingress-nginx 默认不校验后端证书,自签名不影响
+# 浏览器侧(浏览器全程只跟 ingress-nginx 打 HTTP 交道)。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -25,6 +33,24 @@ spec:
           config:
             query:
               maxMemory: "1GB"
+            authenticationType: OAUTH2
+            https:
+              enabled: true
+              port: 8443
+              keystore:
+                path: /etc/trino/tls/key+crt.pem
+        additionalConfigProperties:
+          - http-server.http.enabled=false
+          - http-server.authentication.oauth2.issuer=http://keycloak.local-lite.test/auth/realms/platform
+          - http-server.authentication.oauth2.client-id=trino
+          - http-server.authentication.oauth2.client-secret=${ENV:OAUTH2_CLIENT_SECRET}
+          - http-server.authentication.oauth2.oidc.discovery=true
+          - http-server.authentication.oauth2.principal-field=preferred_username
+        secretMounts:
+          - name: trino-tls
+            secretName: trino-tls
+            path: /etc/trino/tls/key+crt.pem
+            subPath: key+crt.pem
         coordinator:
           jvm:
             maxHeapSize: "1536m"
@@ -50,6 +76,11 @@ spec:
               secretKeyRef:
                 name: minio-root
                 key: rootPassword
+          - name: OAUTH2_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: trino-oidc-secret
+                key: clientSecret
         catalogs:
           iceberg: |
             connector.name=iceberg
