@@ -1,6 +1,6 @@
-# k3s 自带的 CoreDNS Corefile 里已经有 `import /etc/coredns/custom/*.override`
-# (kube-system/coredns ConfigMap,不用我们管),这是 k3s 官方留的自定义 DNS
-# 入口,不用改动 CoreDNS 主配置。
+# k3s 自带的 CoreDNS Corefile 里已经有 `import /etc/coredns/custom/*.server`
+# 和 `import /etc/coredns/custom/*.override`(kube-system/coredns ConfigMap,
+# 不用我们管),这是 k3s 官方留的自定义 DNS 入口,不用改动 CoreDNS 主配置。
 #
 # 背景:*.local-lite.test 这些域名只在 Mac 的 /etc/hosts 里配了,集群内部的
 # pod 完全不认识,任何需要主动发起 OIDC discovery(fetch
@@ -21,11 +21,20 @@ metadata:
   name: coredns-custom
   namespace: kube-system
 data:
-  local-lite.override: |
-    hosts {
-      10.43.102.204 argocd.local-lite.test
-      10.43.102.204 keycloak.local-lite.test
-      10.43.102.204 grafana.local-lite.test
-      10.43.102.204 trino.local-lite.test
-      fallthrough
+  # 用 *.server(不是 *.override!)：k3s 默认 Corefile 的主 `.:53` 块里已经有
+  # 一个 `hosts /etc/coredns/NodeHosts {...}`,CoreDNS 不允许同一个 server
+  # block 里出现两个 hosts 插件实例(实测报错 "this plugin can only be used
+  # once per Server Block")。`*.server` 文件是在主 block **外面**导入的,
+  # 相当于新开一个专门服务 local-lite.test 这个 zone 的独立 server block,
+  # 不会跟主 block 的 hosts 插件冲突,CoreDNS 按最长后缀匹配自动把
+  # *.local-lite.test 的查询路由到这个 block。
+  local-lite.server: |
+    local-lite.test:53 {
+      hosts {
+        10.43.102.204 argocd.local-lite.test
+        10.43.102.204 keycloak.local-lite.test
+        10.43.102.204 grafana.local-lite.test
+        10.43.102.204 trino.local-lite.test
+        fallthrough
+      }
     }
