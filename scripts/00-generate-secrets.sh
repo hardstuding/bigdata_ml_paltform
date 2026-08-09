@@ -126,12 +126,12 @@ ensure_secret data superset-db username=superset password=RANDOM
 # Redis/Celery 整体关掉了(local-lite 简化),但 wait-for-postgres 这类
 # initContainer 的 envFrom 是硬编码引用这一个 Secret 的,缺了 key 数量不对
 # 也无所谓,占位值不会被用到。
-if kubectl -n superset get secret superset-config >/dev/null 2>&1; then
-  echo "已存在,跳过: superset/superset-config"
+if kubectl -n superset get secret superset-db-secrets >/dev/null 2>&1; then
+  echo "已存在,跳过: superset/superset-db-secrets"
 else
   SUPERSET_DB_PW=$(kubectl -n data get secret superset-db -o jsonpath='{.data.password}' | base64 -d)
   SUPERSET_SECRET_KEY=$(openssl rand -base64 42)
-  kubectl -n superset create secret generic superset-config \
+  kubectl -n superset create secret generic superset-db-secrets \
     --from-literal=DB_USER=superset \
     --from-literal=DB_PASS="$SUPERSET_DB_PW" \
     --from-literal=DB_HOST=postgres.data.svc.cluster.local \
@@ -145,7 +145,7 @@ else
     --from-literal=REDIS_DB=1 \
     --from-literal=REDIS_CELERY_DB=0 \
     --from-literal=REDIS_PROTO=redis
-  echo "已创建: superset/superset-config"
+  echo "已创建: superset/superset-db-secrets"
 fi
 
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"

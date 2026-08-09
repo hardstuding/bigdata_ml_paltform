@@ -36,7 +36,7 @@ spec:
           enabled: false
         cache:
           enabled: false
-        envFromSecret: superset-config
+        envFromSecret: superset-db-secrets
         init:
           loadExamples: false
           resources:
