@@ -75,6 +75,8 @@ spec:
                 secretKeyRef:
                   name: minio-root
                   key: rootPassword
+            - name: HADOOP_CONF_DIR
+              value: /opt/hive/conf
             - name: SERVICE_OPTS
               value: >-
                 -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
