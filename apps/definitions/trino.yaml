@@ -46,6 +46,7 @@ spec:
           - http-server.authentication.oauth2.client-secret=${ENV:OAUTH2_CLIENT_SECRET}
           - http-server.authentication.oauth2.oidc.discovery=true
           - http-server.authentication.oauth2.principal-field=preferred_username
+          - internal-communication.shared-secret=${ENV:INTERNAL_SHARED_SECRET}
         secretMounts:
           - name: trino-tls
             secretName: trino-tls
@@ -81,6 +82,11 @@ spec:
               secretKeyRef:
                 name: trino-oidc-secret
                 key: clientSecret
+          - name: INTERNAL_SHARED_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: trino-internal-secret
+                key: secret
         catalogs:
           iceberg: |
             connector.name=iceberg

@@ -120,6 +120,11 @@ else
   echo "已创建: airflow/airflow-metadata"
 fi
 
+# Trino 开了 OAuth2 认证之后,即使是单节点 coordinator-only(没有独立
+# worker),启动时也会强制校验 internal-communication.shared-secret 配了没有
+# (报 "Shared secret is required when authentication is enabled"),不是可选项。
+ensure_secret trino     trino-internal-secret secret=RANDOM
+
 ensure_secret data superset-db username=superset password=RANDOM
 
 # Superset chart 默认把 DB_USER/DB_PASS/SUPERSET_SECRET_KEY 这些当明文写进
