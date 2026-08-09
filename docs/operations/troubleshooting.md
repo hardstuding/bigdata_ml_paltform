@@ -349,3 +349,34 @@
   互相找对方的组件都会连不上),动手前最好先本地/文档确认清楚扩展机制,
   改完立刻验证(`kubectl get pods -n kube-system -l k8s-app=kube-dns`),
   别的组件跟着重启排查之前先确认 CoreDNS 自己是不是先健康的。
+
+### OpenMetadata 改了 OIDC 环境变量,`/api/v1/system/config/auth` 还是显示旧的 basic 认证
+
+- **现象**:`apps/definitions/openmetadata.yaml` 里 `openmetadata.config.authentication.*`
+  改成了 Keycloak OIDC 配置,ArgoCD 也确认 Synced,进容器 `crictl exec ... env`
+  也能看到 `AUTHENTICATION_PROVIDER=custom-oidc` 等环境变量都是对的,但打
+  `/api/v1/system/config/auth` 这个 API,返回的还是 `"provider":"basic"`、
+  `"authority":"https://accounts.google.com"` 这些默认值,而且不是偶发,
+  反复请求结果一样。
+- **原因**:OpenMetadata 只在 `openmetadata_db` 这个数据库**第一次初始化**时,
+  把 env var 算出来的认证配置写进 `openmetadata_settings` 表(`configType =
+  'authenticationConfiguration'` 那一行,存的是一整块 JSON)。**之后每次
+  启动都是数据库里的这份 JSON 说了算,不会再重新读 env var**。这台机器上
+  `openmetadata_db` 是很早一次会话验证 basic 认证时建的,里面已经有数据,
+  这次改 env var 只是改了"新建时的默认值",对已存在的数据库不生效——查
+  `SELECT json FROM openmetadata_settings WHERE configType='authenticationConfiguration'`
+  能直接看到数据库里存的是哪份配置,不用猜。
+- **处理**:这台机器上是纯测试数据,直接 `DROP DATABASE openmetadata_db` +
+  重建(**这是破坏性操作,执行前问过用户**,见 ADR 相关记录),让它从空库
+  重新初始化。生产环境如果真的要改认证方式,不能这么干,需要研究 OpenMetadata
+  有没有提供"强制用 env var 重新覆盖 settings 表"的 CLI/API,这次没往这个
+  方向查(local-lite 阶段直接重建更快),留给以后真的要在有数据的库上切换
+  认证方式时再查。
+- **连带的坑**:重建空库之后,`openmetadata-ops.sh migrate`(建 OpenMetadata
+  自己的表)会跑成功,但 App 主进程启动时可能报
+  `relation "act_ge_property" does not exist`(Flowable 治理工作流引擎自己的
+  表,不属于 OpenMetadata 自己的 schema migration 范围)导致 CrashLoopBackOff。
+  实测这次重试(删 Pod 重建)后就自己好了,像是 Flowable 自己的 schema
+  自动建表在第一次启动时偶发没跟上(不确定是不是这台机器内存紧张、
+  swap 严重时 JVM 启动变慢导致的时序问题),不是每次都复现,遇到先重启
+  一次 Pod 看看,不用一开始就当成需要深入排查的硬故障。
