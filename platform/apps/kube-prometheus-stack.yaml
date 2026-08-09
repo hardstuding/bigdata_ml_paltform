@@ -64,6 +64,14 @@ spec:
               role_attribute_path: "'Admin'"
           persistence:
             enabled: false
+          # 集中日志(见 platform/apps/loki.yaml),这样 Grafana 里指标
+          # (Prometheus)和日志(Loki)能在同一个界面查,不用切换工具。
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              access: proxy
+              url: http://loki.monitoring.svc.cluster.local:3100
+              isDefault: false
           ingress:
             enabled: true
             ingressClassName: nginx

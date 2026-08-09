@@ -1,0 +1,76 @@
+# 集中日志(架构缺口清单里提过的一条:这次调试全程靠一个个 kubectl
+# logs/crictl logs 查,没有集中日志聚合)。官方 grafana/loki chart,
+# SingleBinary 模式(local-lite 单节点,不需要 SimpleScalable/Distributed
+# 那种需要对象存储的模式)。
+#
+# useTestSchema: true——不是"测试用不能用于真实场景"的意思,是 chart 自己
+# 提供的一个开箱即用 schema_config 预设(v13/tsdb),不用手写 schema_config
+# 那一大段(官方文档原话:主要用于快速验证,没有独立的存储生命周期管理,但
+# 数据本身是真实落盘的,不是内存态)。和 kube-prometheus-stack 里 Prometheus
+# 关掉持久化、缩短 retention 是同一个"local-lite 不追求生产级可靠性,先验证
+# 链路能跑通"的取舍。
+#
+# chunksCache/resultsCache(chart 默认各带一个 memcached)关掉——默认值给
+# chunks-cache 分配的内存是 8Gi,这台机器的量级完全不需要,开着反而先把内存
+# 打爆。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    targetRevision: 7.2.0
+    helm:
+      valuesObject:
+        deploymentMode: SingleBinary
+        loki:
+          auth_enabled: false
+          useTestSchema: true
+          commonConfig:
+            replication_factor: 1
+          storage:
+            type: filesystem
+        singleBinary:
+          replicas: 1
+          persistence:
+            enabled: true
+            size: 2Gi
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
+        chunksCache:
+          enabled: false
+        resultsCache:
+          enabled: false
+        gateway:
+          enabled: false
+        test:
+          enabled: false
+        lokiCanary:
+          enabled: false
+        minio:
+          enabled: false
+        backend:
+          replicas: 0
+        read:
+          replicas: 0
+        write:
+          replicas: 0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

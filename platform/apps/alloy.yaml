@@ -1,0 +1,85 @@
+# 采日志送到 Loki 的 agent。用官方 Grafana Alloy,不用 Promtail——Promtail 已经
+# EOL(2026-03-02 停止维护,官方明确建议迁移到 Alloy),这时候再新装一个
+# Promtail 等于一上线就是要迁移的技术债,没有理由不直接用 Alloy。
+#
+# 用 loki.source.kubernetes(不是 loki.source.file + hostPath 挂载 /var/log/pods
+# 那种传统做法)——它是通过 Kubernetes API 拉日志,不需要 hostPath,也就不用
+# 处理"这台 colima 虚拟机的日志文件实际路径和 chart 默认假设的路径对不对得上"
+# 这类环境细节。default RBAC(chart 自带)已经包含这个组件需要的
+# pods/log 权限,不用额外加。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: 1.11.1
+    helm:
+      valuesObject:
+        alloy:
+          configMap:
+            content: |
+              discovery.kubernetes "pod" {
+                role = "pod"
+              }
+
+              discovery.relabel "pod_logs" {
+                targets = discovery.kubernetes.pod.targets
+
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  action = "replace"
+                  target_label = "namespace"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  action = "replace"
+                  target_label = "pod"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_name"]
+                  action = "replace"
+                  target_label = "container"
+                }
+
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+                  action = "replace"
+                  target_label = "job"
+                  separator = "/"
+                }
+              }
+
+              loki.source.kubernetes "pod_logs" {
+                targets    = discovery.relabel.pod_logs.output
+                forward_to = [loki.write.default.receiver]
+              }
+
+              loki.write "default" {
+                endpoint {
+                  url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+                }
+              }
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
