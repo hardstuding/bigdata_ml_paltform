@@ -45,10 +45,19 @@ spec:
         # AUTH_TYPE = AUTH_OAUTH 这条路径 import 的时候才报
         # ModuleNotFoundError: No module named 'authlib',启动阶段的
         # bootstrapScript 之前完全测不出来,只有真的启用 OAuth 才会暴露。
+        #
+        # trino 这个包是 SQLAlchemy 的 trino:// dialect,Superset 要把 Trino
+        # 当数据源接进来(SQL Lab / 建 Dataset / 画 Dashboard)才需要,不装的话
+        # 添加数据源那一步会报 "Could not load database driver"。这不是
+        # Superset 自己连元数据库用的,是给 Superset 连**其他**业务数据库用的,
+        # 每接一种新数据源(以后可能还要 ClickHouse/Doris/MySQL 等)大概率都要
+        # 在这里补一个对应的 SQLAlchemy dialect 包,踩到就加,参考
+        # docs/operations/troubleshooting.md 里 psycopg2/authlib 那条记录的
+        # 处理方式。
         bootstrapScript: |
           #!/bin/bash
           if [ ! -f ~/bootstrap ]; then
-            /app/docker/pip-install.sh psycopg2-binary authlib
+            /app/docker/pip-install.sh psycopg2-binary authlib trino
             echo "Running Superset with uid 0" > ~/bootstrap
           fi
         postgresql:

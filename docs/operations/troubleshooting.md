@@ -117,6 +117,13 @@
   "按需装包"的模式下,每接一个新功能(数据库驱动、认证方式、以后可能的
   缓存后端)都可能暴露一个新的缺包,不是一次装完就一劳永逸,踩到就加,
   不用因为"上次刚修过一个"就觉得这次不该出现同类问题。
+- **2026-08-10 再复现,这次是"连接哪个数据源"层面**:同一个规律不只出现在
+  Superset 自己连元数据库/认证这些内建功能上——**给 Superset 添加一个新的业务
+  数据源(SQL Lab 里连 Trino/ClickHouse/MySQL 等)也是同一套"缺哪个 SQLAlchemy
+  dialect 包就报哪个 ModuleNotFoundError / Could not load database driver"**,
+  同样要在 `bootstrapScript` 里补对应的包(Trino 是 `trino`,ClickHouse 通常是
+  `clickhouse-connect`,MySQL 是 `mysqlclient` 或 `pymysql`,以此类推)。这是
+  接入新数据源清单里必须提前想到的一步,不是等报错了才知道要加。
 
 ### Helm Application 手动 patch 过 Deployment 之后,ArgoCD 卡住不再应用新的 git 变更
 
