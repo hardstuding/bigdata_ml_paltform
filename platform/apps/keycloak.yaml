@@ -1,6 +1,12 @@
-# local-lite: 用 start-dev 模式(内置临时 H2 数据库),够用来验证 OIDC 打通。
-# cloud-full/prod 起需要切到外部 Postgres + start(生产模式),到时候在
-# environments/ 里覆盖这份 values,不改这个文件的结构。
+# 2026-08-09 教训:一开始用 start-dev 自带的临时 H2,colima/pod 重启一次就把
+# platform realm 和所有 OIDC client 全部清空(H2 数据不落盘),ArgoCD/Grafana
+# 的登录跟着失效,而且这个丢失是静默的——ArgoCD Application 依然显示 Healthy,
+# 因为它管的是 Deployment 起没起来,不知道内容(realm)被吃了。改成接共享
+# Postgres(和 hive-metastore/mlflow 等其他组件一样的库,见 apps/postgres/),
+# 数据落盘,不再怕重启。DB 由 apps/keycloak-db-init 建,见那边的 create-db-job.yaml。
+# 仍然保留 start-dev 参数(只是放开了 hostname 严格校验等开发期便利,不代表用
+# 临时数据库,--db 可以单独指定为 postgres),cloud-full/prod 再切到 start
+# (生产模式)。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -36,6 +42,14 @@ spec:
             value: "false"
           - name: KC_PROXY_HEADERS
             value: "xforwarded"
+        database:
+          vendor: postgres
+          hostname: postgres.data.svc.cluster.local
+          port: 5432
+          database: keycloak
+          username: keycloak
+          existingSecret: keycloak-db
+          existingSecretKey: password
         resources:
           requests:
             cpu: 200m

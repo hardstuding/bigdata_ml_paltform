@@ -80,6 +80,9 @@ echo "==> 生成/创建 Secret(已存在的不会重新生成,不会轮换密码
 echo "# $(date -u +%FT%TZ) 生成的凭据,不要提交到 git" >> "$OUT_FILE"
 
 ensure_secret keycloak    keycloak-admin    username=admin    password=RANDOM
+# 和 mlflow-db-secret 一个模式:直接建在 keycloak 命名空间,create-db-job 和
+# keycloakx chart 自己都从这一份读,不用跨命名空间复制。
+ensure_secret keycloak    keycloak-db       password=RANDOM
 ensure_secret monitoring  grafana-admin     admin-user=admin  admin-password=RANDOM
 ensure_secret minio       minio-root        rootUser=admin    rootPassword=RANDOM
 ensure_secret data        postgres-root     username=postgres password=RANDOM
@@ -194,7 +197,7 @@ echo "==> 复制 Postgres 管理员凭据到需要建库的命名空间"
 # 各组件的 create-db-job 都是"在自己的命名空间里跑,通过网络连
 # postgres.data.svc.cluster.local",但要用 postgres-root 的密码建库/建用户,
 # 这个 Secret 本身在 data 命名空间,同样跨不过去,复制一份过去。
-POSTGRES_ROOT_CONSUMER_NAMESPACES="openmetadata mlflow"
+POSTGRES_ROOT_CONSUMER_NAMESPACES="openmetadata mlflow keycloak"
 for ns in $POSTGRES_ROOT_CONSUMER_NAMESPACES; do
   copy_secret data "$ns" postgres-root
 done

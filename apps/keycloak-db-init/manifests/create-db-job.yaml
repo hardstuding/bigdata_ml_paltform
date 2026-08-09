@@ -1,0 +1,35 @@
+# 和 mlflow 的 create-db-job.yaml 同样的模式,跑在 keycloak 命名空间,连
+# Postgres 用完整域名,见 docs/operations/troubleshooting.md。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-create-db
+  namespace: keycloak
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: create-db
+          image: postgres:16.6
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-root
+                  key: password
+            - name: KEYCLOAK_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db
+                  key: password
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              psql -h postgres.data.svc.cluster.local -U postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='keycloak'" | grep -q 1 \
+                || psql -h postgres.data.svc.cluster.local -U postgres -c "CREATE USER keycloak WITH PASSWORD '${KEYCLOAK_DB_PASSWORD}';"
+              psql -h postgres.data.svc.cluster.local -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='keycloak'" | grep -q 1 \
+                || psql -h postgres.data.svc.cluster.local -U postgres -c "CREATE DATABASE keycloak OWNER keycloak;"

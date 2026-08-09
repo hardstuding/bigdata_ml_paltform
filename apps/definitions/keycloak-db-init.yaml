@@ -1,0 +1,25 @@
+# Keycloak 是 Phase 0 常驻组件,不像 Phase 2/3 那样会被
+# scripts/local-lite-toggle-heavy.sh 挪进挪出,这个 Job 建完库之后
+# 长期保持 Complete 状态即可,不需要收进 pending-definitions。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak-db-init
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/keycloak-db-init/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
