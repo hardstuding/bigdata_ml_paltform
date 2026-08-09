@@ -118,7 +118,7 @@ else
 fi
 
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"
-MINIO_CONSUMER_NAMESPACES="trino"
+MINIO_CONSUMER_NAMESPACES="trino data"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done

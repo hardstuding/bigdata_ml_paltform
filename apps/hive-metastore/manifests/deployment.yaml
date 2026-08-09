@@ -1,6 +1,11 @@
-# 官方 apache/hive 镜像不带 Postgres JDBC 驱动,用 initContainer 下载一份放进
-# 共享的 emptyDir,再挂到主容器的 /opt/hive/lib/postgres.jar(参考
+# 官方 apache/hive 镜像不带 Postgres JDBC 驱动,也不带连 S3 的 hadoop-aws/
+# awssdk 客户端 jar,两个都用 initContainer 下载(参考
 # https://github.com/apache/hive/blob/master/standalone-metastore/packaging/src/docker/README.md)。
+#
+# S3A 客户端不是"把 HDFS 加回来"——hadoop-aws 只是 Hadoop 文件系统客户端 API
+# 里连 S3 的实现(s3a://),元数据服务本身建 schema/表的时候要验证/创建
+# S3 上的目录,所以也需要这份凭据,不是只有 Trino 需要,见
+# docs/decisions/003-no-hdfs-on-k8s.md。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,6 +33,17 @@ spec:
           volumeMounts:
             - name: jdbc-driver
               mountPath: /drivers
+        - name: fetch-s3a-client
+          image: curlimages/curl:8.11.0
+          command:
+            - sh
+            - -c
+            - |
+              curl -fsSL -o /drivers/hadoop-aws.jar https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.1/hadoop-aws-3.4.1.jar
+              curl -fsSL -o /drivers/awssdk-bundle.jar https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.51.3/bundle-2.51.3.jar
+          volumeMounts:
+            - name: jdbc-driver
+              mountPath: /drivers
       containers:
         - name: hive-metastore
           image: apache/hive:standalone-metastore-4.2.0
@@ -44,16 +60,38 @@ spec:
                 secretKeyRef:
                   name: hive-metastore-db
                   key: password
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootUser
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootPassword
             - name: SERVICE_OPTS
               value: >-
                 -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
                 -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://postgres.data.svc.cluster.local:5432/metastore
                 -Djavax.jdo.option.ConnectionUserName=hive
                 -Djavax.jdo.option.ConnectionPassword=$(HIVE_DB_PASSWORD)
+                -Dfs.s3a.endpoint=http://minio.minio.svc.cluster.local:9000
+                -Dfs.s3a.access.key=$(MINIO_ACCESS_KEY)
+                -Dfs.s3a.secret.key=$(MINIO_SECRET_KEY)
+                -Dfs.s3a.path.style.access=true
+                -Dfs.s3a.connection.ssl.enabled=false
+                -Dfs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
           volumeMounts:
             - name: jdbc-driver
               mountPath: /opt/hive/lib/postgres.jar
               subPath: postgres.jar
+            - name: jdbc-driver
+              mountPath: /opt/hive/lib/hadoop-aws.jar
+              subPath: hadoop-aws.jar
+            - name: jdbc-driver
+              mountPath: /opt/hive/lib/awssdk-bundle.jar
+              subPath: awssdk-bundle.jar
           resources:
             requests:
               cpu: 150m
