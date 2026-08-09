@@ -42,8 +42,17 @@ spec:
             memory: 512Mi
           limits:
             memory: 1024Mi
+        # local-lite:走真实 Ingress,不再靠 apps/keycloak-local-access 那个专用
+        # Service + 端口转发。/auth 前缀是 chart 自己保留的旧路径约定(见
+        # docs/operations/troubleshooting.md),不是随手加的。
         ingress:
-          enabled: false
+          enabled: true
+          ingressClassName: nginx
+          rules:
+            - host: keycloak.local-lite.test
+              paths:
+                - path: /auth/
+                  pathType: Prefix
   destination:
     server: https://kubernetes.default.svc
     namespace: keycloak

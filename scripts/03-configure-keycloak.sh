@@ -44,7 +44,8 @@ create_client_if_absent() {
   local existing
   existing=$(kcadm get clients -r platform -q clientId="$client_id" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')
   if [ -n "$existing" ]; then
-    echo "client ${client_id} 已存在,跳过创建(不会轮换密钥)"
+    echo "client ${client_id} 已存在,只同步 redirectUris,不轮换密钥"
+    kcadm update "clients/${existing}" -r platform -s "redirectUris=${redirect_uris}"
     return
   fi
   local secret
@@ -66,18 +67,20 @@ create_client_if_absent() {
 echo "==> argocd client"
 # ArgoCD 比较特殊:它只认自己 argocd-secret 里的 key 做变量替换(见
 # configs.cm.oidc.config 里的 $oidc.keycloak.clientSecret),不是独立 Secret。
-# 注意 redirectUris 是 https——ArgoCD server 默认自带 TLS(自签证书),写成
-# http 会导致登录报 "Invalid parameter: redirect_uri"(踩过一次,见
-# docs/operations/troubleshooting.md)。
-existing=$(kcadm get clients -r platform -q clientId=argocd --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')
-if [ -n "$existing" ]; then
-  echo "client argocd 已存在,跳过创建"
+# redirectUris 是 http——argocd-server 现在 server.insecure=true,自己不再起
+# TLS,由 ingress-nginx 接 http 明文流量(见 platform/bootstrap/argocd-values.yaml),
+# 不是随手改的。
+ARGOCD_REDIRECT_URIS='["http://argocd.local-lite.test/auth/callback","http://argocd.local-lite.test/*"]'
+argocd_client_id=$(kcadm get clients -r platform -q clientId=argocd --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')
+if [ -n "$argocd_client_id" ]; then
+  echo "client argocd 已存在,跳过创建(只同步 redirectUris,不轮换密钥)"
+  kcadm update "clients/${argocd_client_id}" -r platform -s "redirectUris=${ARGOCD_REDIRECT_URIS}"
 else
   ARGOCD_SECRET="$(gen_password)"
   kcadm create clients -r platform \
     -s clientId=argocd -s enabled=true -s protocol=openid-connect -s publicClient=false \
     -s secret="$ARGOCD_SECRET" \
-    -s 'redirectUris=["https://localhost:8080/auth/callback","https://localhost:8080/*"]' \
+    -s "redirectUris=${ARGOCD_REDIRECT_URIS}" \
     -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
   kubectl -n argocd patch secret argocd-secret --type merge \
     -p "{\"stringData\":{\"oidc.keycloak.clientSecret\":\"${ARGOCD_SECRET}\"}}"
@@ -85,7 +88,7 @@ else
 fi
 
 echo "==> grafana client"
-create_client_if_absent grafana '["http://localhost:3000/login/generic_oauth"]' monitoring grafana-oidc-secret clientSecret
+create_client_if_absent grafana '["http://grafana.local-lite.test/login/generic_oauth"]' monitoring grafana-oidc-secret clientSecret
 
 echo "==> 初始登录用户: ${INITIAL_USER}"
 if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/null | grep -q '"id"'; then

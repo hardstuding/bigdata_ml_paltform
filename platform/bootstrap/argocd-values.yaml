@@ -2,34 +2,41 @@
 # 这是通用部分,任何环境(本机/云/IDC)都适用。本机特有的代理设置拆到
 # argocd-values.local-proxy.yaml,由 scripts/01-bootstrap-argocd.sh 按需叠加,
 # 不要把本机网络的限制带进这个通用文件里。
+#
+# server.insecure=true:让 argocd-server 自己不再起 TLS,改由 ingress-nginx
+# 在边缘终结(local-lite 阶段先不接 TLS,见 docs/decisions/016)。这是官方推荐的
+# "跑在反向代理后面"的标准姿势,不是本地专用的临时妥协,cloud-full/prod 也这样配,
+# 区别只是那边 ingress 会挂真实证书。
 server:
   service:
     type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hostname: argocd.local-lite.test
 
-# 只在 local-lite 需要:ArgoCD 的 OIDC 只支持配一个 issuer,浏览器和集群内部的
-# ArgoCD server pod 都会用它(浏览器用来跳转登录页,pod 自己用来做 token 交换)。
-# 但这两者能到达的地址不一样(浏览器只能走 port-forward,pod 只能走集群内部
-# service)。用 hostAliases 让 "keycloak.local-lite.test" 这个域名在 pod 里解析
-# 到 apps/keycloak-local-access/manifests/service.yaml 建的那个 Service,同时
-# 你自己在 Mac 上把同一个域名指向 127.0.0.1(/etc/hosts),两边用同一个名字
-# 各自解析到各自能到达的地方。
-# cloud-full/prod 有真实域名后,这段 hostAliases 和下面的 issuer 都要删掉/换掉。
+# argocd-server 自己也要向 issuer 发起 OIDC discovery/token 交换请求,不只是
+# 浏览器跳转要用这个域名——集群内部 DNS 不认识 keycloak.local-lite.test 这种
+# 自造域名,用 hostAliases 让它解析到 ingress-nginx 的 ClusterIP,和浏览器走
+# 同一个 Ingress 入口(只是浏览器经 127.0.0.1、pod 内部经集群网络到达同一个
+# Service)。cloud-full/prod 用真实 DNS 后这段要删掉。
 global:
   hostAliases:
-    - ip: 10.43.180.107 # apps/keycloak-local-access 里那个 Service 的 ClusterIP,变了要同步改
+    - ip: 10.43.102.204 # ingress-nginx-controller 的 ClusterIP,变了要同步改
       hostnames:
         - keycloak.local-lite.test
 
 configs:
+  params:
+    server.insecure: true
   cm:
-    # 本地调试用 localhost,注意协议是 https——ArgoCD server 默认自带 TLS
-    # (自签证书),这里如果写成 http 会导致 OIDC 回调报
-    # "Invalid redirect URL: the protocol and host ... must match"。
-    # 以后接了真实域名/ingress 记得同步改成实际外部地址。
-    url: https://localhost:8080
+    # 协议是 http:server.insecure=true 之后 argocd-server 自己不再有 TLS,
+    # 由 ingress-nginx 接收明文流量。cloud-full/prod 接真实域名 + cert-manager
+    # 之后这里要同步改成 https。
+    url: http://argocd.local-lite.test
     oidc.config: |
       name: Keycloak
-      issuer: http://keycloak.local-lite.test:8180/auth/realms/platform
+      issuer: http://keycloak.local-lite.test/auth/realms/platform
       clientID: argocd
       clientSecret: $oidc.keycloak.clientSecret
       requestedScopes: ["openid", "profile", "email"]

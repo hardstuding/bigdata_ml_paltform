@@ -41,17 +41,22 @@ spec:
                 name: grafana-oidc-secret
                 key: clientSecret
           grafana.ini:
+            server:
+              # OAuth 回调地址(redirect_uri)是从 root_url 拼出来的,不写死会
+              # 默认成 localhost:3000(以前端口转发时代的地址),导致回调地址
+              # 和 Keycloak client 里注册的对不上。
+              root_url: http://grafana.local-lite.test/
             auth.generic_oauth:
               enabled: true
               name: Keycloak
               client_id: grafana
               client_secret: $__env{GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET}
               scopes: "openid profile email"
-              # auth_url 是浏览器要跳转去的地址,必须是你电脑能访问到的地址
-              # (本地端口转发是 localhost:8180);token_url/api_url 是 Grafana
-              # 后端自己在集群内部发起的请求,走的是 service 的集群内域名,
-              # 两者不一样是正常的,不是配置错了。
-              auth_url: http://localhost:8180/auth/realms/platform/protocol/openid-connect/auth
+              # auth_url 是浏览器要跳转去的地址,现在走真实 Ingress(见
+              # platform/apps/keycloak.yaml),不再需要额外的端口转发;
+              # token_url/api_url 是 Grafana 后端自己在集群内部发起的请求,
+              # 走 service 的集群内域名,两者不一样是正常的,不是配置错了。
+              auth_url: http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/auth
               token_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/token
               api_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/userinfo
               # local-lite 简化:第一个登录的人自动拿 Admin,人多起来之前要换成
@@ -59,6 +64,11 @@ spec:
               role_attribute_path: "'Admin'"
           persistence:
             enabled: false
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            hosts:
+              - grafana.local-lite.test
           resources:
             requests:
               cpu: 50m
