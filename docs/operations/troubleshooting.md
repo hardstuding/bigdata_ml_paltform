@@ -28,6 +28,7 @@
 - **原因**:这台 Mac 上装的代理工具(从报错特征看是走 Privoxy 的那一类,比如 Surge / ClashX 的增强模式)在**系统网络层**做透明拦截,不是靠进程读 `HTTP_PROXY` 环境变量生效的,所以在 shell 里 unset 代理变量没用——连虚拟机自己发出的流量都被拦了。它把发往 `192.168.5.0/24`(colima 虚拟网络的私网段)这种内网地址的流量也当成"要走代理"处理,但代理软件自己又不知道怎么路由到这种私网地址,所以报错。
 - **需要用户处理的部分(我这边无法从命令行修复)**:在代理工具里给 `192.168.5.0/24`(colima 的虚拟网络段,如果之后网段变了以此类推)、`10.0.0.0/8` 这类私网地址加"直连/不代理"的规则,或者调试期间临时关掉增强模式/TUN 模式。加完规则后 `kubectl logs`/`kubectl exec` 应该就正常了。
 - **临时绕过办法(不需要用户处理时)**:改用不经过这条路径的诊断方式——`kubectl describe`、`kubectl get -o yaml`(看 `.status`/`.status.conditions`)、`kubectl get events`、`kubectl top`、`kubectl auth can-i`,这些都走 API server 的常规请求路径,不受影响。真的需要看容器内部日志时,先怀疑"组件是不是卡死了",直接重启 Pod 往往比死磕日志更快。更彻底的绕过:`colima ssh -- sudo crictl ps -a` 找到容器 ID,`colima ssh -- sudo crictl logs <id>` 直接走本地 containerd socket,完全不碰网络。
+- **2026-08-09 补充**:装 Loki+Alloy 集中日志时,Alloy 的 `loki.source.kubernetes` 组件(通过 K8s API 的 `containerLogs` 接口拉日志,原理和 `kubectl logs` 完全一样)在集群**内部**照样踩了同一个坑——不是只有我本机的 `kubectl` 会被拦,任何组件只要走 API server -> kubelet 这条 `containerLogs` 代理路径,都会被同样拦截。这进一步确认了上面"连虚拟机自己发出的流量都被拦"的判断。处理方式是从设计上完全绕开这条路径,见下面 Alloy 那条记录,不是加代理白名单就能一劳永逸解决的(因为拦截规则的具体网段/范围不受我们控制)。
 
 ### 某些镜像仓库(如 quay.io)在这个网络下连不上,但 docker hub 是通的
 
@@ -405,3 +406,25 @@
 - **教训**:这次在 OpenMetadata 和 MLflow 上各踩了一次,同一个原因、同一个
   修法——凡是"组件在 pending-definitions 和 apps/definitions 之间来回搬动、
   但共享 Postgres 从不重置"这种场景,都要预期可能撞上这个问题,不是特例。
+
+### Alloy 采不到日志:`loki.source.kubernetes` 拉不到数据,换成 hostPath 又报 "no such file or directory"
+
+- **背景**:见 ADR-020。装 Loki + Grafana Alloy 做集中日志采集时连续踩了两个坑。
+- **坑一**:官方更推荐的 `loki.source.kubernetes` 组件一条数据都拉不到,报
+  `Internal Privoxy Error`——这是本机代理拦截问题(见上面那条记录),不是
+  Alloy 配置错误。处理:改用 `discovery.kubernetes`(只拿 pod 元数据做
+  relabel)+ `local.file_match` + `loki.source.file`,日志内容直接从
+  hostPath 挂载的宿主机文件读,不经过 K8s API 的 `containerLogs` 接口。
+- **坑二**:换成 hostPath 之后,虽然 `/var/log/pods/<ns>_<pod>_<uid>/<container>/0.log`
+  这个路径本身是存在的,但 Alloy 报 `stat ...: no such file or directory`。
+  用 `crictl exec ... ls -la` 进容器实际查看才发现:这个 `0.log` 是个
+  **符号链接**,指向 `/var/lib/docker/containers/<容器id>/<容器id>-json.log`——
+  colima 这个 profile 的容器运行时是 docker(用 docker 的 json-file 日志
+  驱动写日志),不是纯 containerd 直接写文件。只挂了 `/var/log` 的话,这条
+  符号链接在容器里指向一个够不着的路径,`stat` 自然失败。处理:Alloy chart
+  的 `alloy.mounts.dockercontainers: true` 把 `/var/lib/docker/containers`
+  也挂进去,两个 mount 都要开(`varlog` + `dockercontainers`),缺一个都不行。
+- **教训**:这类"文件路径存在,但读不到内容"的问题,先用 `crictl exec ...
+  ls -la <path>` 进容器实际看一眼(不要只看宿主机上文件存不存在),符号
+  链接指向哪里一目了然,比看 chart 文档去猜"是不是该开某个 mount 开关"
+  快得多。

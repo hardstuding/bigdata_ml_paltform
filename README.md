@@ -33,7 +33,8 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 - ✅ OpenMetadata + OpenSearch、✅ MLflow:均已验证功能可用,配置收在 `pending-definitions/` 省本地内存
 - ✅ **Keycloak SSO 已经打通 ArgoCD、Grafana、Trino、Superset、OpenMetadata、MLflow 六个组件**,统一登录。踩坑细节见 ADR-017(Trino,原生 OIDC 但强制要求 TLS)、ADR-019(MLflow,没有原生 OIDC,用 oauth2-proxy 挡在前面)、troubleshooting.md(OpenMetadata 的认证配置只在数据库首次初始化时生效、Superset 缺 authlib 包、组件重新拉起来常见的 Postgres 密码漂移问题)。浏览器完整登录待你在自己机器上加好 `/etc/hosts`(`argocd`/`grafana`/`trino`/`superset`/`openmetadata`/`mlflow`.local-lite.test → 127.0.0.1)后自己试一遍
 - ✅ 本地镜像缓存(见 ADR-018):`scripts/list-project-images.py` 扫描出这个项目用到的全部镜像,`scripts/export-image-cache.sh` 导出到本地 `image-cache/`(git-ignored)——为公司内网出不去国外做准备,以后能直接搬这份缓存去内网机器 `docker load` + 推到公司内部仓库,不用重新连国外源拉
-- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);端到端 demo 链路(核心数据流程真正跑通一遍);用户行为日志分析——当前优先级是"打通已验证组件之间的关系",不是继续加新组件,见 `docs/decisions/`
+- ✅ 集中日志(见 ADR-020):Loki(SingleBinary)+ Grafana Alloy,8 个命名空间的日志已经真实进了 Loki,Grafana 加了 Loki 数据源,指标和日志能在同一个界面查。Alloy 踩了两个坑:`loki.source.kubernetes` 被本机代理拦截拉不到数据,改用 hostPath 读日志文件;`/var/log/pods` 里的日志文件是指向 docker 日志驱动实际存储位置的符号链接,要多开一个 mount 才行
+- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);端到端 demo 链路(核心数据流程真正跑通一遍);用户行为日志分析;CI 校验(GitHub Actions 跑 `helm template`/lint,提交前拦一部分这次靠人肉发现的配置错误)——当前优先级是"打通已验证组件之间的关系",不是继续加新组件,见 `docs/decisions/`
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 
