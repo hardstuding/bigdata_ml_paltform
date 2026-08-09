@@ -39,6 +39,11 @@ spec:
             # 明文 HTTP,cookie_secure 默认要求 HTTPS 才会真正下发 cookie,
             # 不关掉的话登录会一直"成功"又立刻被弹回登录页(cookie 没存住)。
             cookie_secure = false
+            # 不加这行,未登录访问会先停在 oauth2-proxy 自己的"Sign In"
+            # 中间页(要点一下按钮才跳 Keycloak),和其他组件(Trino/Superset/
+            # OpenMetadata)点开就直接跳转的体验不一致。只有一个 provider,
+            # 跳过这个中间页更合理。
+            skip_provider_button = true
         ingress:
           enabled: true
           className: nginx
