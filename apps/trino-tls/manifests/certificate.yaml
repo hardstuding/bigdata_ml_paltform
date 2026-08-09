@@ -13,6 +13,10 @@ metadata:
   namespace: trino
 spec:
   secretName: trino-tls
+  # 不写 commonName 的话,自签证书的 issuer DN 是空的,Java 的 X509 解析器
+  # (Trino 用来读 PEM keystore)直接拒绝:CertificateParsingException:
+  # Empty issuer DN not allowed in X509Certificates。实测踩过,不是猜的。
+  commonName: trino.local-lite.test
   issuerRef:
     name: local-lite-selfsigned
     kind: ClusterIssuer
