@@ -47,6 +47,10 @@ spec:
           - http-server.authentication.oauth2.oidc.discovery=true
           - http-server.authentication.oauth2.principal-field=preferred_username
           - internal-communication.shared-secret=${ENV:INTERNAL_SHARED_SECRET}
+          # http-server.http.enabled=false 之后,Trino 算自己的 internal
+          # announcement URI 时找不到 http 端口可用,报 "internalUri is null"
+          # 崩溃启动。加这行让它改用 https 端口算这个内部 URI。
+          - internal-communication.https.required=true
         # 证书文件故意不放在 /etc/trino/ 底下:那整个目录已经是 chart 自己的
         # ConfigMap(config-volume)挂载点,再往它下面嵌套挂一个 Secret 的
         # subPath 文件会导致 kubelet 创建目录失败(实测报 runc "mounting a
