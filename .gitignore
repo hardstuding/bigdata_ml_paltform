@@ -7,3 +7,4 @@ secrets/
 .idea/
 .vscode/
 logs/
+image-cache/
