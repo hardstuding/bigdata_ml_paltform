@@ -33,7 +33,9 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 - ✅ OpenMetadata + OpenSearch:已验证 web 应用正常响应。Postgres 后端(不用默认 MySQL),采集编排用官方 k8s 模式(不用 Airflow,见 ADR)
 - ✅ MLflow:官方 OCI chart,已验证 health check + 真实建实验 API 调用,Postgres 后端 + MinIO 存 artifact
 - ✅ 真实 Ingress + 域名(`<组件>.local-lite.test`,见 ADR-016):ArgoCD、Keycloak、Grafana 已切换,不再用 port-forward。Keycloak 顺手接上了共享 Postgres(之前的临时 H2 一重启就把 realm 全部丢光)
-- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);Trino/Superset/OpenMetadata/MLflow 的 Ingress 域名 + Keycloak SSO(下一步);端到端 demo 链路;用户行为日志分析——当前优先级是"打通已验证组件之间的关系",不是继续加新组件,见 `docs/decisions/`
+- ✅ Trino 接 Keycloak OAuth2 SSO(见 ADR-017):OAuth2 授权跳转已验证(正确的 client_id/redirect_uri),浏览器完整登录待你在自己机器上加好 `/etc/hosts` 后二次确认。踩坑清单里的教训(TLS 强制要求、internal-communication、X-Forwarded 信任)对接下来 Superset/OpenMetadata/MLflow 大概率还会复现。配置已验证、当前收在 `pending-definitions/` 省内存
+- ✅ CoreDNS 自定义解析(`platform/coredns-custom/`):集群内部 pod 现在能统一解析 `*.local-lite.test`,不用再给每个 chart 单独想 hostAliases 的办法
+- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);Superset/OpenMetadata/MLflow 的 Ingress 域名 + Keycloak SSO(下一步,照着 Trino 那份踩坑清单走);端到端 demo 链路;用户行为日志分析——当前优先级是"打通已验证组件之间的关系",不是继续加新组件,见 `docs/decisions/`
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 
