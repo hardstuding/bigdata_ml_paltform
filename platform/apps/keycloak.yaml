@@ -42,6 +42,16 @@ spec:
             value: "false"
           - name: KC_PROXY_HEADERS
             value: "xforwarded"
+          # 审计日志(见 docs/decisions/024):jboss-logging 这个事件监听器
+          # chart 自带,默认就在,只是日志级别不够 + realm 没开事件开关(那个
+          # 开关在 realm 配置里,scripts/03-configure-keycloak.sh 负责开,
+          # 这两个环境变量单独控制"开了之后打印成什么级别")。事件本身就是
+          # 走 Keycloak 自己的应用日志(Quarkus 发行版默认输出到 stdout),
+          # Alloy 已经在采集所有 pod 的 stdout 进 Loki,不需要额外接收端。
+          - name: KC_SPI_EVENTS_LISTENER_JBOSS_LOGGING_SUCCESS_LEVEL
+            value: "info"
+          - name: KC_SPI_EVENTS_LISTENER_JBOSS_LOGGING_ERROR_LEVEL
+            value: "warn"
         database:
           vendor: postgres
           hostname: postgres.data.svc.cluster.local

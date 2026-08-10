@@ -34,10 +34,21 @@ kcadm config credentials --server http://localhost:8080/auth --realm master --us
 
 echo "==> platform realm"
 if kcadm get realms/platform >/dev/null 2>&1; then
-  echo "已存在,跳过"
+  echo "已存在,跳过创建"
 else
   kcadm create realms -s realm=platform -s enabled=true -s displayName="Data+AI Platform"
 fi
+
+# 审计日志(见 docs/decisions/024):登录事件和管理员操作事件默认是关闭的,
+# 光配置 apps/apps/keycloak.yaml 里那两个 JBOSS_LOGGING 日志级别环境变量
+# 没用——那两个只控制"打印成什么级别",这个开关控制"要不要记事件"。
+# 每次跑都无条件 update(不是 create-if-absent),保证配置漂移了也能收敛回来。
+kcadm update realms/platform \
+  -s eventsEnabled=true \
+  -s adminEventsEnabled=true \
+  -s adminEventsDetailsEnabled=true \
+  -s 'eventsListeners=["jboss-logging"]'
+echo "已开启 platform realm 的登录事件 + 管理员事件审计日志"
 
 create_client_if_absent() {
   local client_id="$1" redirect_uris="$2" secret_ns="$3" secret_name="$4" secret_key="$5"
