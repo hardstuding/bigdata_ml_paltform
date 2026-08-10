@@ -87,12 +87,26 @@
 | 0 | 平台底座 | 改一个 values 文件、push,ArgoCD 能自动同步到集群 |
 | 1 | 湖仓核心(local-lite) | ✅ 建一张 Iceberg 表、写入,Trino 读出、Superset 出图(2026-08-10 验证,见 `scripts/08-create-demo-data.sh`);Spark 读出还没做,留到 Spark Operator 真正跑作业时一起验证 |
 | 2 | 数据工程(转 cloud-full) | SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通 |
-| 3 | AI/ML | 模型从 JupyterHub 训练、MLflow 注册、KServe 一键部署成 API |
+| 3 | AI/ML | 模型从 JupyterHub 训练、MLflow 注册、KServe 一键部署成 API;算法/模型 A-B 实验用 KServe 原生的 canary 流量切分(不是单独部署一套产品分析工具,见下面"还没定的事"里 2026-08-11 那条) |
 | 3.5 | AI 闭环验证 | Feast 打通离线/在线特征,接入模型服务 |
 | 4 | 企业化增强(prod) | Harbor + Ranger + 遗留集群正式联邦对接,可作为旧平台替代方案上生产 |
 
 ## 还没定的事
 
+- **2026-08-11,A-B 实验工具的落点**:一开始想的是 PostHog + ClickHouse,
+  调研发现 PostHog 官方已经在 2023-05 不支持 k8s 部署了(只有社区非官方
+  维护的 chart),而且 PostHog 本质是消费端产品分析工具(feature flag、
+  session replay,面向的是网页/App 的终端用户)。跟用户确认后,明确了
+  实际需求是**算法/模型层面的 A-B 实验**(比如比较不同模型版本的效果),
+  不是消费端产品分析,而且目前公司产品/应用侧还没有自己的 A-B 工具——
+  但这类实时流量分配/特征开关的工具天然应该跟着"服务真实用户请求"的应用
+  基础设施走,不适合放进一个做批处理/数仓/BI 的大数据平台里。算法层面的
+  A-B 实验,更自然的落点是 KServe 的 canary 流量切分(Phase 3,原生支持,
+  不需要额外工具做流量分配)+ 复用现有的 MLflow/湖仓链路做效果分析(把
+  "这次请求用的是哪个模型版本"当一个字段记下来,落到 Iceberg 表,用
+  Trino/Superset 分析不同版本的业务指标差异——这条链路 2026-08-10 已经
+  验证过端到端能跑通,见 `scripts/08-create-demo-data.sh` / `scripts/09-train-demo-model.sh`)。
+  不再计划单独部署 PostHog 或者同类产品分析工具。
 - 云服务器什么时候接入、大概配置 —— 决定 Phase 2 什么时候能开始
 - GitHub 仓库建在个人账号还是组织下,是否私有
 - Ranger 的插拔式授权点现在要不要在 Trino/Hive 配置里提前占位
