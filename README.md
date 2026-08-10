@@ -36,7 +36,8 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 - ✅ 本地镜像缓存(见 ADR-018):`scripts/list-project-images.py` 扫描出这个项目用到的全部镜像,`scripts/export-image-cache.sh` 导出到本地 `image-cache/`(git-ignored)——为公司内网出不去国外做准备,以后能直接搬这份缓存去内网机器 `docker load` + 推到公司内部仓库,不用重新连国外源拉
 - ✅ 集中日志(见 ADR-020):Loki(SingleBinary)+ Grafana Alloy,8 个命名空间的日志已经真实进了 Loki,Grafana 加了 Loki 数据源,指标和日志能在同一个界面查。Alloy 踩了两个坑:`loki.source.kubernetes` 被本机代理拦截拉不到数据,改用 hostPath 读日志文件;`/var/log/pods` 里的日志文件是指向 docker 日志驱动实际存储位置的符号链接,要多开一个 mount 才行
 - ✅ colima 内存从 6GB 扩到 9GB(本机是 16GB,还有余量),之前几乎每次装重组件都要精细监控内存、装完就收回去的紧张状态大幅缓解
-- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);用户行为日志分析(PostHog+ClickHouse);CI 校验(GitHub Actions 跑 `helm template`/lint,提交前拦一部分这次靠人肉发现的配置错误)——当前优先级是"打通已验证组件之间的关系",不是继续加新组件,见 `docs/decisions/`
+- ✅ CI 校验(见 ADR-022):`.github/workflows/validate.yml`,push/PR 时跑 `scripts/validate-charts.py`(所有 Application 的 Helm chart 来源跑 `helm template`,纯 manifest 来源做 YAML 语法检查)。明确拦不住"渲染成功但运行时跑不起来"这类问题(这次踩的坑大部分是这类),只拦 chart 版本写错/字段名写错/YAML 语法错误这些
+- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);用户行为日志分析(PostHog+ClickHouse);训练脚本 -> MLflow 实验记录 -> 模型注册这条 AI/ML 主线的 demo——当前优先级是"打通已验证组件之间的关系",不是继续加新组件,见 `docs/decisions/`
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 
