@@ -125,6 +125,28 @@ fi
 # (报 "Shared secret is required when authentication is enabled"),不是可选项。
 ensure_secret trino     trino-internal-secret secret=RANDOM
 
+# Trino 的 OAuth2(Authorization Code 模式)是给人在浏览器里操作设计的,
+# Superset 的 SQL Lab 要拿一个后端到后端的身份连 Trino,不能走这条路。Trino
+# 原生支持多种认证方式并存(http-server.authentication.type=OAUTH2,PASSWORD,
+# 见 docs/decisions/,服务端按顺序尝试,客户端发 Basic Auth 会自然落到
+# PASSWORD 这条),给 Superset 建一个专门的服务账号用 PASSWORD 认证,人类还是
+# 走 Keycloak OAuth2。密码文件要 bcrypt 哈希,cost 至少 8(Trino 文档写的
+# 最低要求),依赖系统自带的 htpasswd(macOS/大多数 Linux 发行版都有,来自
+# apache2-utils 或系统自带的 httpd 工具)。
+if kubectl -n trino get secret trino-service-account >/dev/null 2>&1; then
+  echo "已存在,跳过: trino/trino-service-account"
+else
+  SVC_PW="$(gen_password)"
+  SVC_HASH="$(htpasswd -nbBC 10 superset_service "$SVC_PW")"
+  kubectl -n trino create secret generic trino-service-account \
+    --from-literal=username=superset_service \
+    --from-literal=password="$SVC_PW" \
+    --from-literal=password.db="$SVC_HASH" \
+    --from-literal=password-authenticator.properties="password-authenticator.name=file
+file.password-file=/secrets/trino-service-account/password.db"
+  echo "已创建: trino/trino-service-account"
+fi
+
 ensure_secret data superset-db username=superset password=RANDOM
 
 # Superset chart 默认把 DB_USER/DB_PASS/SUPERSET_SECRET_KEY 这些当明文写进
@@ -225,6 +247,9 @@ POSTGRES_ROOT_CONSUMER_NAMESPACES="openmetadata mlflow keycloak"
 for ns in $POSTGRES_ROOT_CONSUMER_NAMESPACES; do
   copy_secret data "$ns" postgres-root
 done
+
+echo "==> 复制 Trino 服务账号凭据给 Superset(配 Trino 数据源连接要用)"
+copy_secret trino superset trino-service-account
 
 echo
 echo "完成。新生成的凭据(如果有)已追加到: ${OUT_FILE}"

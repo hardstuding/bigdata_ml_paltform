@@ -13,6 +13,16 @@
 # 我们要用的 8443/https,helm template 验证过),不用这份 chart 自己的
 # ingress 配置(留 false)。ingress-nginx 默认不校验后端证书,自签名不影响
 # 浏览器侧(浏览器全程只跟 ingress-nginx 打 HTTP 交道)。
+#
+# 服务账号(PASSWORD 认证,和 OAUTH2 并存):OAuth2 的 Authorization Code
+# 模式是给人在浏览器操作设计的,Superset 的 SQL Lab 要拿一个后端到后端的
+# 身份连 Trino,走不了这条路。Trino 原生支持
+# `http-server.authentication.type=OAUTH2,PASSWORD` 多种认证方式并存,
+# 服务端按顺序尝试,客户端发 HTTP Basic Auth 的用户名密码会自然落到
+# PASSWORD 这条(不会被硬塞进 OAuth2 流程)。密码文件(bcrypt 哈希)和
+# password-authenticator.properties 都由
+# scripts/00-generate-secrets.sh 生成进 trino-service-account 这个 Secret,
+# 见 docs/decisions/021。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -33,7 +43,7 @@ spec:
           config:
             query:
               maxMemory: "1GB"
-            authenticationType: OAUTH2
+            authenticationType: OAUTH2,PASSWORD
             https:
               enabled: true
               port: 8443
@@ -55,6 +65,10 @@ spec:
           # 默认不信任、直接拒绝(报 406 "does not allow processing of the
           # X-Forwarded-For header"),要显式打开。
           - http-server.process-forwarded=true
+          # 服务账号用的 PASSWORD 认证方式,指到 secretMounts 挂进去的那份
+          # password-authenticator.properties(内容是 password-authenticator.name=file
+          # + file.password-file 指向同目录的 password.db)。
+          - password-authenticator.config-files=/secrets/trino-service-account/password-authenticator.properties
         # 证书文件故意不放在 /etc/trino/ 底下:那整个目录已经是 chart 自己的
         # ConfigMap(config-volume)挂载点,再往它下面嵌套挂一个 Secret 的
         # subPath 文件会导致 kubelet 创建目录失败(实测报 runc "mounting a
@@ -66,6 +80,14 @@ spec:
             secretName: trino-tls
             path: /secrets/trino-tls/tls-combined.pem
             subPath: tls-combined.pem
+          - name: trino-service-account-props
+            secretName: trino-service-account
+            path: /secrets/trino-service-account/password-authenticator.properties
+            subPath: password-authenticator.properties
+          - name: trino-service-account-db
+            secretName: trino-service-account
+            path: /secrets/trino-service-account/password.db
+            subPath: password.db
         coordinator:
           jvm:
             maxHeapSize: "1536m"
