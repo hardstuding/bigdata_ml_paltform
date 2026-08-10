@@ -89,6 +89,19 @@ spec:
             path: /secrets/trino-service-account/password.db
             subPath: password.db
         coordinator:
+          # chart 默认的 livenessProbe 硬编码打 http 端口(8080)的 /v1/info,
+          # 我们关了 http-server.http.enabled,这个探针永远失败,kubelet 每隔
+          # 几十秒就以为 Trino 挂了强杀重启一次——进程其实完全正常,readiness/
+          # startup 探针用的是 exec 健康检查脚本,不挑端口,一直没受影响,所以
+          # pod 表面看是 Running/Ready,实际在不停被杀重启,容易被忽略。改成
+          # 和 readiness/startup 一样用这个 exec 脚本,不依赖 http 端口。
+          livenessProbe:
+            exec:
+              command: ["/usr/lib/trino/bin/health-check"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           jvm:
             maxHeapSize: "1536m"
           config:
