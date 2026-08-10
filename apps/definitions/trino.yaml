@@ -89,19 +89,17 @@ spec:
             path: /secrets/trino-service-account/password.db
             subPath: password.db
         coordinator:
-          # chart 默认的 livenessProbe 硬编码打 http 端口(8080)的 /v1/info,
-          # 我们关了 http-server.http.enabled,这个探针永远失败,kubelet 每隔
-          # 几十秒就以为 Trino 挂了强杀重启一次——进程其实完全正常,readiness/
-          # startup 探针用的是 exec 健康检查脚本,不挑端口,一直没受影响,所以
-          # pod 表面看是 Running/Ready,实际在不停被杀重启,容易被忽略。改成
-          # 和 readiness/startup 一样用这个 exec 脚本,不依赖 http 端口。
-          livenessProbe:
-            exec:
-              command: ["/usr/lib/trino/bin/health-check"]
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 6
+          # chart 默认的 livenessProbe 硬编码打 http 端口(8080)的 /v1/info
+          # (deployment-coordinator.yaml 模板里直接写死 httpGet,不是靠
+          # values 生成的,试过 coordinator.livenessProbe.exec 覆盖,helm
+          # template 验证过完全不生效——values 只能覆盖这个探针的几个数字
+          # 字段,换不了探针类型)。我们关了 http-server.http.enabled,这个
+          # 探针永远失败,kubelet 每隔几十秒就以为 Trino 挂了强杀重启一次
+          # ——进程其实完全正常,readiness/startup 探针用的是 exec 健康检查
+          # 脚本不挑端口,一直没受影响,所以 pod 表面看是 Running/Ready,
+          # 实际在不停被杀重启,很容易被忽略过去。chart 这条路走不通,改成
+          # ArgoCD 的 ignoreDifferences(见下面 spec.ignoreDifferences)+
+          # 一次性手动 patch,细节和取舍见 docs/decisions/017 的更新记录。
           jvm:
             maxHeapSize: "1536m"
           config:
@@ -150,6 +148,18 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: trino
+  # chart 的 coordinator Deployment 模板把 livenessProbe 硬编码成打
+  # http-server.http.enabled=false 之后已经关掉的 8080 端口(见上面
+  # coordinator 那段注释),values 覆盖不了探针类型。让 ArgoCD 不要管这个
+  # 字段,靠 scripts/07-fix-trino-liveness-probe.sh 一次性 kubectl patch 成
+  # exec 探针——这是 ArgoCD 官方支持的"上游 chart 没暴露某个字段,交给别的
+  # 机制管"模式,不是绕过 GitOps,ignoreDifferences 本身就在 git 里声明。
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: trino-coordinator
+      jsonPointers:
+        - /spec/template/spec/containers/0/livenessProbe
   syncPolicy:
     automated:
       prune: true

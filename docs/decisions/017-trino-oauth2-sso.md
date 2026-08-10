@@ -54,6 +54,22 @@ for OAuth 2.0 authentication"),不能像 ArgoCD 那样把 TLS 完全交给 ingre
   block **外面**导入,相当于新开一个专门服务 `local-lite.test` 这个 zone 的
   独立 server block),不能用 `*.override`(在主 block 里面导入,会跟已有的
   `hosts` 插件冲突)。
+- **2026-08-10 补充,一个隐藏了很久的 bug**:chart 的 coordinator Deployment
+  模板把 `livenessProbe` 硬编码成 `httpGet` 打 8080(http)端口的 `/v1/info`,
+  `values` 只能覆盖这个探针的数字字段(delay/period/timeout/threshold),换不了
+  探针类型,`helm template` 验证过。我们关了 `http-server.http.enabled`
+  之后,这个探针**从第一次部署 Trino 起就永远失败**,kubelet 每隔几十秒强杀
+  重启一次容器——但 readiness/startup 探针用的是不挑端口的 exec 健康检查
+  脚本,一直显示正常,所以 pod 表面看是 `Running`/`1/1 Ready`,实际在后台
+  不停被杀重启,很容易被"看起来是健康的"这个表象骗过去(这次是重新验证
+  Superset 连 Trino 时,因为查询过程中连接偶尔失败才发现)。chart 这条路
+  走不通,改用 ArgoCD 的 `spec.ignoreDifferences`(声明在
+  `apps/definitions/trino.yaml` 里,不是绕过 GitOps)+
+  `scripts/07-fix-trino-liveness-probe.sh` 一次性 `kubectl patch` 成 exec
+  探针。**教训**:验证一个组件"能用"不能只看 `kubectl get pods` 的
+  READY 列一次——这个字段反映的是"当前这一刻",不反映"过去几分钟是不是在
+  反复重启",部署完之后要么看 `RESTARTS` 列的数字有没有在涨,要么直接
+  `kubectl describe pod` 看 Events 里有没有 `Killing`/`Unhealthy`。
 
 ## 后果
 
