@@ -100,11 +100,11 @@
   给 Trino 加了并存的 PASSWORD 认证方式,专门给 Superset 用的服务账号
   (`superset_service`,file password authenticator + bcrypt),人类继续走
   Keycloak OAuth2,两条路互不干扰,已验证真实查询能跑通。
-- ~~端到端 demo 具体要展示什么~~ **已解决(2026-08-10)**:做了 (a) 湖仓核心
-  路径——`iceberg.demo.orders` 表 → Trino → Superset Dataset/Chart/Dashboard,
-  见 `scripts/08-create-demo-data.sh`。(b) 训练脚本 -> MLflow 记录实验 ->
-  模型注册这条还没做,留作后续待办。
-- **训练脚本 -> MLflow 实验记录 -> 模型注册这条 demo 路径还没做**——(a) 已经
-  做完之后剩下的那半个候选,不依赖 Trino 认证问题,风险更低,体现的是
-  AI/ML 这条线而不是湖仓这条线,两条路径都做才算把 Data + AI 两个字都
-  落实了。
+- ~~端到端 demo 具体要展示什么~~ **已解决(2026-08-10)**:两条路径都做了。
+  (a) 湖仓核心——`iceberg.demo.orders` 表 → Trino → Superset
+  Dataset/Chart/Dashboard,见 `scripts/08-create-demo-data.sh`。(b) AI/ML——
+  训练一个真实 sklearn 模型 → MLflow 记录实验/指标 → Model Registry 注册,
+  见 `scripts/09-train-demo-model.sh`(ADR-023,训练任务直接连集群内部
+  Service,不走 oauth2-proxy,和 Trino 服务账号是同一类"人走 SSO、服务到
+  服务走不了这条路"的问题,但解法更简单)。Data + AI 两条主线都有一条真实
+  跑通的链路了。

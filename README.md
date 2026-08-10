@@ -29,15 +29,17 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 
 - ✅ Phase 0(平台底座):ArgoCD + ingress-nginx + cert-manager + Keycloak + kube-prometheus-stack,全部 Synced/Healthy。真实 Ingress + 域名(`<组件>.local-lite.test`,见 ADR-016)替代了 port-forward,CoreDNS 自定义解析(`platform/coredns-custom/`)让集群内部 pod 也能统一解析这些域名
 - ✅ Phase 1(湖仓核心):MinIO + Postgres + Hive Metastore + Trino,已验证端到端建表/写入/读出 Iceberg 表,数据真实落盘到 MinIO(Spark 侧读写还未验证,留到 Spark Operator 真正跑作业时一起做)
-- ✅ **端到端 demo 打通了**:真实 Iceberg 表(`iceberg.demo.orders`)→ Trino(服务账号认证,见 ADR-021)→ Superset Dataset/Chart/Dashboard,走的是 Superset 真实的图表查询链路验证过(不是只存了个连接串)。`./scripts/08-create-demo-data.sh` 一键重建,浏览器登录后开 `http://superset.local-lite.test/superset/dashboard/demo-lakehouse-core-path/` 能看到图
+- ✅ **端到端 demo 打通了,Data 和 AI 两条主线都有**:
+  - 湖仓核心:真实 Iceberg 表(`iceberg.demo.orders`)→ Trino(服务账号认证,见 ADR-021)→ Superset Dataset/Chart/Dashboard,走的是 Superset 真实的图表查询链路验证过。`./scripts/08-create-demo-data.sh` 一键重建,浏览器登录后开 `http://superset.local-lite.test/superset/dashboard/demo-lakehouse-core-path/` 能看到图
+  - AI/ML:真实训练一个 sklearn 模型 → MLflow 记录实验/指标 → Model Registry 注册,Registry API 确认真的存在(见 ADR-023)。`./scripts/09-train-demo-model.sh` 一键重跑(本机 Python 环境需要 `pip install mlflow-skinny scikit-learn skops boto3`),浏览器登录后开 `http://mlflow.local-lite.test/` 能看到实验和模型
 - ✅ Phase 2(数据工程,配置已验证、当前收在 `environments/cloud-full/pending-definitions/`):Kafka(Strimzi)、Spark Operator、Airflow、SeaTunnel
-- ✅ OpenMetadata + OpenSearch、✅ MLflow:均已验证功能可用,配置收在 `pending-definitions/`(需要时用 `scripts/local-lite-toggle-heavy.sh on` 拉回来,colima 内存已经从 6GB 扩到 9GB,同时跑的余地比之前宽松很多)
+- ✅ OpenMetadata + OpenSearch:已验证功能可用,配置收在 `pending-definitions/`(需要时用 `scripts/local-lite-toggle-heavy.sh on` 拉回来,colima 内存已经从 6GB 扩到 9GB,同时跑的余地比之前宽松很多);MLflow 目前保持在线跑 demo
 - ✅ **Keycloak SSO 已经打通 ArgoCD、Grafana、Trino、Superset、OpenMetadata、MLflow 六个组件**,统一登录。踩坑细节见 ADR-017(Trino,原生 OIDC 但强制要求 TLS,外加一个 chart 把 livenessProbe 打死端口的隐藏 bug)、ADR-019(MLflow,没有原生 OIDC,用 oauth2-proxy 挡在前面)、ADR-021(Superset 后端连 Trino 用 OAUTH2+PASSWORD 并存的服务账号,OAuth2 的 Authorization Code 模式是给人在浏览器操作设计的,不适合服务到服务)、troubleshooting.md(OpenMetadata 认证配置只在数据库首次初始化时生效、Superset 缺 authlib 包、组件重新拉起来常见的 Postgres 密码漂移问题)。浏览器完整登录待你在自己机器上加好 `/etc/hosts`(`argocd`/`grafana`/`trino`/`superset`/`openmetadata`/`mlflow`.local-lite.test → 127.0.0.1)后自己试一遍
 - ✅ 本地镜像缓存(见 ADR-018):`scripts/list-project-images.py` 扫描出这个项目用到的全部镜像,`scripts/export-image-cache.sh` 导出到本地 `image-cache/`(git-ignored)——为公司内网出不去国外做准备,以后能直接搬这份缓存去内网机器 `docker load` + 推到公司内部仓库,不用重新连国外源拉
 - ✅ 集中日志(见 ADR-020):Loki(SingleBinary)+ Grafana Alloy,8 个命名空间的日志已经真实进了 Loki,Grafana 加了 Loki 数据源,指标和日志能在同一个界面查。Alloy 踩了两个坑:`loki.source.kubernetes` 被本机代理拦截拉不到数据,改用 hostPath 读日志文件;`/var/log/pods` 里的日志文件是指向 docker 日志驱动实际存储位置的符号链接,要多开一个 mount 才行
 - ✅ colima 内存从 6GB 扩到 9GB(本机是 16GB,还有余量),之前几乎每次装重组件都要精细监控内存、装完就收回去的紧张状态大幅缓解
 - ✅ CI 校验(见 ADR-022):`.github/workflows/validate.yml`,push/PR 时跑 `scripts/validate-charts.py`(所有 Application 的 Helm chart 来源跑 `helm template`,纯 manifest 来源做 YAML 语法检查)。明确拦不住"渲染成功但运行时跑不起来"这类问题(这次踩的坑大部分是这类),只拦 chart 版本写错/字段名写错/YAML 语法错误这些
-- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);用户行为日志分析(PostHog+ClickHouse);训练脚本 -> MLflow 实验记录 -> 模型注册这条 AI/ML 主线的 demo——当前优先级是"打通已验证组件之间的关系",不是继续加新组件,见 `docs/decisions/`
+- ⏳ 还没碰:JupyterHub、Argo Workflows、KServe(Phase 3 剩余部分);用户行为日志分析(PostHog+ClickHouse)——见 `docs/decisions/`
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 
