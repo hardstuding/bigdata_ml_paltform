@@ -1,0 +1,31 @@
+# 平台审计日志看板(ADR-024)。用 kube-prometheus-stack 自带的 Grafana
+# sidecar 自动发现机制(见 platform/apps/kube-prometheus-stack.yaml 里
+# sidecar.dashboards,scans 全部命名空间里带 grafana_dashboard: "1" 标签的
+# ConfigMap),不用手动在 Grafana UI 里导入看板。
+#
+# 看板 JSON 里的 Loki 数据源 uid 是 Grafana 自动生成的
+# (`P8E80F9AEF21F6940`,通过 `GET /api/datasources` 查到的),不是我们自己
+# 起的名字——如果以后 Loki 数据源被删掉重建,这个 uid 会变,看板会跟着
+# 失联,需要重新查一次 uid 改这个文件。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana-audit-dashboard
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/grafana-audit-dashboard/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
