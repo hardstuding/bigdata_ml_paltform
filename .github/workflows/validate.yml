@@ -1,0 +1,33 @@
+# push/PR 前拦一部分配置错误——这次很多坑(chart 版本写错、字段名写错、
+# YAML 缩进错了)都是 push 上去等 ArgoCD 报错才发现的,这个 workflow 能在
+# 那之前拦住其中一部分(不是全部,helm template 只验证"渲染得出来",不验证
+# "部署到真实集群里跑不跑得起来",见 scripts/validate-charts.py 开头的说明)。
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-charts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: helm template 渲染校验(所有 ArgoCD Application,含 pending-definitions)
+        run: python3 scripts/validate-charts.py
