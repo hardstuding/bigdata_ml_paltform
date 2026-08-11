@@ -69,6 +69,16 @@ spec:
           initContainers:
             # 官方 kubectl 二进制,不是社区打包的"kubectl 专用镜像"(那类
             # 镜像来源良莠不齐,和 ADR-008 只用官方来源的原则一致)。
+            #
+            # 架构必须动态探测,不能硬编码 amd64:实测在 arm64 节点(colima
+            # 跑在 Apple Silicon 上默认就是 aarch64)上,amd64 的 kubectl
+            # 靠 QEMU 模拟执行时,`kubectl exec` 会稳定触发 client-go 的一个
+            # 真实并发 bug(REST discovery mapper 并发写同一个 map,
+            # `fatal error: concurrent map writes`,栈跟踪在
+            # k8s.io/client-go/restmapper/discovery.go),不是环境偶发抖动
+            # ——换成原生架构的二进制,不走模拟层,问题消失。这台机器上能
+            # 装起来不代表能跑,这类"模拟执行下的真实并发 bug"只有真的调用
+            # 到那条代码路径才会暴露,静态检查/helm template 都测不出来。
             - name: fetch-kubectl
               image: python:3.12-slim
               command:
@@ -77,8 +87,14 @@ spec:
                 - |
                   set -e
                   apt-get update -qq && apt-get install -y -qq curl git >/dev/null
+                  ARCH=$(uname -m)
+                  case "$ARCH" in
+                    x86_64) KARCH=amd64 ;;
+                    aarch64) KARCH=arm64 ;;
+                    *) echo "未知架构: $ARCH" >&2; exit 1 ;;
+                  esac
                   KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
-                  curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+                  curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KARCH}/kubectl"
                   chmod +x /tools/kubectl
               volumeMounts:
                 - name: tools
