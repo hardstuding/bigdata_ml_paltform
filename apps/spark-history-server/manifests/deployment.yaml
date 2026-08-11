@@ -1,0 +1,87 @@
+# Spark 官方(Apache 项目本身)发布的镜像(apache/spark),不是社区/第三方
+# 构建的,和 ADR-008 拒绝 Bitnami 的筛选标准一致。
+#
+# 没有官方 Helm chart(Spark 项目本身不维护 History Server 的 chart),所以
+# 直接写裸 manifest,和 platform/coredns-custom/、
+# platform/grafana-audit-dashboard/ 是同一类"没有官方 chart 时怎么办"的
+# 处理方式。
+#
+# 用 `spark-class org.apache.spark.deploy.history.HistoryServer` 直接调
+# History Server 的 Java 入口类,不依赖官方镜像 entrypoint 脚本的参数分发
+# 约定(那个约定是给 spark-submit 的 driver/executor 场景设计的,没有确认过
+# 是否支持直接跑 history-server,直接调 Java 类更明确、不用猜)。
+#
+# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY 用环境变量而不是塞进
+# SPARK_HISTORY_OPTS 字符串里——Hadoop 的 S3A 连接器本来就认这两个环境变量
+# (默认凭据提供链的一部分),不需要在 Java opts 里手写一遍凭据。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-history-server
+  labels:
+    app: spark-history-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-history-server
+  template:
+    metadata:
+      labels:
+        app: spark-history-server
+    spec:
+      containers:
+        - name: history-server
+          image: apache/spark:3.5.9
+          command:
+            - /opt/spark/bin/spark-class
+            - org.apache.spark.deploy.history.HistoryServer
+          env:
+            - name: SPARK_HISTORY_OPTS
+              value: >-
+                -Dspark.history.fs.logDirectory=s3a://spark-logs/
+                -Dspark.hadoop.fs.s3a.endpoint=http://minio.minio.svc.cluster.local:9000
+                -Dspark.hadoop.fs.s3a.path.style.access=true
+                -Dspark.hadoop.fs.s3a.connection.ssl.enabled=false
+                -Dspark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootUser
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootPassword
+          ports:
+            - containerPort: 18080
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 18080
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 18080
+            initialDelaySeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-history-server
+spec:
+  selector:
+    app: spark-history-server
+  ports:
+    - port: 18080
+      targetPort: 18080
+      name: http

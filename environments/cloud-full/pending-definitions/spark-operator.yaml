@@ -1,6 +1,36 @@
 # kubeflow/spark-operator(原 GoogleCloudPlatform/spark-on-k8s-operator,现由
 # Kubeflow 社区维护)。管 SparkApplication CRD,提交 Spark 作业不用手写
 # spark-submit + 一堆 k8s 资源。
+#
+# 权限/可观测性(ADR-029,对应以前用 YARN ResourceManager UI 看所有队列/
+# 作业、点进去看 Spark 执行详情那套需求):
+#
+# 1. 每个 SparkApplication 自己的实时 UI(4040 端口)不对外开 Ingress——
+#    这个端口是每个作业动态起的,没法像别的组件一样配一个固定的
+#    Ingress+SSO,而且只有作业在跑的时候才存在。提交作业的人自己
+#    `kubectl port-forward` 看,和训练任务直连 MinIO/MLflow(ADR-023)是
+#    同一个"谁的东西谁直接连,不额外包一层"的思路。
+# 2. 想让作业结束后还能在网页上看执行记录(等价于 YARN 点进具体作业看
+#    Stage/Task 明细那部分),每个 SparkApplication 的 `spec.sparkConf`
+#    要带上:
+#      spark.eventLog.enabled: "true"
+#      spark.eventLog.dir: "s3a://spark-logs/"
+#      spark.hadoop.fs.s3a.endpoint: "http://minio.minio.svc.cluster.local:9000"
+#      spark.hadoop.fs.s3a.path.style.access: "true"
+#      spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
+#    这不是 spark-operator 全局配置能强制的(chart 没有"所有作业默认加这些
+#    sparkConf"的机制),是每次提交作业时自己带上,写在这里方便以后抄。
+#    对应的 History Server 见
+#    environments/cloud-full/pending-definitions/spark-history-server.yaml,
+#    读同一个 s3://spark-logs/,前面挂了 oauth2-proxy 做 SSO。
+# 3. "现在所有人在跑哪些作业"这种实时全局视图(等价于 YARN RM 首页):
+#    chart 默认已经开了 prometheus.metrics.enable(暴露指标),这里额外开
+#    prometheus.podMonitor.create 让 kube-prometheus-stack 的 Prometheus
+#    Operator 真的去抓这些指标,理论上可以在已有的 Grafana(ADR-024 那套
+#    审计看板是同一个思路)上加一个面板。这次只做到"指标能被抓到"这一步,
+#    没有实际去建 Grafana 面板——没有真实作业在跑,面板查询语句写出来也
+#    没法验证对不对,留到 Spark Operator 真正启用、有真实作业产生指标时
+#    再建,不做没法验证的东西。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -31,6 +61,9 @@ spec:
               memory: 128Mi
             limits:
               memory: 256Mi
+        prometheus:
+          podMonitor:
+            create: true
   destination:
     server: https://kubernetes.default.svc
     namespace: spark-operator

@@ -47,6 +47,12 @@ spec:
           - name: mlflow
             policy: none
             purge: false
+          # Spark 作业的 eventLog 写这里(spark.eventLog.dir),Spark History
+          # Server 从这里读出来展示——见 ADR-029、
+          # environments/cloud-full/pending-definitions/spark-history-server.yaml
+          - name: spark-logs
+            policy: none
+            purge: false
   destination:
     server: https://kubernetes.default.svc
     namespace: minio

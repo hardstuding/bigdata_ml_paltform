@@ -27,6 +27,28 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# `helm template` 离线跑,默认不知道目标集群实际装了哪些 CRD——遇到
+# `{{- if .Capabilities.APIVersions.Has "x" }}` 这种判断,离线渲染时永远
+# 判 false,某些 chart(比如 spark-operator 的 PodMonitor 模板)对这种情况
+# 是直接报错 fail,不是优雅跳过。真实集群里这些 CRD 是有的(比如
+# monitoring.coreos.com/v1 是 kube-prometheus-stack 自己装的,这个仓库另一个
+# Application 负责),只是"这个 chart 单独 helm template 时看不到别的
+# Application 装了什么"——这里手动补一份"我们知道最终会在同一个集群里"的
+# CRD 清单,让离线校验更贴近真实部署目标,不是瞎猜的容忍名单。
+KNOWN_CLUSTER_API_VERSIONS = [
+    "monitoring.coreos.com/v1",       # kube-prometheus-stack(Prometheus Operator CRD)
+    "monitoring.coreos.com/v1alpha1",
+    "serving.kserve.io/v1beta1",      # kserve-crd
+    "serving.kserve.io/v1alpha1",
+    # 有些 chart 的 {{- if .Capabilities.APIVersions.Has }} 判断写的是
+    # "group/version/Kind" 这种带具体资源类型的完整格式,不是只写
+    # "group/version"(spark-operator 的 PodMonitor 模板就是这样,实测确认
+    # 过——只传 group/version 不够,helm template 照样报
+    # "cluster does not support"),两种格式都得给,不能只给粗粒度那个。
+    "monitoring.coreos.com/v1/PodMonitor",
+    "monitoring.coreos.com/v1/ServiceMonitor",
+]
+
 _repo_added = set()
 
 
@@ -97,6 +119,8 @@ def validate_app(path: Path) -> tuple[bool, str]:
         cmd = ["helm", "template", "validate", chart_ref]
         if version:
             cmd += ["--version", version]
+        for av in KNOWN_CLUSTER_API_VERSIONS:
+            cmd += ["--api-versions", av]
         cmd += extra_args
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)

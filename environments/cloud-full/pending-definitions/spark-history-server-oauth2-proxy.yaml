@@ -1,0 +1,49 @@
+# Spark History Server 前面挡一层 oauth2-proxy,和 MLflow(ADR-019)是同一个
+# 模式、同一个官方 chart 来源,配置结构基本照抄那份,只换了上游地址和域名。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: spark-history-server-oauth2-proxy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://oauth2-proxy.github.io/manifests
+    chart: oauth2-proxy
+    targetRevision: 10.7.0
+    helm:
+      valuesObject:
+        config:
+          existingSecret: oauth2-proxy-secret
+          configFile: |
+            provider = "oidc"
+            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
+            redirect_url = "http://spark-history.local-lite.test/oauth2/callback"
+            upstreams = [ "http://spark-history-server.spark-operator.svc.cluster.local:18080/" ]
+            email_domains = [ "*" ]
+            # 和 mlflow-oauth2-proxy 同样的原因:local-lite 没有 TLS,浏览器
+            # 和 ingress-nginx 之间是明文 HTTP,不关掉这个 cookie 存不住。
+            cookie_secure = false
+            skip_provider_button = true
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - spark-history.local-lite.test
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: spark-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -233,6 +233,24 @@ else
   echo "已创建: mlflow/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
 fi
 
+# Spark History Server 同样没有原生 OIDC,同一个 oauth2-proxy 模式(见
+# ADR-029)。spark-operator 这个 namespace 是 Spark Operator 自己的
+# Application 建的(CreateNamespace=true),这段要等它先跑过一次、namespace
+# 已经存在才能成功——和 spark-history-server 本身一样,是"配置就绪,等
+# Spark Operator 真正启用时才生效"的状态。
+if kubectl -n spark-operator get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  echo "已存在,跳过: spark-operator/oauth2-proxy-secret"
+elif ! kubectl get namespace spark-operator >/dev/null 2>&1; then
+  echo "跳过: spark-operator/oauth2-proxy-secret(namespace 还不存在,Spark Operator 还没启用)"
+else
+  COOKIE_SECRET="$(openssl rand -base64 32)"
+  kubectl -n spark-operator create secret generic oauth2-proxy-secret \
+    --from-literal=client-id=spark-history-server \
+    --from-literal=cookie-secret="$COOKIE_SECRET" \
+    --from-literal=client-secret=PLACEHOLDER
+  echo "已创建: spark-operator/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
+fi
+
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 MINIO_CONSUMER_NAMESPACES="trino data mlflow"
 for ns in $MINIO_CONSUMER_NAMESPACES; do

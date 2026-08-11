@@ -162,6 +162,28 @@ else
   echo "已创建 client mlflow,密钥写入 mlflow/oauth2-proxy-secret 的 client-secret"
 fi
 
+echo "==> spark-history-server client(给挡在前面的 oauth2-proxy 用,和 mlflow 同一个模式,见 ADR-029)"
+if kubectl -n spark-operator get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  SHS_REDIRECT_URIS='["http://spark-history.local-lite.test/oauth2/callback"]'
+  shs_client_id=$(kcadm get clients -r platform -q clientId=spark-history-server --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+  if [ -n "$shs_client_id" ]; then
+    echo "client spark-history-server 已存在,只同步 redirectUris,不轮换密钥"
+    kcadm update "clients/${shs_client_id}" -r platform -s "redirectUris=${SHS_REDIRECT_URIS}"
+  else
+    SHS_OAUTH_SECRET="$(gen_password)"
+    kcadm create clients -r platform \
+      -s clientId=spark-history-server -s enabled=true -s protocol=openid-connect -s publicClient=false \
+      -s secret="$SHS_OAUTH_SECRET" \
+      -s "redirectUris=${SHS_REDIRECT_URIS}" \
+      -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
+    kubectl -n spark-operator patch secret oauth2-proxy-secret --type merge \
+      -p "{\"stringData\":{\"client-secret\":\"${SHS_OAUTH_SECRET}\"}}"
+    echo "已创建 client spark-history-server,密钥写入 spark-operator/oauth2-proxy-secret 的 client-secret"
+  fi
+else
+  echo "跳过 spark-history-server client(spark-operator/oauth2-proxy-secret 还不存在,Spark Operator 还没启用)"
+fi
+
 echo "==> argo-workflows client"
 # 和 openmetadata 同一个原因不能用 create_client_if_absent——argo-workflows
 # chart 的 server.sso.clientId/clientSecret 都是 secretRef(key 名字是
