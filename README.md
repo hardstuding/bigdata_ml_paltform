@@ -1,51 +1,84 @@
 # bigdata_ml_paltform
 
-Kubernetes-native Data + AI Platform. 目标不是复刻 CDH,而是一套本地能验证、按 profile 切换规模、最终原样搬上生产的平台骨架,同时兼容现有的遗留 Hadoop 集群。
+Kubernetes-native 的 Data + AI 平台骨架:统一身份认证、GitOps 驱动的部署方式、按规模分级的环境画像(本机验证 → 云端集成 → 生产)。目标不是照抄一套 CDH,而是给还在用 YARN 时代大数据平台的团队一条能力对等、但运维模型现代化的迁移路径,同时兼容接入现有的遗留 Hadoop 集群做渐进迁移。
 
-架构总览、组件清单、路线图见 [`docs/architecture.md`](docs/architecture.md);关键决策的取舍理由见 [`docs/decisions/`](docs/decisions);日常运维操作见 [`docs/operations/`](docs/operations)。
+## 这个项目提供什么
+
+- **一次登录,处处可用**:所有组件统一接 Keycloak SSO(OIDC),角色/权限按组织架构里的组(group)分发,不是每个组件单独一套账号体系。
+- **GitOps 是唯一的操作接口**:改一个 YAML、`git push`,ArgoCD 自动把集群状态收敛过去。没有隐藏在某个人电脑里的手动步骤——这也是为什么这套平台对 AI Agent 友好:Agent 能做的操作和人能做的操作是同一套(改 git、看 ArgoCD 状态),不需要给 Agent 开额外的特权通道。
+- **按规模分级,不是"要么全装要么不装"**:`local-lite`(笔记本电脑验证)/ `cloud-full`(功能完整的集成环境)/ `prod`(生产)三档,同一套组件定义,资源画像不同。
+- **可插拔基础设施**:公司已经有 Postgres/Kafka/对象存储了?不强制重新部署一份,配置里标出了怎么改接现有的(见 [ADR-030](docs/decisions/030-pluggable-external-infrastructure.md))。
+- **只用官方支持的部署方式**:不用 Bitnami 或来源不明的社区 chart,没有官方 Helm chart 的组件才自己写 manifest(见 [ADR-008](docs/decisions/008-avoid-bitnami.md))。每个决策的取舍理由都留了 ADR,不是"我们就是这么做的",是"为什么这么做、还有什么后果"。
+
+## 快速上手
+
+```bash
+git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
+./scripts/00-generate-secrets.sh
+./scripts/01-bootstrap-argocd.sh          # 需要代理才能出网的环境:NEEDS_LOCAL_PROXY=1 ./scripts/01-bootstrap-argocd.sh
+./scripts/02-bootstrap-root-apps.sh
+./scripts/04-install-kube-prometheus-crds.sh
+kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application/keycloak --timeout=300s
+./scripts/03-configure-keycloak.sh
+```
+
+完整步骤、每步在做什么、常见卡点见下面["从零拉起整套服务"](#从零拉起整套服务新集群--迁移到-gitlab--生产-idc)。
 
 ## 仓库结构
 
 ```
-infra/           # 本地/云端集群自举(OrbStack + k8s、云端节点初始化)
-platform/        # 平台底座:ArgoCD、ingress-nginx、cert-manager、Keycloak、监控
-apps/            # 各业务组件,每个组件一个目录,独立 Helm/Kustomize 配置
-environments/    # local-lite / cloud-full / prod 三个环境画像的 values 覆盖
-scripts/         # 一键拉起 / 销毁 / 常用运维脚本
-docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会话/新 agent 靠这个对齐上下文
+platform/        # 平台底座:ArgoCD、ingress-nginx、cert-manager、Keycloak、监控、审计看板、自定义 DNS
+apps/
+  definitions/    # 业务组件的 ArgoCD Application 定义(当前启用的)
+  <component>/    # 没有官方 chart、我们自己写 manifest 的组件各占一个目录(postgres、hive-metastore、spark-history-server 等)
+environments/     # local-lite / cloud-full / prod 三个环境画像;pending-definitions/ 收着"配置已验证、本机资源关系暂时收起来"的组件
+scripts/          # 一键拉起 / 常用运维 / 校验脚本,编号大致是执行顺序
+docs/
+  architecture.md   # 架构总览、组件清单、路线图
+  decisions/        # ADR——每个非显而易见的技术决策,连同踩过的坑
+  operations/       # 运维手册:排障记录、升级流程、版本清单、备份
 ```
 
 ## 环境画像
 
 | Profile | 用途 | 位置 |
 |---|---|---|
-| `local-lite` | 本机验证 GitOps 流程 + 存储/元数据打通 | Mac (M2/16GB, colima + k3s) |
+| `local-lite` | 本机验证 GitOps 流程 + 核心功能打通 | 单机(实测 Mac M2/16GB, colima + k3s) |
 | `cloud-full` | 功能完整的开发与集成环境 | 云服务器 |
 | `prod` | 替换现有遗留大数据平台 | 生产环境 |
 
-同一套 Helm chart,不同 `environments/<profile>/values.yaml` 决定开哪些组件、配多少资源。
+同一套 Application 定义,`environments/<profile>/` 决定开哪些组件、配多少资源。组件清单、当前 Phase 进度见 [`docs/architecture.md`](docs/architecture.md) 的路线图。
 
-## 当前状态
+## 组件
 
-- ✅ Phase 0(平台底座):ArgoCD + ingress-nginx + cert-manager + Keycloak + kube-prometheus-stack,全部 Synced/Healthy。真实 Ingress + 域名(`<组件>.local-lite.test`,见 ADR-016)替代了 port-forward,CoreDNS 自定义解析(`platform/coredns-custom/`)让集群内部 pod 也能统一解析这些域名
-- ✅ Phase 1(湖仓核心):MinIO + Postgres + Hive Metastore + Trino,已验证端到端建表/写入/读出 Iceberg 表,数据真实落盘到 MinIO(Spark 侧读写还未验证,留到 Spark Operator 真正跑作业时一起做)
-- ✅ **端到端 demo 打通了,Data 和 AI 两条主线都有**:
-  - 湖仓核心:真实 Iceberg 表(`iceberg.demo.orders`)→ Trino(服务账号认证,见 ADR-021)→ Superset Dataset/Chart/Dashboard,走的是 Superset 真实的图表查询链路验证过。`./scripts/08-create-demo-data.sh` 一键重建,浏览器登录后开 `http://superset.local-lite.test/superset/dashboard/demo-lakehouse-core-path/` 能看到图
-  - AI/ML:真实训练一个 sklearn 模型 → MLflow 记录实验/指标 → Model Registry 注册,Registry API 确认真的存在(见 ADR-023)→ KServe 部署成真实 InferenceService,V2 协议推理请求验证过返回随输入变化的分类结果(见 ADR-027)。`./scripts/09-train-demo-model.sh` 训练+注册,`./scripts/11-deploy-demo-inference-service.sh` 部署上线(本机 Python 环境需要 `pip install mlflow-skinny scikit-learn==1.7.0 boto3`,scikit-learn 版本要和 KServe 的 mlserver 镜像对齐,见 ADR-027 踩坑 4)。MLflow 验证完已重新 park,重跑demo前先 `git mv environments/cloud-full/pending-definitions/mlflow.yaml apps/definitions/`
-- ✅ Phase 2(数据工程,配置已验证、当前收在 `environments/cloud-full/pending-definitions/`):Kafka(Strimzi)、Spark Operator、Airflow、SeaTunnel
-- ✅ OpenMetadata + OpenSearch:已验证功能可用,配置收在 `pending-definitions/`(需要时用 `scripts/local-lite-toggle-heavy.sh on` 拉回来,colima 内存已经从 6GB 扩到 9GB,同时跑的余地比之前宽松很多);MLflow 同样收在 `pending-definitions/`,按需临时拉起
-- ✅ **Keycloak SSO 已经打通 ArgoCD、Grafana、Trino、Superset、OpenMetadata、MLflow、JupyterHub 七个组件**,统一登录。踩坑细节见 ADR-017(Trino,原生 OIDC 但强制要求 TLS,外加一个 chart 把 livenessProbe 打死端口的隐藏 bug)、ADR-019(MLflow,没有原生 OIDC,用 oauth2-proxy 挡在前面)、ADR-021(Superset 后端连 Trino 用 OAUTH2+PASSWORD 并存的服务账号,OAuth2 的 Authorization Code 模式是给人在浏览器操作设计的,不适合服务到服务)、ADR-025(JupyterHub,和 Grafana 同一种"两个 URL 分开配"模式)、troubleshooting.md(OpenMetadata 认证配置只在数据库首次初始化时生效、Superset 缺 authlib 包、组件重新拉起来常见的 Postgres 密码漂移问题)。浏览器完整登录待你在自己机器上加好 `/etc/hosts`(`argocd`/`grafana`/`trino`/`superset`/`openmetadata`/`mlflow`/`jupyterhub`.local-lite.test → 127.0.0.1)后自己试一遍
-- ✅ 本地镜像缓存(见 ADR-018):`scripts/list-project-images.py` 扫描出这个项目用到的全部镜像,`scripts/export-image-cache.sh` 导出到本地 `image-cache/`(git-ignored)——为公司内网出不去国外做准备,以后能直接搬这份缓存去内网机器 `docker load` + 推到公司内部仓库,不用重新连国外源拉
-- ✅ 集中日志(见 ADR-020):Loki(SingleBinary)+ Grafana Alloy,8 个命名空间的日志已经真实进了 Loki,Grafana 加了 Loki 数据源,指标和日志能在同一个界面查。Alloy 踩了两个坑:`loki.source.kubernetes` 被本机代理拦截拉不到数据,改用 hostPath 读日志文件;`/var/log/pods` 里的日志文件是指向 docker 日志驱动实际存储位置的符号链接,要多开一个 mount 才行
-- ✅ colima 内存从 6GB 扩到 9GB(本机是 16GB,还有余量),之前几乎每次装重组件都要精细监控内存、装完就收回去的紧张状态大幅缓解
-- ✅ CI 校验(见 ADR-022):`.github/workflows/validate.yml`,push/PR 时跑 `scripts/validate-charts.py`(所有 Application 的 Helm chart 来源跑 `helm template`,纯 manifest 来源做 YAML 语法检查)。明确拦不住"渲染成功但运行时跑不起来"这类问题(这次踩的坑大部分是这类),只拦 chart 版本写错/字段名写错/YAML 语法错误这些
-- ✅ 平台审计日志(见 ADR-024):Keycloak 登录/管理员事件、Trino 查询时间线都已确认流入 Loki,Grafana 有专门的"平台审计日志"看板(4 个面板,走真实查询链路验证过)。调研过 PostHog,发现已经不支持 k8s 部署、而且是面向消费端产品的分析工具,不适合这次的实际需求(平台审计,不是产品分析),没有采用
-- ✅ **Phase 3:JupyterHub 接 Keycloak SSO**(见 ADR-025):官方 chart,**真实浏览器完整验证过**——登录 → 拉起 notebook pod → JupyterLab 界面加载成功(用 Claude in Chrome 插件由 Claude 自己操作浏览器测的,不是只 curl 跳转参数)。过程中连续踩了三个只有走完整登录才会暴露的坑:双域名模式在 Keycloak 的 userinfo issuer 校验下不可用(改单一 issuer)、`Authenticator.allow_all` 默认 false 导致认证通过仍 403、`singleuser.memory` 必须用 `M/G` 不能用 k8s 惯用的 `Mi/Gi`。db 用默认的 sqlite-pvc,不接共享 Postgres
-- ✅ **Phase 3:Argo Workflows 接 Keycloak SSO**(见 ADR-026):官方 argo-helm 仓库,SSO 用单一 issuer 模式(和 ArgoCD 内置 OIDC 同款)。CRD 安装 Job 直连 GitHub 超时,用 chart 自带的 `crds.upgradeJob.extraEnv` 代理配置解决,不是本地发明的绕过办法
-- ✅ **Phase 3:KServe 模型上线服务**(见 ADR-027):Standard/RawDeployment 模式(不装 Knative)。demo-rf-classifier 从 MLflow Model Registry 真实部署为 InferenceService,V2 协议推理请求验证通过。踩了 4 个坑:CRD 太大 client-side apply 超注解上限(ServerSideApply=true)、chart 不带 ClusterServingRuntime(单独脚本装官方 config/runtimes)、MLflow 默认 skops 序列化 mlserver 镜像不认(改 pickle)、pickle 对 sklearn 版本敏感(训练环境和 serving 镜像版本要对齐)
-- KServe 的 canary 流量切分作为算法 A-B 实验的落点这条,留到真正有多版本对比需求时再做(见 `docs/architecture.md`"还没定的事")
+### 标准开源组件(官方 chart/官方镜像,我们只是配了 values)
 
-详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
+用法、原理、故障排查以对应项目自己的官方文档为准,这里不重复维护——重复抄一遍容易随上游升级过时。这个仓库里对应的只是"怎么把它接进这套平台"的集成配置,踩过的坑记在 [ADR](docs/decisions/) 里。完整版本清单(自动生成,不是手写维护、不会过时)见 [`docs/operations/upgrade.md`](docs/operations/upgrade.md),跑 `python3 scripts/list-component-versions.py` 拿到最新的。
+
+平台底座:ArgoCD、[ingress-nginx](https://kubernetes.github.io/ingress-nginx/)、[cert-manager](https://cert-manager.io/)、[Keycloak](https://www.keycloak.org/)(codecentric/keycloakx chart)、[kube-prometheus-stack](https://github.com/prometheus-operator/kube-prometheus-stack)(Prometheus + Grafana)、[Loki](https://grafana.com/oss/loki/) + [Grafana Alloy](https://grafana.com/docs/alloy/)。
+
+湖仓核心:[MinIO](https://min.io/)、[Trino](https://trino.io/)、[Apache Superset](https://superset.apache.org/)、[OpenMetadata](https://open-metadata.org/)、[OpenSearch](https://opensearch.org/)。
+
+数据工程:[Apache Kafka](https://kafka.apache.org/)([Strimzi](https://strimzi.io/) operator)、[Apache Airflow](https://airflow.apache.org/)、[Apache SeaTunnel](https://seatunnel.apache.org/)、[Spark Operator](https://github.com/kubeflow/spark-operator)。
+
+AI/ML:[JupyterHub](https://jupyterhub.readthedocs.io/)、[MLflow](https://mlflow.org/)、[Argo Workflows](https://argoproj.github.io/workflows/)、[KServe](https://kserve.github.io/website/)。
+
+通用:[oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/)(给没有原生 OIDC 的组件挡一层 SSO,MLflow/Spark History Server 各用了一份)。
+
+### 这个仓库自己维护的部分
+
+没有官方 Helm chart 的组件(官方镜像,manifest 自己写的),以及平台自己的集成/运维工具链:
+
+| 内容 | 是什么 | 文档 |
+|---|---|---|
+| `apps/postgres/`、`apps/hive-metastore/`、`apps/spark-history-server/` | 官方镜像 + 自己写的裸 K8s manifest(这几个组件没有官方 chart) | 各自的注释 + [ADR-029](docs/decisions/029-spark-permissions-and-observability.md) |
+| `platform/iam/` + `scripts/12-sync-iam.py` | 组织架构/角色数据表(YAML+CSV)→ 同步进 Keycloak Group/Role 的声明式同步工具 | [ADR-028](docs/decisions/028-iam-org-model.md) |
+| `platform/coredns-custom/` | 让集群内 pod 能解析 `*.local-lite.test` 这类本地域名的自定义 DNS zone | [ADR-016](docs/decisions/016-ingress-domains-local-lite.md) |
+| `platform/grafana-audit-dashboard/` | 平台审计日志看板(Keycloak 登录事件 + Trino 查询时间线) | [ADR-024](docs/decisions/024-platform-audit-logging.md) |
+| `scripts/list-project-images.py` + `export-image-cache.sh` | 扫描全部用到的容器镜像、导出本地缓存(内网环境准备用) | [ADR-018](docs/decisions/018-local-image-cache.md) |
+| `scripts/list-component-versions.py` | 汇总所有组件当前锁定的版本 | [ADR-010](docs/decisions/010-optional-components-versioning.md) |
+| `scripts/validate-charts.py` | CI 用:所有 Application 的 chart 来源跑 `helm template`,纯 manifest 做语法检查 | [ADR-022](docs/decisions/022-ci-chart-validation.md) |
+| `scripts/08/09/11-*.sh` | 端到端 demo(湖仓核心、AI/ML 训练→上线两条主线) | ADR-021/023/027 |
 
 ## 从零拉起整套服务(新集群 / 迁移到 GitLab / 生产 IDC)
 
@@ -93,6 +126,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 | 脚本 | 做什么 | 什么时候要(重新)跑 |
 |---|---|---|
 | `scripts/03-configure-keycloak.sh` | 建 platform realm + 各组件的 OIDC client | 每接一个新的 SSO 组件之后都要重跑一次(幂等,已存在的 client/用户不会被覆盖)——比如 JupyterHub/Argo Workflows 的 client 就是它们的 Application 先建好自己的 namespace 之后,再跑这个脚本才能建成 |
+| `scripts/12-sync-iam.py` | 把 `platform/iam/` 里的组织架构/角色数据同步进 Keycloak(Group/Role/成员) | 改了 `platform/iam/` 下任意文件之后 |
 | `scripts/05-configure-airflow.sh` | 建 Airflow 初始管理员账号 | Airflow 从 `pending-definitions/` 拉回来、Deployment 第一次起来之后 |
 | `scripts/06-configure-superset-datasources.sh` | 给 Superset 注册 Trino 数据源(服务账号认证) | Superset 或 Trino 任一个被重建之后 |
 | `scripts/07-fix-trino-liveness-probe.sh` | 修 Trino chart 里硬编码错的 livenessProbe(见 ADR-017) | **每次** `trino-coordinator` 这个 Deployment 被重新创建(不是重启,是整个 Deployment 对象重建)都要重跑,否则会一直被 kubelet 杀死重启 |
@@ -105,3 +139,15 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 `scripts/11-deploy-demo-inference-service.sh`(AI/ML:MLflow → KServe 上线)——
 这三个不是平台必需的初始化步骤,是用来验证端到端链路真的打通的演示脚本,
 随时可以重跑重建,细节和已知坑见 ADR-021/023/027。
+
+## 文档地图
+
+- [`docs/architecture.md`](docs/architecture.md) —— 架构总览、分层设计、组件清单、路线图(Phase 0-4)、还没定的设计决策
+- [`docs/decisions/`](docs/decisions/) —— ADR,每个非显而易见的技术选择,包含理由、踩过的坑、后续更正(是不是验证过、验证到什么程度都写在里面,不是"我们决定这么做"就完了)
+- [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md) —— 真实踩过的坑,排障时先查这里
+- [`docs/operations/upgrade.md`](docs/operations/upgrade.md) —— 当前版本清单 + 升级流程
+- [`docs/operations/backup.md`](docs/operations/backup.md) —— 备份策略
+
+## 当前状态
+
+Phase 0(平台底座)、Phase 1(湖仓核心)、Phase 3(AI/ML:JupyterHub/Argo Workflows/MLflow/KServe)核心链路已验证。Phase 2(数据工程:Kafka/Spark/Airflow/SeaTunnel)配置就绪、当前收在 `pending-definitions/` 按需拉起。企业级权限管理(组织架构同步、按组分角色)已落地,细粒度数据权限(Trino 行列级)、可插拔基础设施(目前只做了 Postgres 的参考例子)还在推进。完整的、持续更新的状态见 [`docs/architecture.md`](docs/architecture.md) 的路线图表格——这里不重复维护一份会过时的清单。

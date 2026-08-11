@@ -12,7 +12,7 @@
 2. **环境画像(Profile)** —— 同一套 Helm chart,不同 values 文件决定开哪些组件、配多少资源。`local-lite` / `cloud-full` / `prod` 是三个画像,不是三套代码。见 [ADR-004](decisions/004-environment-profiles.md)。
 3. **组件独立可升级** —— 每个组件是 ArgoCD 里独立的 Application,各自锁定 chart 版本、各自发布。禁止用一个大 umbrella chart 把所有组件焊在一起。
 4. **AI 原生可运维** —— GitOps 即操作接口:人和 AI Agent 都通过提交 Git 变更来操作平台。机器状态 = Git 状态,不允许手动 `kubectl apply` 之类的旁路操作。见 [ADR-005](decisions/005-argocd-gitops.md)、[ADR-006](decisions/006-ai-agent-identity-v1.md)。
-5. **治理预留位,不预先重** —— Keycloak 现在就上,是身份底座。Ranger 现在不部署,但查询引擎都通过标准插拔式授权接口接入 —— 以后装 Ranger 是配置变更,不是重新架构。
+5. **治理预留位,不预先重** —— Keycloak 现在就上,是身份底座。细粒度数据权限(行/列级)现在不部署,但查询引擎都通过标准插拔式授权接口接入 —— 以后装(倾向于 OPA,理由见 [ADR-028](decisions/028-iam-org-model.md))是配置变更,不是重新架构。
 
 ## 分层架构
 
@@ -31,7 +31,7 @@
 │ 镜像仓库(Harbor)│ ├─────────────────────────────────────────┤
 │ 可观测性      │   │ L0 · 湖仓核心(存储与元数据)                    │
 │              │   │ MinIO · Postgres · Hive Metastore ·      │
-│              │   │ Iceberg · Trino · Ranger(预留)·HBase*/Doris*│
+│              │   │ Iceberg · Trino · OPA(预留,细粒度权限)·HBase*/Doris*│
 └──────────────┘   └─────────────────────────────────────────┘
       ▲                              ▲
       │ push → 同步                    │ Trino 联邦查询 · 渐进迁移
@@ -60,7 +60,7 @@
 | 湖仓 | Trino | 交互式 SQL / 联邦查询 | 重 | — | ✅ | ✅ | Phase 1 |
 | 湖仓 | OpenMetadata | 数据目录 / 血缘 | 重 | — | ✅ | ✅ | Phase 1 |
 | 湖仓 | Superset | BI / 看板 | 中 | — | ✅ | ✅ | Phase 1 |
-| 湖仓 | Ranger | 细粒度权限 | 重 | — | — | ✅ | Phase 4 |
+| 湖仓 | OPA(原计划 Ranger,见 ADR-028) | 细粒度权限(行/列级) | 中 | — | — | ✅ | Phase 4 |
 | 湖仓 | HBase / Doris | KV / OLAP,按需 | 重 | — | — | 可选 | Backlog |
 | 数据工程 | Airflow | 批处理编排 | 中 | — | ✅ | ✅ | Phase 2 |
 | 数据工程 | SeaTunnel | 批流一体数据集成 | 中 | — | ✅ | ✅ | Phase 2 |
@@ -78,18 +78,18 @@
 
 - **local-lite**(本机 M2/16GB/colima + k3s):Kubernetes + ArgoCD + Ingress + Keycloak + Prometheus/Grafana + MinIO + Postgres + Hive Metastore + Iceberg。目标是验证 GitOps 流程和存储/元数据打通,不追求性能。
 - **cloud-full**(公有云或公司 IDC 机房,建议 ≥32GB;demo 跑通后再接入,生产大概率落在自有 IDC):local-lite 全部 + Trino/Superset/OpenMetadata + Airflow/SeaTunnel/Spark Operator/Kafka + JupyterHub/MLflow/Argo Workflows/KServe。目标是功能完整的开发与集成验证环境。
-- **prod**:cloud-full 全部 + Harbor + Ranger + 接入现有遗留 Hadoop 集群(Trino 联邦)+ 按需 Flink/Feast/HBase/Doris。目标是替换掉现有的旧平台。
+- **prod**:cloud-full 全部 + Harbor + OPA(细粒度数据权限)+ 接入现有遗留 Hadoop 集群(Trino 联邦)+ 按需 Flink/Feast/HBase/Doris。目标是替换掉现有的旧平台。
 
 ## 路线图
 
 | Phase | 目标 | 退出标准 |
 |---|---|---|
-| 0 | 平台底座 | 改一个 values 文件、push,ArgoCD 能自动同步到集群 |
+| 0 | 平台底座 | ✅ 改一个 values 文件、push,ArgoCD 能自动同步到集群。✅ 企业级权限管理(2026-08-11,见 ADR-028):组织架构/角色数据表(`platform/iam/`)声明式同步进 Keycloak Group/Role,ArgoCD/Grafana/JupyterHub/MLflow 都已改成按 group 映射角色(不再是"登进来就是管理员"),真实浏览器验证过。可插拔外部基础设施(ADR-030)起步,目前只做了 Postgres 的参考例子(Keycloak + Hive Metastore) |
 | 1 | 湖仓核心(local-lite) | ✅ 建一张 Iceberg 表、写入,Trino 读出、Superset 出图(2026-08-10 验证,见 `scripts/08-create-demo-data.sh`);Spark 读出还没做,留到 Spark Operator 真正跑作业时一起验证 |
-| 2 | 数据工程(转 cloud-full) | SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通 |
+| 2 | 数据工程(转 cloud-full) | SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通。Spark 权限/可观测性配置已就绪(ADR-029:History Server + oauth2-proxy SSO,Grafana 指标暴露),等 Spark Operator 真正启用时一起验证 |
 | 3 | AI/ML | ✅ 核心链路已验证(2026-08-11,见 ADR-025/026/027):JupyterHub/Argo Workflows/MLflow 接了 Keycloak SSO,模型训练 → MLflow 注册 → KServe(Standard 模式)部署成 InferenceService,V2 协议推理请求验证通过(`scripts/09-train-demo-model.sh` + `scripts/11-deploy-demo-inference-service.sh`)。算法/模型 A-B 实验用 KServe 原生的 canary 流量切分这条还没做(不是单独部署一套产品分析工具,见下面"还没定的事"里 2026-08-11 那条) |
 | 3.5 | AI 闭环验证 | Feast 打通离线/在线特征,接入模型服务 |
-| 4 | 企业化增强(prod) | Harbor + Ranger + 遗留集群正式联邦对接,可作为旧平台替代方案上生产 |
+| 4 | 企业化增强(prod) | Harbor + 遗留集群正式联邦对接,可作为旧平台替代方案上生产。Trino 细粒度数据权限倾向于用 OPA 而不是 Ranger——Ranger 官方(Apache 项目本身)没有维护 Helm chart,不满足这个项目"只用官方支持的部署方式"的门槛,OPA 有官方 chart 且 Trino 原生支持行过滤/列脱敏,见 ADR-028"后续"部分 |
 
 ## 还没定的事
 
@@ -109,7 +109,7 @@
   不再计划单独部署 PostHog 或者同类产品分析工具。
 - 云服务器什么时候接入、大概配置 —— 决定 Phase 2 什么时候能开始
 - GitHub 仓库建在个人账号还是组织下,是否私有
-- Ranger 的插拔式授权点现在要不要在 Trino/Hive 配置里提前占位
+- ~~Ranger 的插拔式授权点现在要不要在 Trino/Hive 配置里提前占位~~ **已解决(2026-08-11,ADR-028)**:倾向于 OPA 不用 Ranger(Ranger 官方没有维护 Helm chart),Trino 原生支持通过 OPA 做行过滤/列脱敏,设计留到真正要做的时候展开
 - ~~Superset 查 Trino 用什么身份~~ **已解决(2026-08-10,ADR-021)**:方案 (a),
   给 Trino 加了并存的 PASSWORD 认证方式,专门给 Superset 用的服务账号
   (`superset_service`,file password authenticator + bcrypt),人类继续走
