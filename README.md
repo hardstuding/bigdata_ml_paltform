@@ -31,17 +31,19 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 - ✅ Phase 1(湖仓核心):MinIO + Postgres + Hive Metastore + Trino,已验证端到端建表/写入/读出 Iceberg 表,数据真实落盘到 MinIO(Spark 侧读写还未验证,留到 Spark Operator 真正跑作业时一起做)
 - ✅ **端到端 demo 打通了,Data 和 AI 两条主线都有**:
   - 湖仓核心:真实 Iceberg 表(`iceberg.demo.orders`)→ Trino(服务账号认证,见 ADR-021)→ Superset Dataset/Chart/Dashboard,走的是 Superset 真实的图表查询链路验证过。`./scripts/08-create-demo-data.sh` 一键重建,浏览器登录后开 `http://superset.local-lite.test/superset/dashboard/demo-lakehouse-core-path/` 能看到图
-  - AI/ML:真实训练一个 sklearn 模型 → MLflow 记录实验/指标 → Model Registry 注册,Registry API 确认真的存在(见 ADR-023)。`./scripts/09-train-demo-model.sh` 一键重跑(本机 Python 环境需要 `pip install mlflow-skinny scikit-learn skops boto3`),浏览器登录后开 `http://mlflow.local-lite.test/` 能看到实验和模型
+  - AI/ML:真实训练一个 sklearn 模型 → MLflow 记录实验/指标 → Model Registry 注册,Registry API 确认真的存在(见 ADR-023)→ KServe 部署成真实 InferenceService,V2 协议推理请求验证过返回随输入变化的分类结果(见 ADR-027)。`./scripts/09-train-demo-model.sh` 训练+注册,`./scripts/11-deploy-demo-inference-service.sh` 部署上线(本机 Python 环境需要 `pip install mlflow-skinny scikit-learn==1.7.0 boto3`,scikit-learn 版本要和 KServe 的 mlserver 镜像对齐,见 ADR-027 踩坑 4)。MLflow 验证完已重新 park,重跑demo前先 `git mv environments/cloud-full/pending-definitions/mlflow.yaml apps/definitions/`
 - ✅ Phase 2(数据工程,配置已验证、当前收在 `environments/cloud-full/pending-definitions/`):Kafka(Strimzi)、Spark Operator、Airflow、SeaTunnel
-- ✅ OpenMetadata + OpenSearch:已验证功能可用,配置收在 `pending-definitions/`(需要时用 `scripts/local-lite-toggle-heavy.sh on` 拉回来,colima 内存已经从 6GB 扩到 9GB,同时跑的余地比之前宽松很多);MLflow 目前保持在线跑 demo
+- ✅ OpenMetadata + OpenSearch:已验证功能可用,配置收在 `pending-definitions/`(需要时用 `scripts/local-lite-toggle-heavy.sh on` 拉回来,colima 内存已经从 6GB 扩到 9GB,同时跑的余地比之前宽松很多);MLflow 同样收在 `pending-definitions/`,按需临时拉起
 - ✅ **Keycloak SSO 已经打通 ArgoCD、Grafana、Trino、Superset、OpenMetadata、MLflow、JupyterHub 七个组件**,统一登录。踩坑细节见 ADR-017(Trino,原生 OIDC 但强制要求 TLS,外加一个 chart 把 livenessProbe 打死端口的隐藏 bug)、ADR-019(MLflow,没有原生 OIDC,用 oauth2-proxy 挡在前面)、ADR-021(Superset 后端连 Trino 用 OAUTH2+PASSWORD 并存的服务账号,OAuth2 的 Authorization Code 模式是给人在浏览器操作设计的,不适合服务到服务)、ADR-025(JupyterHub,和 Grafana 同一种"两个 URL 分开配"模式)、troubleshooting.md(OpenMetadata 认证配置只在数据库首次初始化时生效、Superset 缺 authlib 包、组件重新拉起来常见的 Postgres 密码漂移问题)。浏览器完整登录待你在自己机器上加好 `/etc/hosts`(`argocd`/`grafana`/`trino`/`superset`/`openmetadata`/`mlflow`/`jupyterhub`.local-lite.test → 127.0.0.1)后自己试一遍
 - ✅ 本地镜像缓存(见 ADR-018):`scripts/list-project-images.py` 扫描出这个项目用到的全部镜像,`scripts/export-image-cache.sh` 导出到本地 `image-cache/`(git-ignored)——为公司内网出不去国外做准备,以后能直接搬这份缓存去内网机器 `docker load` + 推到公司内部仓库,不用重新连国外源拉
 - ✅ 集中日志(见 ADR-020):Loki(SingleBinary)+ Grafana Alloy,8 个命名空间的日志已经真实进了 Loki,Grafana 加了 Loki 数据源,指标和日志能在同一个界面查。Alloy 踩了两个坑:`loki.source.kubernetes` 被本机代理拦截拉不到数据,改用 hostPath 读日志文件;`/var/log/pods` 里的日志文件是指向 docker 日志驱动实际存储位置的符号链接,要多开一个 mount 才行
 - ✅ colima 内存从 6GB 扩到 9GB(本机是 16GB,还有余量),之前几乎每次装重组件都要精细监控内存、装完就收回去的紧张状态大幅缓解
 - ✅ CI 校验(见 ADR-022):`.github/workflows/validate.yml`,push/PR 时跑 `scripts/validate-charts.py`(所有 Application 的 Helm chart 来源跑 `helm template`,纯 manifest 来源做 YAML 语法检查)。明确拦不住"渲染成功但运行时跑不起来"这类问题(这次踩的坑大部分是这类),只拦 chart 版本写错/字段名写错/YAML 语法错误这些
 - ✅ 平台审计日志(见 ADR-024):Keycloak 登录/管理员事件、Trino 查询时间线都已确认流入 Loki,Grafana 有专门的"平台审计日志"看板(4 个面板,走真实查询链路验证过)。调研过 PostHog,发现已经不支持 k8s 部署、而且是面向消费端产品的分析工具,不适合这次的实际需求(平台审计,不是产品分析),没有采用
-- ✅ **Phase 3 起步:JupyterHub 接 Keycloak SSO**(见 ADR-025):官方 chart,OAuth2 授权跳转已验证(client_id/redirect_uri/PKCE 都对)。域名解析用的是 Grafana 那套"两个 URL 分开配"模式,不需要 hostAliases/CoreDNS。db 用默认的 sqlite-pvc,不接共享 Postgres
-- ⏳ 还没碰:Argo Workflows、KServe(Phase 3 剩余部分,KServe 的 canary 流量切分也是算法 A-B 实验的落点,见 ADR 和 `docs/architecture.md`"还没定的事")——见 `docs/decisions/`
+- ✅ **Phase 3:JupyterHub 接 Keycloak SSO**(见 ADR-025):官方 chart,OAuth2 授权跳转已验证(client_id/redirect_uri/PKCE 都对)。域名解析用的是 Grafana 那套"两个 URL 分开配"模式,不需要 hostAliases/CoreDNS。db 用默认的 sqlite-pvc,不接共享 Postgres
+- ✅ **Phase 3:Argo Workflows 接 Keycloak SSO**(见 ADR-026):官方 argo-helm 仓库,SSO 用单一 issuer 模式(和 ArgoCD 内置 OIDC 同款)。CRD 安装 Job 直连 GitHub 超时,用 chart 自带的 `crds.upgradeJob.extraEnv` 代理配置解决,不是本地发明的绕过办法
+- ✅ **Phase 3:KServe 模型上线服务**(见 ADR-027):Standard/RawDeployment 模式(不装 Knative)。demo-rf-classifier 从 MLflow Model Registry 真实部署为 InferenceService,V2 协议推理请求验证通过。踩了 4 个坑:CRD 太大 client-side apply 超注解上限(ServerSideApply=true)、chart 不带 ClusterServingRuntime(单独脚本装官方 config/runtimes)、MLflow 默认 skops 序列化 mlserver 镜像不认(改 pickle)、pickle 对 sklearn 版本敏感(训练环境和 serving 镜像版本要对齐)
+- KServe 的 canary 流量切分作为算法 A-B 实验的落点这条,留到真正有多版本对比需求时再做(见 `docs/architecture.md`"还没定的事")
 
 详见 [`docs/architecture.md`](docs/architecture.md) 里的路线图,踩过的坑都记在 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md)。
 
