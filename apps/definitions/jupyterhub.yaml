@@ -60,6 +60,12 @@ spec:
               # 不配任何 allowed_*/admin_* 会导致认证成功但 403 "not
               # currently authorized",见 ADR-025 更正 2):这次是主动配
               # allowed_groups,不是碰到那个坑再补。
+              #
+              # manage_groups 必须开:admin_groups 单独配不生效,真实报错是
+              # "GenericOAuthenticator.admin_groups requires
+              # GenericOAuthenticator.manage_groups to also be set",hub
+              # 直接 CrashLoopBackOff 起不来(第一次部署时踩到,补的这行)。
+              manage_groups: true
               allowed_groups:
                 - platform-team
                 - algorithm-team
