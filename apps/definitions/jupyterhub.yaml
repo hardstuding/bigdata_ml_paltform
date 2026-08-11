@@ -1,0 +1,112 @@
+# 官方 jupyterhub/jupyterhub chart(hub.jupyter.org 发布,不是社区非官方
+# 维护的,和当初否决 PostHog 是同一条筛选标准)。KubeSpawner 是这个 chart
+# 的默认 spawner,每个用户登录后会拉起一个独立的 notebook Pod,不需要额外
+# 配置。
+#
+# 认证:hub 镜像自带 oauthenticator 包(实测确认过,不是猜的),用
+# GenericOAuthenticator 接 Keycloak——和 Grafana 是同一个模式(见
+# platform/apps/kube-prometheus-stack.yaml):authorize_url 用浏览器能到达的
+# 域名(只用来拼跳转链接,hub 自己不会主动请求这个地址),token_url/
+# userdata_url 用集群内部域名(hub 后端自己发起请求)。这样不需要像
+# ArgoCD/Trino 那样额外配 hostAliases/CoreDNS,hub pod 完全不需要解析
+# keycloak.local-lite.test 这个域名。
+#
+# db 用 chart 默认的 sqlite-pvc,不接共享 Postgres——hub 的状态(谁登录过、
+# 谁的 server 在跑)不是别的组件需要联动的数据,没有理由为了这个单独接一次
+# Postgres,和当初给 Keycloak/Trino 接 Postgres(数据会被其他东西依赖,或者
+# 丢了代价很大)是不同的权衡。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jupyterhub
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://hub.jupyter.org/helm-chart/
+    chart: jupyterhub
+    targetRevision: 4.4.1
+    helm:
+      valuesObject:
+        hub:
+          config:
+            JupyterHub:
+              authenticator_class: generic-oauth
+              admin_access: true
+            GenericOAuthenticator:
+              client_id: jupyterhub
+              authorize_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/auth"
+              token_url: "http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/token"
+              userdata_url: "http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/userinfo"
+              login_service: "Keycloak"
+              username_claim: "preferred_username"
+              scope:
+                - "openid"
+                - "profile"
+                - "email"
+              oauth_callback_url: "http://jupyterhub.local-lite.test/hub/oauth_callback"
+          extraEnv:
+            OAUTH_CLIENT_SECRET:
+              valueFrom:
+                secretKeyRef:
+                  name: jupyterhub-oidc-secret
+                  key: clientSecret
+          extraConfig:
+            "01-oauth-secret": |
+              import os
+              c.GenericOAuthenticator.client_secret = os.environ["OAUTH_CLIENT_SECRET"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+        singleuser:
+          memory:
+            guarantee: 512Mi
+            limit: 1536Mi
+          cpu:
+            # chart 的 schema 要求这里是纯数字(CPU 核数),不是
+            # Kubernetes 常见的 "100m" 这种带单位字符串,0.1 = 100m。
+            guarantee: 0.1
+          storage:
+            capacity: 2Gi
+          # 训练 demo 用的 scikit-learn/mlflow 这些包默认镜像不带,和
+          # scripts/09-train-demo-model.sh 在本机 Python 环境里手动 pip
+          # install 是同一个道理——用户在 notebook 里自己按需装,不为了
+          # 这个单独 build 一份自定义镜像。
+          startTimeout: 300
+        proxy:
+          # 前面已经有 ingress-nginx 做外部入口了,不需要 chart 默认的
+          # LoadBalancer 类型再单独暴露一次(k3s 上会占用 ServiceLB 的
+          # 另一个端口,没必要)。
+          service:
+            type: ClusterIP
+          chp:
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 256Mi
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts:
+            - jupyterhub.local-lite.test
+        scheduling:
+          userPlaceholder:
+            enabled: false
+          userScheduler:
+            enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jupyterhub
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

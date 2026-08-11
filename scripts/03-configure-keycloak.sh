@@ -104,6 +104,10 @@ fi
 echo "==> grafana client"
 create_client_if_absent grafana '["http://grafana.local-lite.test/login/generic_oauth"]' monitoring grafana-oidc-secret clientSecret
 
+echo "==> jupyterhub client"
+# oauthenticator 的回调路径固定是 /hub/oauth_callback。
+create_client_if_absent jupyterhub '["http://jupyterhub.local-lite.test/hub/oauth_callback"]' jupyterhub jupyterhub-oidc-secret clientSecret
+
 echo "==> trino client"
 # Trino OAuth2 的回调路径固定是 /oauth2/callback,不能改。
 create_client_if_absent trino '["http://trino.local-lite.test/oauth2/callback"]' trino trino-oidc-secret clientSecret
