@@ -1,6 +1,8 @@
 # 019. MLflow 没有原生 OIDC,用 oauth2-proxy 挡在前面接 Keycloak SSO
 
-- 状态: 已采纳(2026-08-09,已验证:OAuth2 授权跳转,client_id/redirect_uri 都对)
+- 状态: 已采纳(2026-08-09,已验证:OAuth2 授权跳转,client_id/redirect_uri 都对)。
+  **2026-08-12 更正**:当初"已验证"的其实只是跳转参数对不对,oauth2-proxy
+  这个 Pod 本身能不能真的起来从来没有实测过——见下面"2026-08-12 更正"。
 
 ## 背景
 
@@ -46,3 +48,28 @@ pip 包的镜像。这和这个项目一直坚持的"尽量用官方镜像,不�
 - `cookie_secure = false` 是 local-lite 专属(没有 TLS,见 ADR-016),
   cloud-full/prod 接了真实 TLS 之后要改回 `true`(默认值),否则 cookie
   会被浏览器当成不安全连接拒绝存储,登录会一直被弹回登录页。
+
+## 2026-08-12 更正:cookie-secret 长度写错了,MLflow 的 oauth2-proxy Pod 很可能从没真的起来过
+
+部署权限申请门户(ADR-032)时第一次真正启动一个新的 oauth2-proxy 实例,
+才发现上面"决策"里那条"`cookie-secret` 必须是 16/24/32 字节的合法
+base64"的说法本身没错,但 `scripts/00-generate-secrets.sh` 里当初的实现
+`openssl rand -base64 32` 是错的——那是 32 字节随机数**编码成 base64 之后**
+的字符串,长度会变成 44 个字符,而 oauth2-proxy 校验的是**字符串本身的
+原始长度**要等于 16/24/32,不是"解码后"的字节数。直接导致 Pod
+`CrashLoopBackOff`,报 `cookie_secret must be 16, 24, or 32 bytes... but
+is 44 bytes`,不是能跑但有点小问题,是完全起不来。
+
+查了一下当前集群里 MLflow 那份 `oauth2-proxy-secret`,`cookie-secret`
+同样是 44 字节——**说明这个 bug 从 MLflow 的 oauth2-proxy 第一次建这个
+Secret 起就一直在**,当初"已验证"的其实只是 OAuth2 授权跳转参数对不对
+(client_id/redirect_uri 这些,靠 curl 就能测),从来没有真的让 Pod 完整
+启动过、走完真实登录。这和这个项目反复踩到的同一类教训一致(ADR-017 的
+livenessProbe、ADR-025 的 JupyterHub 三连坑):**"跳转参数对"不等于"这个
+组件能用",必须真的把 Pod 跑起来、走完整个流程才算数**。
+
+已经热修复了当前集群里 MLflow 的这份 Secret(和权限申请门户的一起改的,
+脚本本身也改成 `openssl rand -base64 24`,编码后刚好 32 个字符、没有
+padding)。MLflow 现在是 park 状态,这个修复还没有通过真实拉起来验证——
+下次从 `pending-definitions/` 挪回来测试时,应该确认 oauth2-proxy Pod 是
+`Running` 而不是 `CrashLoopBackOff`,不能想当然认为这条链路已经没问题了。

@@ -54,6 +54,16 @@ Prometheus Operator 真的去抓。**没有实际去建 Grafana 面板**——�
 验证的东西"原则一致(ADR-024 的审计看板是先有真实数据流入 Loki 才建的
 面板,不是反过来)。留到 Spark Operator 真正启用、有真实指标产生时再建。
 
+## 2026-08-12 补充
+
+Spark History Server 这份 oauth2-proxy 还没被真实拉起来验证过(Spark
+Operator 本身还是 park 状态),但共用的 `scripts/00-generate-secrets.sh`
+里生成 `cookie-secret` 那段代码有一个之前没发现的长度 bug(`openssl rand
+-base64 32` 编码后是 44 字符,oauth2-proxy 要求原始字符串长度必须是
+16/24/32),已经在 ADR-019 的更正里改成 `openssl rand -base64 24` 并说明
+了根因——这个组件目前还没建到这份 Secret(namespace 不存在),不需要
+额外的热修复,以后第一次生成时就会是对的。
+
 ## 顺带修的东西
 
 - `scripts/validate-charts.py` 新增 `KNOWN_CLUSTER_API_VERSIONS`
