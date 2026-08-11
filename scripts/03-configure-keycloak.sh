@@ -190,7 +190,14 @@ if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/nu
   echo "已存在,跳过(不会重置密码)"
 else
   USER_PW="$(gen_password | cut -c1-16)"
+  # firstName/lastName 不是随便填的:Keycloak 的 User Profile 校验把这两个
+  # 字段标成必填,账号没填就登录不了(password grant 报 invalid_grant /
+  # "Account is not fully set up",错误信息完全看不出跟 first/last name 有
+  # 关系)。之前"admin"这个账号没踩到是因为它很早就通过浏览器登录时被要求
+  # "更新个人资料"补填过一次,新建账号(比如 scripts/12-sync-iam.py 建的)
+  # 不会有这个补救机会,必须一开始就填。
   kcadm create users -r platform -s username="$INITIAL_USER" -s email="$INITIAL_EMAIL" \
+    -s firstName="$INITIAL_USER" -s lastName="$INITIAL_USER" \
     -s enabled=true -s emailVerified=true
   kcadm set-password -r platform --username "$INITIAL_USER" --new-password "$USER_PW" --temporary=false
   mkdir -p secrets

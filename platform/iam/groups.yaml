@@ -1,0 +1,20 @@
+# 组定义——组叫什么名字、对应哪些角色(见 roles.yaml),改动很少。谁在
+# 组里是 memberships.csv 管的,不在这个文件里,见
+# docs/decisions/028-iam-org-model.md。
+groups:
+  - name: platform-team
+    display_name: 平台组(维护这套基础设施的人)
+    roles:
+      - platform-admin
+  - name: data-analysts
+    display_name: 数据分析师
+    roles:
+      - data-analyst
+  - name: algorithm-team
+    display_name: 算法工程组
+    roles:
+      - ml-engineer
+  - name: viewers
+    display_name: 只读访客
+    roles:
+      - viewer

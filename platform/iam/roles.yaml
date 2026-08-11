@@ -1,0 +1,13 @@
+# 角色定义——改动很少(新增一种角色类型才需要动这个文件),所以用 YAML,
+# 带上说明文字。"谁属于哪个组"这种高频变动的数据在 groups.yaml(组本身,
+# 也是低频)和 memberships.csv(人-组归属,高频,纯表格)里,分开是因为
+# 变动频率不一样,不是随手拆的。见 docs/decisions/028-iam-org-model.md。
+roles:
+  platform-admin:
+    description: 平台管理员——ArgoCD/Grafana/Trino 等所有组件的管理员权限
+  data-analyst:
+    description: 数据分析师——Trino 查询 + Grafana 只读看板。表级/行列级细粒度权限见 Trino OPA 策略(ADR-028,待建)
+  ml-engineer:
+    description: 算法工程师——JupyterHub/MLflow/Argo Workflows/KServe 的使用权限
+  viewer:
+    description: 只读访问——只能看 Grafana 看板,没有其他权限,给临时访客/审计用

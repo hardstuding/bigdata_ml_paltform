@@ -59,9 +59,13 @@ spec:
               auth_url: http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/auth
               token_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/token
               api_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/userinfo
-              # local-lite 简化:第一个登录的人自动拿 Admin,人多起来之前要换成
-              # 按 Keycloak group 映射角色(和 ArgoCD RBAC 那条同一个待办)。
-              role_attribute_path: "'Admin'"
+              # 2026-08-11 起改成按 Keycloak group 映射角色(见 ADR-028、
+              # platform/iam/),和 ArgoCD RBAC 那条是同一次改的。JMESPath
+              # 没有真正的三元表达式,`条件 && '值' || '值'` 是 Grafana 官方
+              # 文档推荐的写法。没匹配到任何已知 group 的人落到 Viewer,不是
+              # 空权限——和 ArgoCD 故意"零权限报错"的姿态不一样,是因为
+              # Grafana 看板本身信息敏感度低,给个只读兜底比强制报错更实用。
+              role_attribute_path: "contains(groups, 'platform-team') && 'Admin' || (contains(groups, 'data-analysts') && 'Editor' || (contains(groups, 'algorithm-team') && 'Editor' || 'Viewer'))"
           persistence:
             enabled: false
           # 集中日志(见 platform/apps/loki.yaml),这样 Grafana 里指标

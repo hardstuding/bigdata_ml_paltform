@@ -41,7 +41,15 @@ configs:
       clientSecret: $oidc.keycloak.clientSecret
       requestedScopes: ["openid", "profile", "email"]
   rbac:
-    # local-lite 简化处理:登录即 admin,只有我一个受信用户在用。接入更多人
-    # 或者上 cloud-full/prod 之前,要换成按 Keycloak group 做角色映射
-    # (见 docs/decisions/006-ai-agent-identity-v1.md 的"用真实需求驱动"原则)。
-    policy.default: role:admin
+    # 2026-08-11 起改成按 Keycloak group 做角色映射(见 ADR-028、
+    # platform/iam/):group 名字从 token 的 groups claim 里读("roles" 这个
+    # 默认 client scope 上加了 group-membership mapper,见 ADR-028),
+    # ArgoCD 默认就认 groups claim,不需要额外配 oidc.config 指定claim名字。
+    # policy.default 留空(不是 role:admin 了)——不在任何已知 group 里的人
+    # 登进来是"零权限",不是兜底 admin,这是刻意的:宁可漏权限报错让人来问,
+    # 不要漏配置导致意外授权。
+    policy.csv: |
+      g, platform-team, role:admin
+      g, data-analysts, role:readonly
+      g, algorithm-team, role:readonly
+      g, viewers, role:readonly
