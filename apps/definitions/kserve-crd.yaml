@@ -3,6 +3,13 @@
 # wave)——kserve-resources 里的自定义资源如果先于 CRD 装上会报错,ArgoCD 的
 # selfHeal 会自动重试,等 CRD 装完就收敛,和 hive-metastore 等 Postgres
 # 启动是同一个"不需要显式排队,自愈会追上"的模式,见 troubleshooting.md。
+#
+# ServerSideApply=true 是必须的,不是可选优化:inferenceservices CRD 内嵌的
+# OpenAPI schema 太大,ArgoCD 默认的 client-side kubectl apply 会把整份
+# manifest 写进 kubectl.kubernetes.io/last-applied-configuration 注解,超过
+# k8s 单个注解 262144 字节的硬限制,报 "Too long" 直接同步失败、无限重试。
+# server-side apply 不写这个注解,绕开这个限制(KServe 官方文档也建议大 CRD
+# 用 server-side apply,不是我们发明的绕过办法)。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -25,3 +32,4 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
