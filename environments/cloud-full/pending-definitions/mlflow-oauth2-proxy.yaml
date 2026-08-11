@@ -44,6 +44,14 @@ spec:
             # OpenMetadata)点开就直接跳转的体验不一致。只有一个 provider,
             # 跳过这个中间页更合理。
             skip_provider_button = true
+            # 2026-08-11 起按 Keycloak group 收紧(和 ArgoCD/Grafana/
+            # JupyterHub 是同一次企业级权限收拢,见 ADR-028、platform/iam/)。
+            # oidc_groups_claim 默认就是 "groups",这里写出来是让配置自解释,
+            # 不是必须覆盖默认值。--allowed-group 是 oauth2-proxy 官方原生
+            # 支持的选项(直接跑过官方镜像的 --help 确认过,不是猜的),不需要
+            # 额外的插件或改造。
+            oidc_groups_claim = "groups"
+            allowed_groups = [ "platform-team", "algorithm-team" ]
         ingress:
           enabled: true
           className: nginx

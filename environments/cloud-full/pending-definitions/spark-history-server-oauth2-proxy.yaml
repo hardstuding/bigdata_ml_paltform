@@ -27,6 +27,10 @@ spec:
             # 和 ingress-nginx 之间是明文 HTTP,不关掉这个 cookie 存不住。
             cookie_secure = false
             skip_provider_button = true
+            # 按 Keycloak group 收紧,和 mlflow-oauth2-proxy 同一次改动
+            # (见 ADR-028、platform/iam/)。
+            oidc_groups_claim = "groups"
+            allowed_groups = [ "platform-team", "algorithm-team" ]
         ingress:
           enabled: true
           className: nginx
