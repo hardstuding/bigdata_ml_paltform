@@ -85,3 +85,26 @@ Operator 本身还是 park 状态),但共用的 `scripts/00-generate-secrets.sh`
   (比如要求所有 Spark UI 访问都留痕),需要重新评估。
 - Hive Metastore 目前也完全没有鉴权(查过,没有 auth/kerberos 相关配置),
   这次没有一起处理,是另一块待补的空白,不在这次范围内。
+
+## 2026-08-12 补充:PySpark 作业的资源回收
+
+用户提到数分/算法工程师提交的作业(notebook 和 PySpark)可能长时间不主动
+关闭,一直占着资源。这个其实是两个独立的场景,回收机制不一样:
+
+1. **PySpark 跑在 JupyterHub notebook pod 里(client 模式,最常见的用法,
+   driver 就是 notebook 进程本身)**:JupyterHub 的 idle-culler(见
+   ADR-025,2 小时无活动自动关 notebook server)已经覆盖了这个场景——
+   notebook pod 被回收,里面的 PySpark driver 自然跟着没了,不需要
+   额外机制。
+2. **PySpark 通过 spark-operator 提交成独立的 SparkApplication(cluster
+   模式,driver/executor 是独立于 notebook 的 pod)**:这个不受 JupyterHub
+   culler 管,需要 SparkApplication 自己的字段
+   `spec.timeToLiveSeconds`——作业完成/失败后超过这个秒数自动清理资源
+   (这是 CRD 本身的字段,查过 chart 的 `values.yaml`,operator 级别没有
+   一个全局开关能统一设置,只能在**每一个提交的 SparkApplication** 里
+   自己带上)。真正提交作业的地方(以后大概率是 Airflow DAG 或 Argo
+   Workflow 模板拼出来的 SparkApplication manifest)要记得带上这个字段,
+   这次没有一起做,因为 Spark Operator 还是 park 状态,没有真实的作业
+   提交模板可以改——等真的有提交作业的模板(Airflow operator/Argo
+   Workflow template)时,要把 `timeToLiveSeconds` 设成默认值写进模板里,
+   不能指望每次手写的人自己记得加。

@@ -57,6 +57,7 @@ echo "已开启 platform realm 的登录事件 + 管理员事件审计日志"
 # 最大会话长度,减少这种"必须有人在电脑前才能继续调试"的等待。生产环境的
 # 会话策略应该由公司自己的安全基线决定,这里的宽松值只适合 local-lite/开发
 # 联调场景,cloud-full/prod 部署时应该按公司安全要求重新评估这两个值。
+# 【可调参数,见 docs/operations/tuning.md】
 kcadm update realms/platform \
   -s ssoSessionIdleTimeout=28800 \
   -s ssoSessionMaxLifespan=86400

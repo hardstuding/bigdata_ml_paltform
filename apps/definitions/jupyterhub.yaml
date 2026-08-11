@@ -129,6 +129,7 @@ spec:
         # timeout=7200(2 小时无活动就关,比 chart 默认的 1 小时宽松,给
         # 数分/算法工程师留够思考/开会中途不动的余量)、every=600(每 10
         # 分钟检查一次,chart 默认值)。
+        # 【可调参数,见 docs/operations/tuning.md】
         cull:
           enabled: true
           timeout: 7200

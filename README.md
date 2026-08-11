@@ -155,6 +155,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 - [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md) —— 真实踩过的坑,排障时先查这里
 - [`docs/operations/upgrade.md`](docs/operations/upgrade.md) —— 当前版本清单 + 升级流程
 - [`docs/operations/backup.md`](docs/operations/backup.md) —— 备份策略
+- [`docs/operations/tuning.md`](docs/operations/tuning.md) —— 哪些参数预期要按自己情况调,调哪个文件
 
 ## 当前状态
 
