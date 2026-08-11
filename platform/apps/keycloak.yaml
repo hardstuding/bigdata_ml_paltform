@@ -52,6 +52,16 @@ spec:
             value: "info"
           - name: KC_SPI_EVENTS_LISTENER_JBOSS_LOGGING_ERROR_LEVEL
             value: "warn"
+        # 【可插拔基础设施】公司已经有自己的 Postgres 了,不想再多跑一份
+        # 我们打包的 Postgres?改这 5 行指向你自己的实例就行,chart 原生就
+        # 支持独立配 hostname/port/database/username/existingSecret,不需要
+        # 改代码。同时要做两件事:1) 别装
+        # apps/definitions/keycloak-db-init.yaml(那个 Job 会尝试
+        # CREATE DATABASE,对着别人的生产库这么干大概率没权限,也不合适——
+        # 数据库/用户应该由你们自己的 DBA 按平时的流程建);2) 手动建一个
+        # `keycloak-db` Secret,key 是 `password`,值是 DBA 给你的密码。
+        # 默认(不改这段)是接本仓库自带的 Postgres(见 apps/postgres/),
+        # 数据库由 keycloak-db-init 那个 Job 自动建。见 ADR-030。
         database:
           vendor: postgres
           hostname: postgres.data.svc.cluster.local

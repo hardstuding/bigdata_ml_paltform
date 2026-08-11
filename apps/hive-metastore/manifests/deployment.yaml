@@ -77,6 +77,14 @@ spec:
                   key: rootPassword
             - name: HADOOP_CONF_DIR
               value: /opt/hive/conf
+            # 【可插拔基础设施,见 ADR-030】ConnectionURL 指向公司已有的
+            # 外部 Postgres 就行,改这一行。**但这个组件比 Keycloak 那个例子
+            # 多一层坑**:metastore 这个库不是靠独立的 xxx-db-init.yaml Job
+            # 建的,是写死在 apps/postgres/manifests/init-configmap.yaml 里,
+            # 跟着 Postgres 自己首次启动的 docker-entrypoint-initdb.d 一起跑
+            # ——这是历史遗留的不一致(其他组件都是独立 Job 模式),真要接外部
+            # Postgres,数据库本身还是得让你们 DBA 单独建,这行只是改客户端
+            # 连哪,不会帮你建库。这处不一致目前还没重构,是已知欠账。
             - name: SERVICE_OPTS
               value: >-
                 -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
