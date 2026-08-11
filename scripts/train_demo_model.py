@@ -39,7 +39,18 @@ with mlflow.start_run(run_name="rf-baseline") as run:
     mlflow.log_metric("accuracy", acc)
     mlflow.log_metric("f1_score", f1)
 
-    mlflow.sklearn.log_model(model, name="model", registered_model_name="demo-rf-classifier")
+    # serialization_format="pickle":MLflow 3.x 默认改用 skops(更安全,避免
+    # pickle 反序列化风险),但 KServe mlserver runtime 镜像(seldonio/mlserver
+    # :1.7.1)自带的 mlflow 客户端版本较老,不认 skops 格式,加载会报
+    # "Unrecognized serialization format: skops"。这里换回 pickle 是为了兼容
+    # 部署目标,不是否定 skops 更安全这个前提——如果以后 mlserver 镜像升级
+    # 支持 skops 了,应该改回默认。
+    mlflow.sklearn.log_model(
+        model,
+        name="model",
+        registered_model_name="demo-rf-classifier",
+        serialization_format="pickle",
+    )
 
     print("RUN_ID:", run.info.run_id)
     print("ACCURACY:", acc)
