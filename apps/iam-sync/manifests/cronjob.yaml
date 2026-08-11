@@ -1,0 +1,111 @@
+# 定期(每 5 分钟)把 platform/iam/ 下的组织架构/角色数据同步进
+# Keycloak,不用等人手动想起来跑 scripts/12-sync-iam.py。见 ADR-031。
+#
+# 权限设计上刻意和"谁能改 platform/iam/ 里的数据"这件事分开:这个
+# CronJob 只读 git(公开仓库,不需要凭据),只有 `pods/exec` 到 keycloak
+# 这一个 namespace 里那一个 pod 的权限,没有 git 写权限、没有其他任何
+# namespace 的权限。真正能改权限数据的是走 apps/permission-request-app/
+# 那个自助申请门户(或者人自己发 PR)——那边有 git 写权限但没有集群权限,
+# 这边有集群权限但没有 git 写权限,没有任何一个组件同时拿到两种能力,是
+# 故意的纵深防御,不是疏漏。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: iam-sync
+  namespace: keycloak
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: iam-sync
+  namespace: keycloak
+rules:
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    resourceNames: ["keycloak-keycloakx-0"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["keycloak-keycloakx-0"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["keycloak-admin"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: iam-sync
+  namespace: keycloak
+subjects:
+  - kind: ServiceAccount
+    name: iam-sync
+    namespace: keycloak
+roleRef:
+  kind: Role
+  name: iam-sync
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: iam-sync
+  namespace: keycloak
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 单次跑最长给 5 分钟(等于调度间隔),卡住了不会无限占着,下一次调度
+      # 会因为 concurrencyPolicy: Forbid 自动跳过,不会堆积。
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          serviceAccountName: iam-sync
+          restartPolicy: Never
+          initContainers:
+            # 官方 kubectl 二进制,不是社区打包的"kubectl 专用镜像"(那类
+            # 镜像来源良莠不齐,和 ADR-008 只用官方来源的原则一致)。
+            - name: fetch-kubectl
+              image: python:3.12-slim
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  apt-get update -qq && apt-get install -y -qq curl git >/dev/null
+                  KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
+                  curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+                  chmod +x /tools/kubectl
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
+          containers:
+            - name: sync
+              image: python:3.12-slim
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  export PATH="/tools:$PATH"
+                  apt-get update -qq && apt-get install -y -qq git >/dev/null
+                  pip install --quiet pyyaml
+                  git clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
+                  cd /tmp/repo
+                  python3 scripts/12-sync-iam.py --no-create-users
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: tools
+              emptyDir: {}

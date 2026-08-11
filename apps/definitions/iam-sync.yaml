@@ -1,0 +1,25 @@
+# 每 5 分钟自动把 platform/iam/ 同步进 Keycloak,见 ADR-031 和
+# apps/iam-sync/manifests/cronjob.yaml 里的详细设计说明(权限拆分:这个
+# CronJob 只有集群内 Keycloak 的 exec 权限,没有 git 写权限)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iam-sync
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/iam-sync/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

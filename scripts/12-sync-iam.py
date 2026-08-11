@@ -15,15 +15,21 @@ Keycloak 没有官方支持的"用 YAML/CSV 声明式管理 realm 内容"方案,
 就是那个缺失的声明式层,手动实现"git 里的文件 = Keycloak 里的状态"。
 
 用法:
-    python3 scripts/12-sync-iam.py
+    python3 scripts/12-sync-iam.py                    # 人手动跑,新用户会自动建号
+    python3 scripts/12-sync-iam.py --no-create-users   # 无人值守场景用(见 apps/iam-sync/),
+                                                        # 遇到 Keycloak 里还不存在的用户只报警不新建
 
 前置条件:Keycloak 在跑、scripts/00-generate-secrets.sh 已经生成了
 keycloak-admin 这个 Secret、scripts/03-configure-keycloak.sh 已经建好了
 platform realm。
 
-memberships.csv 里如果有 Keycloak 还没有的用户,会自动建号(密码写进
-secrets/generated-credentials.txt,和 03 建初始用户是同一个模式)。
+memberships.csv 里如果有 Keycloak 还没有的用户,默认会自动建号(密码写进
+secrets/generated-credentials.txt,和 03 建初始用户是同一个模式)——
+`--no-create-users` 模式下不会,只会打印警告跳过,见 ADR-031:自动化场景
+(apps/iam-sync/ 那个 CronJob)生成的密码没人能看到,等于建了个永久登不进
+去的账号,新用户必须由人手动跑一次(不带这个参数)才能拿到看得见的密码。
 """
+import argparse
 import base64
 import csv
 import json
@@ -38,6 +44,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 IAM_DIR = REPO_ROOT / "platform" / "iam"
+NO_CREATE_USERS = False
 KC_NS = "keycloak"
 KC_POD = "keycloak-keycloakx-0"
 REALM = "platform"
@@ -116,10 +123,20 @@ def sync_group_roles(group_id: str, group_name: str, desired_roles: set[str]):
         print(f"  group {group_name} 移除了 role {role_name}(不在 roles.yaml/groups.yaml 里了)")
 
 
-def ensure_user(username: str) -> str:
+def ensure_user(username: str) -> str | None:
     existing = find_by_field("users", "username", username)
     if existing:
         return existing["id"]
+    if NO_CREATE_USERS:
+        # apps/iam-sync/ 那个 CronJob 每 5 分钟无人值守跑一次,这个分支故意
+        # 不让它自动建新用户——建号会生成一个随机密码,CronJob 是从 git
+        # 现拉的临时 pod,Job 一结束密码就随 pod 一起没了,没人能看到,等于
+        # 建了一个永远登不进去的账号。新用户必须由人手动跑这个脚本(不带
+        # --no-create-users)创建,密码会打印在这个人自己的终端里,不会
+        # 丢。见 ADR-031。
+        print(f"  !! {username} 在 Keycloak 里还不存在,自动同步(CronJob)不会新建账号"
+              f"——请手动跑 `python3 scripts/12-sync-iam.py` 建号,密码会打印在终端", file=sys.stderr)
+        return None
     email = f"{username}@example.com"
     # firstName/lastName 必须填:Keycloak 的 User Profile 校验把这两个字段
     # 标成必填,漏填的账号在 password grant 等非交互式登录场景下会报
@@ -144,6 +161,8 @@ def sync_group_members(group_id: str, group_name: str, desired_usernames: set[st
     current_members = {m["username"]: m["id"] for m in (kcadm_json("get", f"groups/{group_id}/members", "-r", REALM) or [])}
     for username in desired_usernames - current_members.keys():
         user_id = ensure_user(username)
+        if user_id is None:
+            continue
         kcadm("update", f"users/{user_id}/groups/{group_id}", "-r", REALM,
               "-s", f"userId={user_id}", "-s", f"groupId={group_id}", "-n")
         print(f"  {username} 加入了 group {group_name}")
@@ -154,6 +173,12 @@ def sync_group_members(group_id: str, group_name: str, desired_usernames: set[st
 
 
 def main():
+    global NO_CREATE_USERS
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-create-users", action="store_true")
+    args = parser.parse_args()
+    NO_CREATE_USERS = args.no_create_users
+
     roles = yaml.safe_load((IAM_DIR / "roles.yaml").read_text())["roles"]
     groups = yaml.safe_load((IAM_DIR / "groups.yaml").read_text())["groups"]
 
