@@ -48,6 +48,18 @@ spec:
             JupyterHub:
               authenticator_class: generic-oauth
               admin_access: true
+            Authenticator:
+              # JupyterHub 3.x 起 Authenticator.allow_all 默认是 false——
+              # Keycloak 那边认证(你是谁)通过之后,JupyterHub 自己还有一层
+              # 独立的授权(允不允许你用这个 hub),默认谁都不在名单里,直接
+              # 403"not currently authorized to use this hub"。这是"认证
+              # 成功 != 授权通过"的经典坑,和 OIDC 配置本身对不对没关系。
+              # local-lite 阶段就一两个人用,直接放开所有通过 Keycloak 认证
+              # 的用户,不用维护白名单。
+              allow_all: true
+              admin_users:
+                - admin
+                - zhenghe
             GenericOAuthenticator:
               client_id: jupyterhub
               authorize_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/auth"

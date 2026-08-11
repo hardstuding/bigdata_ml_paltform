@@ -1,8 +1,9 @@
 # 025. JupyterHub 接 Keycloak SSO
 
-- 状态: 已采纳,决策内容已更正(2026-08-11 首次验证 OAuth2 授权跳转;
-  2026-08-11 真实浏览器登录后发现双域名模式实际不可用,已改为单一 issuer
-  模式并验证通过——见下面"2026-08-11 更正")
+- 状态: 已采纳,决策内容已更正两次(2026-08-11 首次验证 OAuth2 授权跳转;
+  2026-08-11 真实浏览器登录后发现双域名模式实际不可用,改为单一 issuer
+  模式;同一天登录又踩到第二个坑——认证通过但 403 "not authorized to use
+  this hub",详见下面两处"更正")
 
 ## 决策
 
@@ -86,3 +87,26 @@ issuer 校验。也就是说"双域名模式能不能用"不只取决于 OIDC �
 修复:`token_url`/`userdata_url` 改回和 `authorize_url` 一样的外部域名,
 变成单一 issuer 模式,和 ArgoCD/Trino/Argo Workflows 统一。改完后
 issuer 从头到尾都是同一个值,不会再触发这个校验。
+
+## 2026-08-11 更正 2:issuer 坑修好之后,又冒出"403 not authorized"
+
+上一条更正修完 issuer 问题后,用户真实登录,Keycloak 认证走完了(能看到
+JupyterHub 的 403 页面,而不是卡在 Keycloak 登录页或跳转失败),但页面
+显示:
+
+```
+403 : Forbidden
+Sorry, you are not currently authorized to use this hub.
+Please contact the hub administrator.
+```
+
+这是 JupyterHub 3.x 起的默认行为:`Authenticator.allow_all` 默认是
+`false`。**认证(你是谁,Keycloak 说了算)和授权(JupyterHub 允不允许这个
+身份用这个 hub)是两件独立的事**,OIDC 配置全对、登录流程全通,不代表
+JupyterHub 就会放行——没有任何 `allow_all`/`allowed_users`/`admin_users`
+配置的情况下,默认谁都不在白名单里,直接 403。之前只验证到"OAuth2 授权跳转
+参数对不对",这个坑要走完真实登录才会暴露,和更正 1 是同一个教训的再一次
+印证。
+
+修复:加 `Authenticator.allow_all: true`(local-lite 阶段就一两个人用,
+不维护白名单),同时把 `admin`、`zhenghe` 都加进 `admin_users`。
