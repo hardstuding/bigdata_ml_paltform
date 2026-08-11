@@ -162,6 +162,29 @@ else
   echo "已创建 client mlflow,密钥写入 mlflow/oauth2-proxy-secret 的 client-secret"
 fi
 
+echo "==> argo-workflows client"
+# 和 openmetadata 同一个原因不能用 create_client_if_absent——argo-workflows
+# chart 的 server.sso.clientId/clientSecret 都是 secretRef(key 名字是
+# client-id/client-secret,chart 自己约定的,不能改),这个 Secret 要同时
+# 装两个 key。
+AW_REDIRECT_URIS='["http://argo-workflows.local-lite.test/oauth2/callback"]'
+aw_client_id=$(kcadm get clients -r platform -q clientId=argo-workflows --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+if [ -n "$aw_client_id" ]; then
+  echo "client argo-workflows 已存在,只同步 redirectUris,不轮换密钥"
+  kcadm update "clients/${aw_client_id}" -r platform -s "redirectUris=${AW_REDIRECT_URIS}"
+else
+  AW_SECRET="$(gen_password)"
+  kcadm create clients -r platform \
+    -s clientId=argo-workflows -s enabled=true -s protocol=openid-connect -s publicClient=false \
+    -s secret="$AW_SECRET" \
+    -s "redirectUris=${AW_REDIRECT_URIS}" \
+    -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
+  kubectl -n argo-workflows create secret generic argo-workflows-oidc-secret \
+    --from-literal=client-id=argo-workflows \
+    --from-literal=client-secret="$AW_SECRET"
+  echo "已创建 client argo-workflows,密钥写入 argo-workflows/argo-workflows-oidc-secret"
+fi
+
 echo "==> 初始登录用户: ${INITIAL_USER}"
 if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/null | grep -q '"id"'; then
   echo "已存在,跳过(不会重置密码)"
