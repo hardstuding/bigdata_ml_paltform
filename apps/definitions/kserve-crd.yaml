@@ -1,0 +1,27 @@
+# KServe 的 CRD 单独一个 chart(和 kserve-resources 分开发布是官方自己的
+# 结构,不是我们拆的)。两个 Application 之间没有显式排序(没用 sync
+# wave)——kserve-resources 里的自定义资源如果先于 CRD 装上会报错,ArgoCD 的
+# selfHeal 会自动重试,等 CRD 装完就收敛,和 hive-metastore 等 Postgres
+# 启动是同一个"不需要显式排队,自愈会追上"的模式,见 troubleshooting.md。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kserve-crd
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: oci://ghcr.io/kserve/charts/kserve-crd
+    chart: kserve-crd
+    targetRevision: v0.19.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kserve
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
