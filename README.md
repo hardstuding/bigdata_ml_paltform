@@ -40,7 +40,7 @@ docs/            # 架构文档、ADR、运维手册 —— 权威版本,新会�
 - ✅ colima 内存从 6GB 扩到 9GB(本机是 16GB,还有余量),之前几乎每次装重组件都要精细监控内存、装完就收回去的紧张状态大幅缓解
 - ✅ CI 校验(见 ADR-022):`.github/workflows/validate.yml`,push/PR 时跑 `scripts/validate-charts.py`(所有 Application 的 Helm chart 来源跑 `helm template`,纯 manifest 来源做 YAML 语法检查)。明确拦不住"渲染成功但运行时跑不起来"这类问题(这次踩的坑大部分是这类),只拦 chart 版本写错/字段名写错/YAML 语法错误这些
 - ✅ 平台审计日志(见 ADR-024):Keycloak 登录/管理员事件、Trino 查询时间线都已确认流入 Loki,Grafana 有专门的"平台审计日志"看板(4 个面板,走真实查询链路验证过)。调研过 PostHog,发现已经不支持 k8s 部署、而且是面向消费端产品的分析工具,不适合这次的实际需求(平台审计,不是产品分析),没有采用
-- ✅ **Phase 3:JupyterHub 接 Keycloak SSO**(见 ADR-025):官方 chart,OAuth2 授权跳转已验证(client_id/redirect_uri/PKCE 都对)。域名解析用的是 Grafana 那套"两个 URL 分开配"模式,不需要 hostAliases/CoreDNS。db 用默认的 sqlite-pvc,不接共享 Postgres
+- ✅ **Phase 3:JupyterHub 接 Keycloak SSO**(见 ADR-025):官方 chart,**真实浏览器完整验证过**——登录 → 拉起 notebook pod → JupyterLab 界面加载成功(用 Claude in Chrome 插件由 Claude 自己操作浏览器测的,不是只 curl 跳转参数)。过程中连续踩了三个只有走完整登录才会暴露的坑:双域名模式在 Keycloak 的 userinfo issuer 校验下不可用(改单一 issuer)、`Authenticator.allow_all` 默认 false 导致认证通过仍 403、`singleuser.memory` 必须用 `M/G` 不能用 k8s 惯用的 `Mi/Gi`。db 用默认的 sqlite-pvc,不接共享 Postgres
 - ✅ **Phase 3:Argo Workflows 接 Keycloak SSO**(见 ADR-026):官方 argo-helm 仓库,SSO 用单一 issuer 模式(和 ArgoCD 内置 OIDC 同款)。CRD 安装 Job 直连 GitHub 超时,用 chart 自带的 `crds.upgradeJob.extraEnv` 代理配置解决,不是本地发明的绕过办法
 - ✅ **Phase 3:KServe 模型上线服务**(见 ADR-027):Standard/RawDeployment 模式(不装 Knative)。demo-rf-classifier 从 MLflow Model Registry 真实部署为 InferenceService,V2 协议推理请求验证通过。踩了 4 个坑:CRD 太大 client-side apply 超注解上限(ServerSideApply=true)、chart 不带 ClusterServingRuntime(单独脚本装官方 config/runtimes)、MLflow 默认 skops 序列化 mlserver 镜像不认(改 pickle)、pickle 对 sklearn 版本敏感(训练环境和 serving 镜像版本要对齐)
 - KServe 的 canary 流量切分作为算法 A-B 实验的落点这条,留到真正有多版本对比需求时再做(见 `docs/architecture.md`"还没定的事")
