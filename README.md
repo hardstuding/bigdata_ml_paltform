@@ -73,6 +73,8 @@ AI/ML:[JupyterHub](https://jupyterhub.readthedocs.io/)、[MLflow](https://mlflow
 |---|---|---|
 | `apps/postgres/`、`apps/hive-metastore/`、`apps/spark-history-server/` | 官方镜像 + 自己写的裸 K8s manifest(这几个组件没有官方 chart) | 各自的注释 + [ADR-029](docs/decisions/029-spark-permissions-and-observability.md) |
 | `platform/iam/` + `scripts/12-sync-iam.py` | 组织架构/角色数据表(YAML+CSV)→ 同步进 Keycloak Group/Role 的声明式同步工具 | [ADR-028](docs/decisions/028-iam-org-model.md) |
+| `apps/iam-sync/` | CronJob,每 5 分钟自动跑上面那个同步脚本,不用等人手动执行 | [ADR-031](docs/decisions/031-iam-auto-sync-cronjob.md) |
+| `apps/permission-request-app/` | 权限自助申请门户(申请 -> platform-team 审批 -> 自动写回 `platform/iam/`) | [ADR-032](docs/decisions/032-permission-request-app.md) |
 | `platform/coredns-custom/` | 让集群内 pod 能解析 `*.local-lite.test` 这类本地域名的自定义 DNS zone | [ADR-016](docs/decisions/016-ingress-domains-local-lite.md) |
 | `platform/grafana-audit-dashboard/` | 平台审计日志看板(Keycloak 登录事件 + Trino 查询时间线) | [ADR-024](docs/decisions/024-platform-audit-logging.md) |
 | `scripts/list-project-images.py` + `export-image-cache.sh` | 扫描全部用到的容器镜像、导出本地缓存(内网环境准备用) | [ADR-018](docs/decisions/018-local-image-cache.md) |
@@ -116,6 +118,12 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 ```
 
 跑完用 `kubectl get applications -n argocd` 看所有组件是不是 `Synced`/`Healthy`。卡住了先查 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md),这台机器踩过的坑基本都记在那了。
+
+`local-lite` 用的是自造域名(不是真实 DNS,见 [ADR-016](docs/decisions/016-ingress-domains-local-lite.md)),要在自己电脑的 `/etc/hosts` 里加一行才能用浏览器访问(集群内部的 pod 靠 `platform/coredns-custom/` 自动解析,不需要这一步)。当前用到的域名(启用一个组件才需要加对应那一行,不用一次性全加):
+
+```
+127.0.0.1 argocd.local-lite.test grafana.local-lite.test keycloak.local-lite.test jupyterhub.local-lite.test argo-workflows.local-lite.test permission-request.local-lite.test trino.local-lite.test superset.local-lite.test openmetadata.local-lite.test mlflow.local-lite.test spark-history.local-lite.test
+```
 
 **后续所有变更**(加组件、改配置、升级版本)都是:改 `platform/apps/*.yaml` 或 `apps/definitions/*.yaml` → commit → push,ArgoCD 自动同步,不需要再手动跑脚本或 `kubectl apply`。上面 7 步只在"一个全新的空集群"上需要做一次(第 7 步例外——见下面)。
 
