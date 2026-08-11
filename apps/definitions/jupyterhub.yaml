@@ -90,8 +90,14 @@ spec:
               memory: 512Mi
         singleuser:
           memory:
-            guarantee: 512Mi
-            limit: 1536Mi
+            # 这两个字段最终传进 KubeSpawner 自己的 mem_guarantee/mem_limit
+            # traitlet(ByteSpecification),只认 K/M/G/T(十进制)后缀,不认
+            # Kubernetes 资源规格常见的 Ki/Mi/Gi(二进制)后缀——写成
+            # "1536Mi" 会在用户登录、hub 要给这个用户建 spawner 时直接
+            # TraitError,500。和下面 cpu.guarantee 必须是纯数字是同一类
+            # "chart 里这个字段最终走 Python 校验,不是走 k8s 校验"的坑。
+            guarantee: 512M
+            limit: 1536M
           cpu:
             # chart 的 schema 要求这里是纯数字(CPU 核数),不是
             # Kubernetes 常见的 "100m" 这种带单位字符串,0.1 = 100m。
