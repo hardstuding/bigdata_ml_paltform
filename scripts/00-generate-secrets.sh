@@ -216,16 +216,25 @@ fi
 
 # MLflow 本身没有原生 OIDC/SSO 支持(开源版只有本地用户名密码的 basic-auth
 # app,不接 Keycloak),接 SSO 用 oauth2-proxy 挡在前面(见
-# apps/definitions/mlflow-oauth2-proxy.yaml)。cookie-secret 不能用
-# gen_password(那个函数会剔除 +/= 字符,破坏 base64 编码,oauth2-proxy 要求
-# 解码后正好是 16/24/32 字节,和当初 airflow-fernet-key 同样的坑)。
+# apps/definitions/mlflow-oauth2-proxy.yaml)。
+#
+# cookie-secret 长度这里之前的注释写错了(2026-08-12 部署
+# permission-request-app 的 oauth2-proxy 时才真正启动一次、实测报错才发现):
+# oauth2-proxy 校验的是**这个字符串本身的原始长度**要是 16/24/32,不是
+# "base64 解码之后"的字节数。`openssl rand -base64 32` 是 32 字节随机数
+# 编码成 base64,字符串长度会变成 44(带 padding),报
+# "cookie_secret must be 16, 24, or 32 bytes... but is 44 bytes"。正确做法
+# 是倒推着凑:要一个刚好 32 字符、没有 padding 的 base64 字符串,原始字节数
+# 要能被 3 整除且编码后不产生 `=`,`openssl rand -base64 24` 算出来正好是
+# 32 个字符。不能用 gen_password(那个函数会剔除 +/= 字符,破坏 base64
+# 编码的字符分布)。
 # client-id 不是真的密钥,但 chart 的 existingSecret 机制要求这三个 key 都在
 # 同一个 Secret 里,直接存字面量 "mlflow"。client-secret 由
 # 03-configure-keycloak.sh 建 Keycloak client 之后 patch 进来。
 if kubectl -n mlflow get secret oauth2-proxy-secret >/dev/null 2>&1; then
   echo "已存在,跳过: mlflow/oauth2-proxy-secret"
 else
-  COOKIE_SECRET="$(openssl rand -base64 32)"
+  COOKIE_SECRET="$(openssl rand -base64 24)"
   kubectl -n mlflow create secret generic oauth2-proxy-secret \
     --from-literal=client-id=mlflow \
     --from-literal=cookie-secret="$COOKIE_SECRET" \
@@ -243,7 +252,7 @@ if kubectl -n spark-operator get secret oauth2-proxy-secret >/dev/null 2>&1; the
 elif ! kubectl get namespace spark-operator >/dev/null 2>&1; then
   echo "跳过: spark-operator/oauth2-proxy-secret(namespace 还不存在,Spark Operator 还没启用)"
 else
-  COOKIE_SECRET="$(openssl rand -base64 32)"
+  COOKIE_SECRET="$(openssl rand -base64 24)"
   kubectl -n spark-operator create secret generic oauth2-proxy-secret \
     --from-literal=client-id=spark-history-server \
     --from-literal=cookie-secret="$COOKIE_SECRET" \
@@ -257,7 +266,7 @@ if kubectl -n permission-request-app get secret oauth2-proxy-secret >/dev/null 2
 elif ! kubectl get namespace permission-request-app >/dev/null 2>&1; then
   echo "跳过: permission-request-app/oauth2-proxy-secret(namespace 还不存在,等这个 Application 先同步一次)"
 else
-  COOKIE_SECRET="$(openssl rand -base64 32)"
+  COOKIE_SECRET="$(openssl rand -base64 24)"
   kubectl -n permission-request-app create secret generic oauth2-proxy-secret \
     --from-literal=client-id=permission-request-app \
     --from-literal=cookie-secret="$COOKIE_SECRET" \
