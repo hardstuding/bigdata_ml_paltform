@@ -73,8 +73,35 @@ git add -A && git commit -m "chore: 迁移仓库地址" && git push
 # 6. kube-prometheus-stack 的 CRD 太大,ArgoCD 应付不了,单独装一次
 #    (只在第一次装、或者升级这个组件版本时需要跑)
 ./scripts/04-install-kube-prometheus-crds.sh
+
+# 7. 等 keycloak Application Synced/Healthy 之后,建 platform realm +
+#    ArgoCD/Grafana 等组件的 OIDC client + 一个初始登录用户。SSO 能不能用
+#    全靠这一步,不是可选项。Keycloak realm/client/user 是 kcadm.sh 命令式
+#    建的,不在 GitOps 范围内(见 ADR-009),重建集群必须重新跑。
+kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application/keycloak --timeout=300s
+./scripts/03-configure-keycloak.sh
 ```
 
 跑完用 `kubectl get applications -n argocd` 看所有组件是不是 `Synced`/`Healthy`。卡住了先查 [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md),这台机器踩过的坑基本都记在那了。
 
-**后续所有变更**(加组件、改配置、升级版本)都是:改 `platform/apps/*.yaml` 或 `apps/definitions/*.yaml` → commit → push,ArgoCD 自动同步,不需要再手动跑脚本或 `kubectl apply`。上面 6 步只在"一个全新的空集群"上需要做一次。
+**后续所有变更**(加组件、改配置、升级版本)都是:改 `platform/apps/*.yaml` 或 `apps/definitions/*.yaml` → commit → push,ArgoCD 自动同步,不需要再手动跑脚本或 `kubectl apply`。上面 7 步只在"一个全新的空集群"上需要做一次(第 7 步例外——见下面)。
+
+### 组件专属的初始化脚本(不在上面 7 步里,按需跑)
+
+这些脚本是各组件自己的命令式初始化,不归 GitOps 管(要么是账号/密码这类不该进 git 的东西,要么是官方 chart 就没提供声明式配置的能力)。**每次对应组件的 Application 第一次 Sync、或者它的 Deployment/StatefulSet 被整个重建(不是简单重启)时都要重新跑**,不是跑一次就永久生效:
+
+| 脚本 | 做什么 | 什么时候要(重新)跑 |
+|---|---|---|
+| `scripts/03-configure-keycloak.sh` | 建 platform realm + 各组件的 OIDC client | 每接一个新的 SSO 组件之后都要重跑一次(幂等,已存在的 client/用户不会被覆盖)——比如 JupyterHub/Argo Workflows 的 client 就是它们的 Application 先建好自己的 namespace 之后,再跑这个脚本才能建成 |
+| `scripts/05-configure-airflow.sh` | 建 Airflow 初始管理员账号 | Airflow 从 `pending-definitions/` 拉回来、Deployment 第一次起来之后 |
+| `scripts/06-configure-superset-datasources.sh` | 给 Superset 注册 Trino 数据源(服务账号认证) | Superset 或 Trino 任一个被重建之后 |
+| `scripts/07-fix-trino-liveness-probe.sh` | 修 Trino chart 里硬编码错的 livenessProbe(见 ADR-017) | **每次** `trino-coordinator` 这个 Deployment 被重新创建(不是重启,是整个 Deployment 对象重建)都要重跑,否则会一直被 kubelet 杀死重启 |
+| `scripts/10-install-kserve-serving-runtimes.sh` | 装 KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等,官方 chart 不带) | KServe 装完之后跑一次;这些是集群级资源,自身不占用运行时资源,不需要跟着组件重建反复重跑 |
+
+### Demo / 演示脚本(可选,验证平台端到端能力用)
+
+`scripts/08-create-demo-data.sh`(湖仓核心:Iceberg → Trino → Superset)、
+`scripts/09-train-demo-model.sh`(AI/ML:训练 → MLflow 注册)、
+`scripts/11-deploy-demo-inference-service.sh`(AI/ML:MLflow → KServe 上线)——
+这三个不是平台必需的初始化步骤,是用来验证端到端链路真的打通的演示脚本,
+随时可以重跑重建,细节和已知坑见 ADR-021/023/027。

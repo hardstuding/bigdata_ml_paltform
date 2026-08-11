@@ -25,5 +25,10 @@ RBAC 简化处理:ArgoCD `policy.default: role:admin`,Grafana `role_attribute_pa
 
 ## 后果
 
-- `platform/bootstrap/argocd-values.yaml` 里的 `configs.cm.url` 现在写死 `http://localhost:8080`,接了真实域名/ingress 之后要改成外部地址,否则 OIDC 回调会跳回 localhost。cloud-full/prod 阶段要处理这个。
-- Keycloak realm/client/user 是通过 `kcadm.sh` 命令行手动建的,不是声明式配置,不在 GitOps 管理范围内,机器重建(比如换集群)时需要重新跑一遍(还没脚本化,是已知欠账,见 README 的"从零拉起"手册里目前没覆盖这一步)。
+- Keycloak realm/client/user 是通过 `kcadm.sh` 命令行手动建的,不是声明式配置,不在 GitOps 管理范围内,机器重建(比如换集群)时需要重新跑一遍——已脚本化为 `scripts/03-configure-keycloak.sh`,并已补进 README"从零拉起"手册(2026-08-11)。
+
+## 2026-08-11 更正(几处随项目演进已经过时的描述)
+
+- 上面"实现细节"里说的 issuer 是"集群内部地址"(`keycloak-keycloakx-http...svc.cluster.local`),这是 ADR-016/017 引入真实 Ingress + CoreDNS 自定义 zone **之前**的早期状态。现在 ArgoCD(以及 Trino、Argo Workflows)的 issuer 统一是外部域名 `http://keycloak.local-lite.test/auth/realms/platform`,靠 `platform/coredns-custom/` 让集群内 pod 也能解析这个域名——见 ADR-016/017。
+- 上面"浏览器地址和后端地址要分开配置...以后接 Superset/Airflow/JupyterHub/OpenMetadata 照这个模式来"这条建议**不是普遍成立的**,已经在 JupyterHub 上踩过反例(见 ADR-025 的"2026-08-11 更正"):能不能分开配,不只取决于 OIDC 客户端库支不支持两个 URL 分开填,还取决于这个客户端库内部**会不会真的对 userinfo 端点单独发一次请求**——如果会,Keycloak 会校验 token 的 issuer 和这次请求实际用的域名是否一致,双域名模式就会失败。只解码 `id_token` claim、不额外请求 userinfo 的客户端(比如 Grafana 的 `auth.generic_oauth`)才能安全用双域名模式。**每接一个新组件,双域名模式配完之后必须真的用浏览器登录一次验证到底,不能只看跳转链接对不对就判定"能用"。**
+- 之前写的 `configs.cm.url` 写死 `http://localhost:8080` 这条也已经不成立,现在是 `http://argocd.local-lite.test`(ADR-016 引入真实域名时改的)。
