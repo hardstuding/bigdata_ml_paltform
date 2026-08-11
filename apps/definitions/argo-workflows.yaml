@@ -21,6 +21,25 @@ spec:
     targetRevision: 1.0.24
     helm:
       valuesObject:
+        # 这个 chart 的 CRD 是通过一个 pre-install Job 直接从
+        # raw.githubusercontent.com 下载再 apply 的(不是打包在 chart 里),
+        # 这台机器上 pod 直接连 GitHub 会很慢/超时(和 ArgoCD repo-server
+        # 当初需要 NEEDS_LOCAL_PROXY 是同一个网络限制,见
+        # platform/bootstrap/argocd-values.local-proxy.yaml)。chart 自己在
+        # values.yaml 里就写了这个例子(crds.upgradeJob.extraEnv 支持
+        # HTTP_PROXY/HTTPS_PROXY),不是我们额外发明的绕过方式。代理地址来自
+        # colima 虚拟机内部看到的宿主机代理:`colima ssh -- env | grep -i
+        # proxy`,换了网络或者重启 colima 后如果这个 Job 又卡住,先重新跑一遍
+        # 这条命令确认地址没变。
+        crds:
+          upgradeJob:
+            extraEnv:
+              - name: HTTP_PROXY
+                value: "http://192.168.5.2:1087"
+              - name: HTTPS_PROXY
+                value: "http://192.168.5.2:1087"
+              - name: NO_PROXY
+                value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
         controller:
           resources:
             requests:
