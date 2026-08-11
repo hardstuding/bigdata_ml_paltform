@@ -174,6 +174,41 @@ def argocd_bootstrap_images() -> set[str]:
     return helm_template_images(fake_app)
 
 
+def kserve_serving_runtime_images() -> set[str]:
+    """KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等)不来自任何
+    ArgoCD Application——kserve-resources chart v0.19.0 起不再打包这些,是
+    scripts/10-install-kserve-serving-runtimes.sh 直接 `kubectl apply -k`
+    官方 GitHub 仓库装的(见 ADR-027),完全在这个脚本正常扫描的"Application
+    -> helm template"路径之外,踩过一次"以为镜像清单扫全了,其实漏了整个
+    mlserver/sklearnserver 这一类"的坑,才补上这个特例,和上面 ArgoCD 自己
+    是同一个道理。
+
+    版本号不在这里硬编码第二份,直接读 apps/definitions/kserve-resources.yaml
+    的 targetRevision,避免两处版本号将来改一个忘了改另一个又对不上。
+    """
+    kserve_app_file = REPO_ROOT / "apps" / "definitions" / "kserve-resources.yaml"
+    if not kserve_app_file.exists():
+        return set()
+    app = yaml.safe_load(kserve_app_file.read_text())
+    version = app["spec"]["source"]["targetRevision"]
+
+    print(f"==> kserve ClusterServingRuntime(scripts/10,版本跟 kserve-resources 对齐:{version})", file=sys.stderr)
+    result = subprocess.run(
+        ["kubectl", "kustomize", f"https://github.com/kserve/kserve/config/runtimes?ref={version}"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        print(f"  !! kubectl kustomize 失败: {result.stderr.strip().splitlines()[-1] if result.stderr else '未知错误'}", file=sys.stderr)
+        return set()
+
+    images = set()
+    for line in result.stdout.splitlines():
+        m = IMAGE_RE.match(line)
+        if m:
+            images.add(m.group(1))
+    return images
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--include-pending", action="store_true")
@@ -187,6 +222,7 @@ def main():
     for d in dirs:
         all_images |= scan_dir(d)
     all_images |= argocd_bootstrap_images()
+    all_images |= kserve_serving_runtime_images()
 
     for img in sorted(all_images):
         print(img)
