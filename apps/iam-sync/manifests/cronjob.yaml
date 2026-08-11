@@ -102,6 +102,20 @@ spec:
           containers:
             - name: sync
               image: python:3.12-slim
+              # 直连 github.com 在这台机器上会卡住/超时(和 Argo Workflows
+              # 的 CRD 安装 Job 当初踩的是同一个网络限制,见 ADR-026),要走
+              # colima 虚拟机内部看到的宿主机代理。地址来自
+              # `colima ssh -- env | grep -i proxy`,换了网络或者重启
+              # colima 后如果这个 Job 又卡在 git clone 上,先重新跑一遍这条
+              # 命令确认地址没变。dl.k8s.io(kubectl 二进制)不受影响,不需要
+              # 代理也能直连,只有这一步的 github.com 需要。
+              env:
+                - name: HTTP_PROXY
+                  value: "http://192.168.5.2:1087"
+                - name: HTTPS_PROXY
+                  value: "http://192.168.5.2:1087"
+                - name: NO_PROXY
+                  value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
               command:
                 - sh
                 - -c
