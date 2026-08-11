@@ -1,0 +1,56 @@
+# 和 MLflow(ADR-019)、Spark History Server(ADR-029)是同一个 oauth2-proxy
+# 模式。这里刻意**不设 allowed_groups**——权限申请门户本来就该是"任何登录
+# 用户都能提申请",谁能审批是 app 自己内部按 platform-team 判断的(见
+# ADR-032),不是 oauth2-proxy 这一层的事,卡在这一层反而会出现"想申请
+# algorithm-team 权限,但没有 algorithm-team 权限进不了申请页面"的死锁。
+#
+# pass_access_token 是这个组件比 MLflow/Spark History Server 多开的一个
+# 选项:app 自己要读 token 里的 groups claim 判断谁是审批人,legacy config
+# 格式没有单独一个"把 groups 转成请求头"的选项,只能把整个 access token
+# 传下去,app 自己解。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: permission-request-app-oauth2-proxy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://oauth2-proxy.github.io/manifests
+    chart: oauth2-proxy
+    targetRevision: 10.7.0
+    helm:
+      valuesObject:
+        config:
+          existingSecret: oauth2-proxy-secret
+          configFile: |
+            provider = "oidc"
+            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
+            redirect_url = "http://permission-request.local-lite.test/oauth2/callback"
+            upstreams = [ "http://permission-request-app.permission-request-app.svc.cluster.local:8080/" ]
+            email_domains = [ "*" ]
+            cookie_secure = false
+            skip_provider_button = true
+            pass_access_token = true
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - permission-request.local-lite.test
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: permission-request-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

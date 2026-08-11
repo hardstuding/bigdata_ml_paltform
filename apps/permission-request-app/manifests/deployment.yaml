@@ -1,0 +1,97 @@
+# 见 docs/decisions/032-permission-request-app.md。用官方 python:3.12-slim
+# 镜像,启动时 pip install flask + 跑挂载进来的 ConfigMap 源码,不需要建
+# 一个专门的容器镜像仓库——和 apps/iam-sync/ 那个 CronJob 是同一个模式。
+#
+# GIT_TOKEN 从 Secret 读,这个 Secret 需要人手动建(不是任何脚本自动生成
+# 的——git 写权限是敏感凭据,不能由自动化流程自己造一个):
+#   kubectl -n permission-request-app create secret generic permission-request-app-git \
+#     --from-literal=token=<GitHub fine-grained PAT,scope 到这一个仓库,contents:write 权限>
+# 没建这个 Secret 之前,app 仍然能跑、能收申请、能批准,只是批准后不会自动
+# push,会在页面上提示需要哪一行手动加进 platform/iam/memberships.csv。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: permission-request-app-data
+  namespace: permission-request-app
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: permission-request-app
+  namespace: permission-request-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # ReadWriteOnce 的 PVC,滚动升级会导致新旧 Pod 抢同一个卷,直接重建更简单
+  selector:
+    matchLabels:
+      app: permission-request-app
+  template:
+    metadata:
+      labels:
+        app: permission-request-app
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-slim
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              apt-get update -qq && apt-get install -y -qq git >/dev/null
+              pip install --quiet flask
+              python3 /src/app.py
+          env:
+            - name: DB_PATH
+              value: /data/requests.db
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-git
+                  key: token
+                  optional: true  # 没建这个 Secret 时,GIT_TOKEN 就是空字符串,走降级路径
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: src
+              mountPath: /src
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+      volumes:
+        - name: src
+          configMap:
+            name: permission-request-app-src
+        - name: data
+          persistentVolumeClaim:
+            claimName: permission-request-app-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: permission-request-app
+  namespace: permission-request-app
+spec:
+  selector:
+    app: permission-request-app
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

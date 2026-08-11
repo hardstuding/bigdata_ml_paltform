@@ -196,6 +196,28 @@ else
   echo "跳过 spark-history-server client(spark-operator/oauth2-proxy-secret 还不存在,Spark Operator 还没启用)"
 fi
 
+echo "==> permission-request-app client(给挡在前面的 oauth2-proxy 用,见 ADR-032)"
+if kubectl -n permission-request-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  PRA_REDIRECT_URIS='["http://permission-request.local-lite.test/oauth2/callback"]'
+  pra_client_id=$(kcadm get clients -r platform -q clientId=permission-request-app --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+  if [ -n "$pra_client_id" ]; then
+    echo "client permission-request-app 已存在,只同步 redirectUris,不轮换密钥"
+    kcadm update "clients/${pra_client_id}" -r platform -s "redirectUris=${PRA_REDIRECT_URIS}"
+  else
+    PRA_OAUTH_SECRET="$(gen_password)"
+    kcadm create clients -r platform \
+      -s clientId=permission-request-app -s enabled=true -s protocol=openid-connect -s publicClient=false \
+      -s secret="$PRA_OAUTH_SECRET" \
+      -s "redirectUris=${PRA_REDIRECT_URIS}" \
+      -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
+    kubectl -n permission-request-app patch secret oauth2-proxy-secret --type merge \
+      -p "{\"stringData\":{\"client-secret\":\"${PRA_OAUTH_SECRET}\"}}"
+    echo "已创建 client permission-request-app,密钥写入 permission-request-app/oauth2-proxy-secret 的 client-secret"
+  fi
+else
+  echo "跳过 permission-request-app client(permission-request-app/oauth2-proxy-secret 还不存在,等这个 Application 先同步一次)"
+fi
+
 echo "==> argo-workflows client"
 # 和 openmetadata 同一个原因不能用 create_client_if_absent——argo-workflows
 # chart 的 server.sso.clientId/clientSecret 都是 secretRef(key 名字是

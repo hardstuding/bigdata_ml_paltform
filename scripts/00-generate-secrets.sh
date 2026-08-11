@@ -251,6 +251,20 @@ else
   echo "已创建: spark-operator/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
 fi
 
+# 权限自助申请门户,同一个 oauth2-proxy 模式(见 ADR-032)。
+if kubectl -n permission-request-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  echo "已存在,跳过: permission-request-app/oauth2-proxy-secret"
+elif ! kubectl get namespace permission-request-app >/dev/null 2>&1; then
+  echo "跳过: permission-request-app/oauth2-proxy-secret(namespace 还不存在,等这个 Application 先同步一次)"
+else
+  COOKIE_SECRET="$(openssl rand -base64 32)"
+  kubectl -n permission-request-app create secret generic oauth2-proxy-secret \
+    --from-literal=client-id=permission-request-app \
+    --from-literal=cookie-secret="$COOKIE_SECRET" \
+    --from-literal=client-secret=PLACEHOLDER
+  echo "已创建: permission-request-app/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
+fi
+
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 MINIO_CONSUMER_NAMESPACES="trino data mlflow"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
