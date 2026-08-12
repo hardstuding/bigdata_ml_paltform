@@ -121,10 +121,17 @@ POD_OVERRIDE = {
 
 @task(executor_config=POD_OVERRIDE)
 def submit_seatunnel_job(**context) -> str:
+    # 一开始用 context['ts_nodash'] 拼作业名,这个 DAG 是 schedule=None 手动
+    # 触发,没有真正的 logical_date/data_interval——实测确认 Airflow 3.x
+    # 在这种情况下压根不会往 context 里塞 ts_nodash 这个键,直接 KeyError。
+    # 改用 run_id(手动触发的 dag_run 也一定有,格式是
+    # "manual__2026-...+00:00")清理成安全的作业名。
+    run_id = context["run_id"]
+    safe_run_id = run_id.replace(":", "").replace("+", "").replace(".", "")
     minio_key = Variable.get("minio_access_key")
     minio_secret = Variable.get("minio_secret_key")
     job_config = _build_job_config(minio_key, minio_secret)
-    job_name = f"device-events-{context['ts_nodash']}"
+    job_name = f"device-events-{safe_run_id}"
     result = _post_json(
         f"{SEATUNNEL_REST_URL}/hazelcast/rest/maps/submit-job?jobName={job_name}",
         job_config,

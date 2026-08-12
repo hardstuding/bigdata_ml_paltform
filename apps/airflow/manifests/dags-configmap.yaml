@@ -1,8 +1,8 @@
 # apps/airflow/dags/ 底下的 DAG 文件打包成这个 ConfigMap,挂进
-# scheduler/dagProcessor 的 dags 目录——Airflow chart 的 gitSync 需要一个
-# 独立可访问的 git 仓库/凭据,这个仓库统一用"没有镜像仓库/额外基础设施依赖
-# 时优先 ConfigMap 挂载"的思路(和 iam-sync、permission-request-app 是同一
-# 个模式),不单独接 gitSync。
+# scheduler/dagProcessor/workers.kubernetes 的 dags 目录——Airflow chart 的
+# gitSync 需要一个独立可访问的 git 仓库/凭据,这个仓库统一用"没有镜像仓库/
+# 额外基础设施依赖时优先 ConfigMap 挂载"的思路(和 iam-sync、
+# permission-request-app 是同一个模式),不单独接 gitSync。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -133,10 +133,17 @@ data:
 
     @task(executor_config=POD_OVERRIDE)
     def submit_seatunnel_job(**context) -> str:
+        # 一开始用 context['ts_nodash'] 拼作业名,这个 DAG 是 schedule=None 手动
+        # 触发,没有真正的 logical_date/data_interval——实测确认 Airflow 3.x
+        # 在这种情况下压根不会往 context 里塞 ts_nodash 这个键,直接 KeyError。
+        # 改用 run_id(手动触发的 dag_run 也一定有,格式是
+        # "manual__2026-...+00:00")清理成安全的作业名。
+        run_id = context["run_id"]
+        safe_run_id = run_id.replace(":", "").replace("+", "").replace(".", "")
         minio_key = Variable.get("minio_access_key")
         minio_secret = Variable.get("minio_secret_key")
         job_config = _build_job_config(minio_key, minio_secret)
-        job_name = f"device-events-{context['ts_nodash']}"
+        job_name = f"device-events-{safe_run_id}"
         result = _post_json(
             f"{SEATUNNEL_REST_URL}/hazelcast/rest/maps/submit-job?jobName={job_name}",
             job_config,
