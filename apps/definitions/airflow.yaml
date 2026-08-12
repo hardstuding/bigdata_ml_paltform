@@ -58,13 +58,21 @@ spec:
               memory: 512Mi
             limits:
               memory: 1024Mi
+          # 挂整个 ConfigMap 目录会踩 Airflow 3.x 的坑:k8s ConfigMap 卷靠
+          # `..data` 软链 + 带时间戳的隐藏目录做原子更新,Airflow 3.x 新的
+          # DAG 目录遍历逻辑会把这些隐藏目录识别成"递归循环"直接崩溃退出
+          # (RuntimeError: Detected recursive loop when walking DAG
+          # directory)——实测确认。用 subPath 只挂这一个文件,绕开整个
+          # 软链目录结构;代价是 ConfigMap 改了以后这个文件不会自动热更新,
+          # 需要重启 pod 才能生效,这个 demo DAG 可以接受。
           extraVolumes:
             - name: dags
               configMap:
                 name: airflow-dags
           extraVolumeMounts:
             - name: dags
-              mountPath: /opt/airflow/dags
+              mountPath: /opt/airflow/dags/seatunnel_device_events.py
+              subPath: seatunnel_device_events.py
         # dagProcessor 是 Airflow 3.x 才拆出来的独立组件(DAG 解析不再是
         # scheduler 自己干),之前没配 resources,这次一起补上。DAG 文件同样
         # 要挂进这里——scheduler 和 dagProcessor 都要能看到 dags 目录,不是
@@ -77,13 +85,21 @@ spec:
               memory: 512Mi
             limits:
               memory: 1024Mi
+          # 挂整个 ConfigMap 目录会踩 Airflow 3.x 的坑:k8s ConfigMap 卷靠
+          # `..data` 软链 + 带时间戳的隐藏目录做原子更新,Airflow 3.x 新的
+          # DAG 目录遍历逻辑会把这些隐藏目录识别成"递归循环"直接崩溃退出
+          # (RuntimeError: Detected recursive loop when walking DAG
+          # directory)——实测确认。用 subPath 只挂这一个文件,绕开整个
+          # 软链目录结构;代价是 ConfigMap 改了以后这个文件不会自动热更新,
+          # 需要重启 pod 才能生效,这个 demo DAG 可以接受。
           extraVolumes:
             - name: dags
               configMap:
                 name: airflow-dags
           extraVolumeMounts:
             - name: dags
-              mountPath: /opt/airflow/dags
+              mountPath: /opt/airflow/dags/seatunnel_device_events.py
+              subPath: seatunnel_device_events.py
         triggerer:
           replicas: 1
           persistence:
