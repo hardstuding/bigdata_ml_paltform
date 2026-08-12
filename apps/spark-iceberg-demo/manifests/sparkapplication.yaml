@@ -35,7 +35,21 @@ spec:
     spark.hadoop.fs.s3a.path.style.access: "true"
     spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
     spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
-    spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.11.0,org.apache.hadoop:hadoop-aws:3.4.1,software.amazon.awssdk:bundle:2.51.3"
+    # iceberg-spark-runtime 特意不用 Maven Central 上最新的 1.11.0——实测
+    # 1.11.0 这个 jar 是用 Java 17 编译的(class file version 61),但
+    # apache/spark:3.5.9-python3 这个官方镜像自带的是 Temurin JDK 11
+    # (`java -version` 实测确认),driver 启动时直接
+    # UnsupportedClassVersionError。逐个版本下载实测二分定位:1.10.0 还是
+    # Java 11 编译(class file version 55),1.11.0 才跳到 Java 17,分界点
+    # 在这两个版本之间,选最新的、还兼容当前镜像 JDK 的 1.10.0。
+    spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0,org.apache.hadoop:hadoop-aws:3.4.1,software.amazon.awssdk:bundle:2.51.3"
+    # spark.jars.packages 触发的 Maven/Ivy 依赖解析是 spark-operator
+    # controller 自己在它的 pod 里跑 spark-submit 完成的(不是在
+    # driver/executor pod 里),controller 这个 pod 跑在一个没有可写
+    # $HOME 的受限用户下(Ivy 默认缓存路径 /nonexistent/.ivy2.5.2/... 报
+    # FileNotFoundException,实测确认过)。显式把 Ivy 缓存指到一个肯定
+    # 可写的路径,不依赖 controller pod 的默认 $HOME。
+    spark.jars.ivy: "/tmp/.ivy2"
   restartPolicy:
     type: Never
   driver:
