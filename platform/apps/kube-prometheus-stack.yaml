@@ -1,6 +1,19 @@
-# local-lite: 关掉 Alertmanager、缩短 retention、去掉持久化,只求验证指标链路能跑通。
-# cloud-full/prod 起需要打开 Alertmanager + 持久化存储,到时候用 environments/
-# 里的 values 覆盖,不改这个文件的结构。
+# local-lite: 缩短 retention、去掉持久化,只求验证指标链路能跑通。
+# cloud-full/prod 起需要持久化存储,到时候用 environments/ 里的 values
+# 覆盖,不改这个文件的结构。
+#
+# 2026-08-12 打开了 Alertmanager(ADR-034)——之前关掉是图省资源,但代价是
+# "系统坏了要靠人肉巡检才知道",今晚 cert-manager 崩了 8 小时才被发现,
+# 撑不住无人值守。chart 自带的 defaultRules(见下面没有改动的部分,
+# `defaultRules.create` 是 chart 默认值 true,一直在生效,只是之前没地方
+# 路由)已经覆盖了 Pod 崩溃重启、Job 失败等常见场景,打开 Alertmanager 当天
+# 就抓到一个真实问题(iam-sync CronJob 的 DeadlineExceeded,见 ADR-031)。
+#
+# 还没配外部通知渠道(Slack/邮件/PagerDuty)——没有对应的 webhook/凭据,
+# 这次只是让告警"可查"(Alertmanager 自己的 UI、Prometheus /alerts 页面),
+# 不是"会推送"。真要做到有人告警会收到通知,需要人提供一个接收端(公司
+# 内部的 webhook 地址,或者 Slack/邮件配置),这个 Secret 不应该由自动化
+# 流程自己造。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -19,7 +32,43 @@ spec:
         crds:
           enabled: false
         alertmanager:
+          enabled: true
+          alertmanagerSpec:
+            resources:
+              requests: {cpu: 25m, memory: 64Mi}
+              limits: {memory: 128Mi}
+            storage: {}
+          config:
+            route:
+              receiver: "null"
+              routes:
+                # Watchdog 是 chart 自带的"心跳"告警,设计上永远 firing,
+                # 用来验证告警链路本身没死——单独路由到 null,不是要忽略
+                # 告警,是这条本来就不该被当成"有问题"处理。
+                - receiver: "null"
+                  matchers:
+                    - alertname = "Watchdog"
+            receivers:
+              - name: "null"
+        # k3s 把 controller-manager/scheduler/kube-proxy 内置在同一个二进制
+        # 里,不像标准 kubeadm 集群那样有独立的、chart 期望的 metrics
+        # 端口可以抓——这三个开着只会产生"Down"假阳性(实测确认过:
+        # KubeControllerManagerDown/KubeProxyDown/KubeSchedulerDown 一直在
+        # firing,不是真的挂了,是根本抓不到指标)。关掉抓取 + 对应的默认
+        # 告警规则组,不是关掉告警能力本身。
+        kubeControllerManager:
           enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false
+        defaultRules:
+          rules:
+            kubeControllerManager: false
+            kubeScheduler: false
+            kubeSchedulerAlerting: false
+            kubeSchedulerRecording: false
+            kubeProxy: false
         prometheus:
           prometheusSpec:
             retention: 6h

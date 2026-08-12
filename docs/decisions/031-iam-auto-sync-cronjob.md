@@ -71,3 +71,13 @@ pod 直连 `github.com` 会卡住/超时,`dl.k8s.io`(下 kubectl 二进制那步
 - `NO_CREATE_USERS` 这个跳过分支目前只打印警告,没有做进一步的告警通知
   (比如发到某个地方提醒人去处理)——等真的有人被这个逻辑挡住、需要手动
   建号时,才知道是不是需要加通知机制,现在没有真实需求先不做。
+
+## 2026-08-12 补充:打开 Alertmanager(ADR-034)后第一批告警就抓到真实问题
+
+`activeDeadlineSeconds` 最早设成 300 秒(等于调度间隔),`kubectl get jobs
+-n keycloak` 查出来连续 3 次跑失败,`kubectl describe job` 确认原因是
+`DeadlineExceeded`——内存紧张时 `apt-get install git` + `pip install
+pyyaml` + `git clone` 这几步本身就可能超过 5 分钟,不是卡死,是单纯不够快。
+放宽到 600 秒(10 分钟),`concurrencyPolicy: Forbid` 保证不会因为放宽这个
+值就产生并发跑多份的风险。这是打开 Alertmanager 之后第一个通过告警(不是
+人肉巡检)发现的真实问题,验证了这件事本身的价值。

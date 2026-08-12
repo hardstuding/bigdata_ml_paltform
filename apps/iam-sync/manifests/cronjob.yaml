@@ -59,9 +59,14 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      # 单次跑最长给 5 分钟(等于调度间隔),卡住了不会无限占着,下一次调度
-      # 会因为 concurrencyPolicy: Forbid 自动跳过,不会堆积。
-      activeDeadlineSeconds: 300
+      # 2026-08-12 打开 Alertmanager 后第一批告警就抓到:这个原来设成和
+      # 调度间隔一样的 5 分钟,在内存紧张的时候不够用(apt-get install git +
+      # pip install pyyaml + git clone 这几步本身正常就要一段时间,资源紧张
+      # 时更慢),连续踩到 DeadlineExceeded 被强杀,`kubectl describe job`
+      # 确认过真实原因。放宽到 10 分钟,配合 concurrencyPolicy: Forbid——
+      # 跑慢的那次结束前,下一次调度会跳过,不会堆积,不会因为放宽这个值
+      # 就产生并发跑多份的风险。
+      activeDeadlineSeconds: 600
       template:
         spec:
           serviceAccountName: iam-sync
