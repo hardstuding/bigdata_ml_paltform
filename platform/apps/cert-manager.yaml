@@ -15,20 +15,35 @@ spec:
       valuesObject:
         crds:
           enabled: true
+        # 2026-08-12 补上 limits——之前只有 requests,复盘架构现状时发现
+        # 这是唯一一个缺 limits 的组件(扫了一遍 platform/apps/、
+        # apps/definitions/ 确认的),没有上限意味着这个组件可以无限制占
+        # 内存,当天晚上 cert-manager 因为宿主机整体内存紧张反复被
+        # livenessProbe 杀掉重启 8 小时(根因是别的组件占用太多,不是这个
+        # 组件本身内存泄漏),但"关键组件没有 limits"这件事本身是一个
+        # 独立的、该补的缺口。值参考 kubectl top 实测(controller ~27Mi、
+        # cainjector ~93Mi、webhook ~25Mi),留了几倍余量,不是精确算出来的
+        # 上限。
         resources:
           requests:
             cpu: 50m
             memory: 64Mi
+          limits:
+            memory: 256Mi
         webhook:
           resources:
             requests:
               cpu: 25m
               memory: 32Mi
+            limits:
+              memory: 128Mi
         cainjector:
           resources:
             requests:
               cpu: 25m
               memory: 64Mi
+            limits:
+              memory: 256Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager

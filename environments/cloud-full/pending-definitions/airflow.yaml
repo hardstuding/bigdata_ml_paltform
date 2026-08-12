@@ -32,11 +32,15 @@ spec:
         # 历史),关掉改用 scripts/05-configure-airflow.sh 走 Secret 建管理员账号。
         createUserJob:
           enabled: false
+        # 2026-08-12 补上 limits,和 cert-manager 那次是同一轮扫描发现的
+        # 同一类缺口(这个组件本身还是 park 状态,还没真实跑过,先修好)。
         migrateDatabaseJob:
           resources:
             requests:
               cpu: 100m
               memory: 256Mi
+            limits:
+              memory: 512Mi
         webserver:
           replicas: 1
           resources:

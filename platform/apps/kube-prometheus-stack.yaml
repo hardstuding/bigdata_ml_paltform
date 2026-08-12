@@ -136,16 +136,22 @@ spec:
               memory: 128Mi
             limits:
               memory: 256Mi
+        # 2026-08-12 补上 limits,和 cert-manager 那次是同一轮扫描发现的
+        # 同一类缺口。
         prometheus-node-exporter:
           resources:
             requests:
               cpu: 25m
               memory: 32Mi
+            limits:
+              memory: 64Mi
         kube-state-metrics:
           resources:
             requests:
               cpu: 25m
               memory: 64Mi
+            limits:
+              memory: 128Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
