@@ -21,6 +21,13 @@ data:
           endpoint-groups:
             CLUSTER_WRITE:
               enabled: true
+            # 提交/查询作业(POST /hazelcast/rest/maps/submit-job 等)走的是
+            # DATA 这个 endpoint group,不是 CLUSTER_WRITE——一开始照文档
+            # 片段拼的时候没意识到要单独开(文档本身没有给完整的 REST 配置
+            # 示例,见上面的说明),真正提交作业时报
+            # "REST endpoint group is not enabled - DATA"才发现,实测确认。
+            DATA:
+              enabled: true
         join:
           tcp-ip:
             enabled: true
