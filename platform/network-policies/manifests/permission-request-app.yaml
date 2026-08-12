@@ -1,0 +1,83 @@
+# 第一批 NetworkPolicy 的落地对象,见 docs/decisions/035-network-policy.md。
+# 选 permission-request-app 这个 namespace 当试点,不是随手挑的:这是这次
+# 会话新建的组件,不是任何已有核心链路(Keycloak/Postgres/MinIO)依赖的
+# 东西,策略写错了、把自己的流量挡住了,爆炸半径最多是这一个门户不能用,
+# 不会牵连 SSO/数据库这些基础设施——在没人盯着的情况下动网络策略,先挑
+# 一个"错了也不影响别的东西"的目标验证,比一次性铺开全部 namespace 更
+# 负责任。
+#
+# 只做 ingress(谁能连进来),不做 egress(这个 pod 能连出去哪里)——
+# egress 这次没做是因为这台机器上不少组件的出网要走一个宿主机代理
+# (192.168.5.2:1087,见 ADR-026),这个地址不在标准的集群 Pod/Service
+# CIDR 范围内,egress 白名单要把这类"到宿主机某个端口"的外部地址也考虑
+# 进去,复杂度和出错风险更高,留到下一步单独做,不想在第一次引入
+# NetworkPolicy 时就把两件事一起做。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: permission-request-app
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 浏览器流量入口:只有 ingress-nginx 能连 oauth2-proxy 的监听端口
+# (4180,不是 Service 的 80,NetworkPolicy 的 ports 匹配的是容器端口)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-nginx-to-oauth2-proxy
+  namespace: permission-request-app
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 4180
+---
+# oauth2-proxy 代理成功之后转发给 app 本体(同 namespace 内部调用)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-oauth2-proxy-to-app
+  namespace: permission-request-app
+spec:
+  podSelector:
+    matchLabels:
+      app: permission-request-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: oauth2-proxy
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# monitoring(Prometheus/Alloy)需要能抓这个 namespace 里所有 pod 的
+# metrics 端口,不区分是 app 本体还是 oauth2-proxy。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: permission-request-app
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring

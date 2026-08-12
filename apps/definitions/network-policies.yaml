@@ -1,0 +1,25 @@
+# NetworkPolicy 试点,见 docs/decisions/035-network-policy.md。这个
+# Application 只覆盖 permission-request-app 这一个 namespace,不是全量
+# 铺开——先在一个"错了也不影响核心链路"的目标上验证。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: network-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/network-policies/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: permission-request-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
