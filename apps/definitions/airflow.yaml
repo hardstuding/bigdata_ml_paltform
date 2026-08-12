@@ -22,11 +22,15 @@ spec:
         # 任务失败/重试时 KubernetesExecutor 默认会很快删掉对应的 pod,排查
         # 问题时经常等 kubectl 反应过来 pod 已经没了,连 crictl 都抓不到日志
         # (实测踩过好几次)。关掉自动删除,这台本地机器不缺这点残留 pod 的
-        # 存储空间,方便调试;真要清理手动 kubectl delete 就行。
-        config:
-          kubernetes_executor:
-            delete_worker_pods: 'False'
-            delete_worker_pods_on_failure: 'False'
+        # 存储空间,方便调试;真要清理手动 kubectl delete 就行。用 env 而不是
+        # config.kubernetes_executor.*——试过后者,chart 的 config 合并只认
+        # 预置在模板里的固定键,新加的键会被静默丢掉(实测确认,渲染出来的
+        # airflow.cfg 里根本没有这两个键),env 是更直接、保证生效的路径。
+        env:
+          - name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS
+            value: "False"
+          - name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
+            value: "False"
         postgresql:
           enabled: false
         redis:
