@@ -275,7 +275,10 @@ else
 fi
 
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"
-MINIO_CONSUMER_NAMESPACES="trino data mlflow"
+# spark-operator: SparkApplication driver/executor 直连 MinIO(S3A)读写
+# Iceberg warehouse,和 Trino 当初踩的是同一个坑,同样要复制一份
+# (ADR-036 验证 Spark+Iceberg 链路时发现 driver pod 报 secret not found)。
+MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done
