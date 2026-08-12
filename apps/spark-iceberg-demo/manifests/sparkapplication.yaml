@@ -3,11 +3,20 @@
 # kserve-demo/scripts/08 建的 Superset demo 是同一类东西)。
 #
 # 官方 apache/spark 镜像(不自己 build),Iceberg/S3A 支持通过
-# `spark.jars.packages` 在提交时从 Maven Central 现拉,不打进镜像——版本
-# 号和这个仓库里其他地方保持一致:hadoop-aws 3.4.1 (apps/hive-metastore/)、
-# AWS SDK bundle 2.51.3(同上),iceberg-spark-runtime-3.5_2.12 1.11.0 是
-# 查 Maven Central 当前最新稳定版(Scala 2.12 对应镜像里的 Spark 3.5.9
-# 默认 Scala 版本)。
+# `spark.jars.packages` 在提交时从 Maven Central 现拉,不打进镜像。
+#
+# hadoop-aws 版本特意不跟 Trino/Hive Metastore 那边保持一致(那两处是
+# 3.4.1/3.1.0,各自匹配自己镜像内置的 hadoop-common)——这里必须匹配
+# apache/spark:3.5.9-python3 自己镜像内置的 hadoop-client-api/runtime
+# 版本,实测是 3.3.4(`docker run --entrypoint sh apache/spark:3.5.9-python3
+# -- ls /opt/spark/jars/ | grep hadoop-client` 确认),不是 3.4.1。塞一个
+# 3.4.1 的 hadoop-aws 进去会在真正读表时报
+# ClassNotFoundException: org.apache.hadoop.fs.BulkDelete(这个类是 Hadoop
+# 3.4.0 才加的批量删除 API,3.3.4 里没有)。hadoop-aws 3.3.4 对应的 AWS SDK
+# 也不是 Trino 那边用的 SDK v2(software.amazon.awssdk),是 SDK v1 的
+# aws-java-sdk-bundle:1.12.262(查的是 hadoop-aws:3.3.4 那份 POM 里
+# aws-java-sdk.version 属性)。iceberg-spark-runtime 版本见下面 1.10.0 那条
+# 注释。
 #
 # Hive Metastore URI 和 S3A 端点配置照抄 apps/hive-metastore/manifests/
 # core-site-configmap.yaml(和 Trino 连的是同一个 Hive Metastore、同一个
@@ -42,7 +51,7 @@ spec:
     # UnsupportedClassVersionError。逐个版本下载实测二分定位:1.10.0 还是
     # Java 11 编译(class file version 55),1.11.0 才跳到 Java 17,分界点
     # 在这两个版本之间,选最新的、还兼容当前镜像 JDK 的 1.10.0。
-    spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0,org.apache.hadoop:hadoop-aws:3.4.1,software.amazon.awssdk:bundle:2.51.3"
+    spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
     # spark.jars.packages 触发的 Maven/Ivy 依赖解析是 spark-operator
     # controller 自己在它的 pod 里跑 spark-submit 完成的(不是在
     # driver/executor pod 里),controller 这个 pod 跑在一个没有可写
