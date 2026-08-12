@@ -61,7 +61,10 @@ spec:
     spark.jars.ivy: "/tmp/.ivy2"
   restartPolicy:
     type: Never
-  driver:
+    # driver 自己就占了 1000m 的 CPU request,是这台机器上单个 pod 里最大的
+    # 一块——降到 500m 之后还是不够(还差 35m),说明真正的瓶颈是 driver 自己
+    # 这 1 核,一起降。
+    coreRequest: "500m"
     cores: 1
     memory: "1024m"
     serviceAccount: spark
