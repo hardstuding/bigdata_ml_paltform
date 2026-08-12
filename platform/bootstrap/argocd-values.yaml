@@ -15,13 +15,20 @@
 # 重启(exitCode 0,不是典型的 OOMKilled),且完全没配内存上限——不能排除
 # 是资源相关问题的一个诱因,先补上,数值参照 `kubectl top pod -n argocd`
 # 实测(application-controller 常驻 ~640Mi,是唯一吃内存大户,其余都是几十Mi)。
+#
+# 2026-08-12 更正:controller 的 limits 一开始定的 1024Mi,结果几十分钟后
+# 就在真实使用中被 OOMKilled(反复重启,导致所有 Application 的 sync 操作
+# 卡在 Running 不动,排查了好一阵才发现)——`kubectl top` 那次测的 640Mi
+# 只是瞬时静态值,没考虑到它要跟踪这个平台全部 25+ 个 Application 及其名下
+# 资源的实时状态,遇到批量 sync/patch 操作时的内存峰值远不止这个数。调高到
+# 2048Mi,留够真实操作时的峰值余量,不要只信一次性的 top 快照。
 controller:
   resources:
     requests:
       cpu: 200m
       memory: 512Mi
     limits:
-      memory: 1024Mi
+      memory: 2048Mi
 
 repoServer:
   resources:
