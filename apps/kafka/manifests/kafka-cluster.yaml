@@ -3,6 +3,19 @@
 # 合一节点,存储从官方示例的 100Gi 降到 local-lite 能接受的 5Gi。
 # 依赖 kafka-operator 先把 CRD 装好,Job/CR 会自动重试直到 CRD 就绪,不需要
 # 手动排队(和 hive-metastore 依赖 postgres 是同一个处理方式)。
+#
+# 【可插拔基础设施,见 ADR-030】Kafka 和 Postgres/S3 不是同一类"改个连接
+# 串"的覆盖点——这份 manifest 本身就是在自建一整个 Kafka 集群,不是某个
+# 组件连外部 Kafka 的客户端配置。公司已经有生产 Kafka 的话,做法是这整个
+# `KafkaNodePool`/`Kafka` 资源都不部署(对应
+# `kafka-cluster`/`kafka-operator` 这两个 Application 保持 park 在
+# `environments/cloud-full/pending-definitions/`,不 un-park),下游需要连
+# Kafka 的组件(现在
+# 还没有——这个仓库目前没有任何 SeaTunnel job/Kafka Connect 之类的真实
+# 消费者接进来)配置指向公司已有的 broker 地址即可。kafka-operator 本身
+# (Strimzi operator)不受影响,不管连哪个 Kafka,operator 只是用来管理
+# `KafkaNodePool`/`Kafka` 这类自建集群资源的,公司已有 Kafka 场景下这个
+# operator 也一样不需要装。
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:

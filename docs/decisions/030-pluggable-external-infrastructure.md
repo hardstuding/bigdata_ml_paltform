@@ -2,8 +2,9 @@
 
 - 状态: 已采纳,**Postgres 这条已经推广到 Keycloak + Hive Metastore + MLflow +
   Superset + OpenMetadata + Airflow;对象存储(MinIO→外部 S3)这条推广到
-  Hive Metastore + Trino + Spark History Server + Postgres 备份;Kafka/SSO
-  待推广**(2026-08-11/13)
+  Hive Metastore + Trino + Spark History Server + Postgres 备份;Kafka 记录了
+  和前两者不同的覆盖方式(整个组件不部署,不是改连接串);SSO 待推广**
+  (2026-08-11/13)
 
 ## 背景
 
@@ -88,6 +89,17 @@ ConfigMap/Secret 读 S3 端点,类似 Postgres 连接串现在的做法,留作�
 课题,不在这次范围内)。这次先把"这几处分别在哪、换的时候要注意什么
 差异(path-style-access/ssl 等)"标清楚,降低"改了一处、以为全换完了、
 结果另一处还连着 MinIO"这种半吊子迁移的风险。
+
+### 2026-08-13 补充:Kafka 是不同的覆盖方式,标记方式也不一样
+
+`apps/kafka/manifests/kafka-cluster.yaml` 标了,但和前面几个不是同一类
+覆盖点——Postgres/S3 那几个组件本身是"消费者",改连接串就行;Kafka 这份
+manifest 本身就是在**自建**一整个 Kafka 集群(Strimzi 的
+`KafkaNodePool`/`Kafka` 资源),接公司已有 Kafka 的做法是这整个组件都不
+部署,不是改哪个字段。当前这个仓库里还没有任何真实的 Kafka 消费者(没有
+SeaTunnel job/Kafka Connect 接进来),所以也没有"改这里指向外部 broker"
+的具体覆盖点可以标——等真的有消费者接进来,才会出现类似 Postgres/S3 那种
+"改连接串"的标记点。
 
 优先级(用户确认过的顺序):先做企业普遍已有的基础设施(Postgres、S3 兼容
 对象存储、Kafka、已有的 SSO/IdP),这些换掉能带来最大的采用门槛下降;
