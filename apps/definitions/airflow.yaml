@@ -115,6 +115,22 @@ spec:
         dags:
           gitSync:
             enabled: false
+        # KubernetesExecutor 每个任务起一个独立 pod,用的是 workers.kubernetes
+        # 这份 pod 模板——不是 scheduler/dagProcessor 那份。一开始只挂了
+        # scheduler/dagProcessor,任务 pod 里根本没有 DAG 文件,报
+        # "Dag not found during start up"(实测确认,DAG 逻辑本身用
+        # `airflow tasks test` 在 scheduler pod 里跑是完全正常的,问题只在
+        # KubernetesExecutor 起的任务 pod 缺这个挂载)。
+        workers:
+          kubernetes:
+            extraVolumes:
+              - name: dags
+                configMap:
+                  name: airflow-dags
+            extraVolumeMounts:
+              - name: dags
+                mountPath: /opt/airflow/dags/seatunnel_device_events.py
+                subPath: seatunnel_device_events.py
   destination:
     server: https://kubernetes.default.svc
     namespace: airflow
