@@ -88,7 +88,30 @@ def _get_json(url: str) -> dict:
         return json.loads(resp.read())
 
 
-@task
+# KubernetesExecutor 起的任务 pod 默认不带任何 resources(BestEffort
+# QoS)——排查一次任务被 SIGKILL(exit_code=-9)的问题时,在节点的
+# kernel OOM 日志里发现这台机器当时确实在被反复 OOM(`journalctl -k`,
+# 连 argocd-application-controller 都被连带杀了几次),BestEffort 的 pod
+# 天然是 OOM killer 第一批目标。加个最小的 resources request,不求解决这台
+# 机器整体资源紧张的根因,至少让这两个任务 pod 不是最先被杀的那批。
+POD_OVERRIDE = {
+    "pod_override": {
+        "spec": {
+            "containers": [
+                {
+                    "name": "base",
+                    "resources": {
+                        "requests": {"cpu": "50m", "memory": "128Mi"},
+                        "limits": {"memory": "256Mi"},
+                    },
+                }
+            ]
+        }
+    }
+}
+
+
+@task(executor_config=POD_OVERRIDE)
 def submit_seatunnel_job(**context) -> str:
     minio_key = Variable.get("minio_access_key")
     minio_secret = Variable.get("minio_secret_key")
@@ -105,7 +128,7 @@ def submit_seatunnel_job(**context) -> str:
     return job_id
 
 
-@task
+@task(executor_config=POD_OVERRIDE)
 def wait_for_completion(job_id: str) -> None:
     # SeaTunnel REST API 没有"阻塞直到完成"的接口,只能轮询 job-info——这个
     # demo 作业量很小,预期几秒到十几秒内跑完,轮询间隔不用做得太精细。
