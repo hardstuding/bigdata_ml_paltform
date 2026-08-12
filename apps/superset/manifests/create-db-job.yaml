@@ -1,6 +1,11 @@
 # 和 apps/airflow/manifests/create-db-job.yaml 同样的模式:在已运行的 Postgres
 # 实例上补建 superset 专用库/用户。不要加 argocd hook 注解,原因见那个文件的
 # 注释和 troubleshooting.md。
+#
+# 【可插拔基础设施,见 ADR-030】接外部 Postgres 就别装这个 Job——数据库该
+# 由 DBA 按平时流程建,同时把 apps/definitions/superset.yaml 里说明的
+# superset-db-secrets 这个 Secret 的 DB_HOST/DB_USER/DB_PASS/DB_NAME 改成
+# 外部实例的值。
 apiVersion: batch/v1
 kind: Job
 metadata:

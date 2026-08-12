@@ -35,12 +35,26 @@ spec:
             # 的,不是真的连不上)。开放所有 host 访问,local-lite 场景下
             # 这层 pod 本来就只能在集群内部访问,不算暴露风险。
             allowed_hosts: "*"
+        # 【可插拔基础设施,见 ADR-030】backendStoreUriFrom 读的是
+        # mlflow-db-secret 这个 Secret 的 uri 字段(scripts/00-generate-
+        # secrets.sh 拼的完整 DSN,不是这里的独立字段)——接外部 Postgres
+        # 改这个 Secret 的 uri 值就行,不用改这份 Application yaml 本身。
+        # 和 Keycloak 那个参考例子(platform/apps/keycloak.yaml)不一样:
+        # keycloakx chart 原生把 host/port/database 拆成独立字段,MLflow
+        # 官方 chart 只接受一整个 URI,做不到同样细粒度。配套的
+        # apps/mlflow/manifests/create-db-job.yaml 接外部 Postgres 时应该
+        # 跳过(数据库该由 DBA 按平时流程建),同样的 uri 也要同步改成外部
+        # 实例的连接串。
         mlflow:
           backendStoreUriFrom:
             secretKeyRef:
               name: mlflow-db-secret
               key: uri
           defaultArtifactRoot: "s3://mlflow/"
+        # 【可插拔基础设施,见 ADR-030】接外部 S3(不是 MinIO)只用改这三行:
+        # MLFLOW_S3_ENDPOINT_URL 指向真实 S3(或删掉这个变量,MLflow 默认
+        # 就是连 AWS S3),AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY 换成外部
+        # 存储的凭据(不一定非要走 minio-root 这个 Secret)。
         env:
           - name: AWS_ACCESS_KEY_ID
             valueFrom:

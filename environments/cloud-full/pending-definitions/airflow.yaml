@@ -34,6 +34,12 @@ spec:
           enabled: false
         redis:
           enabled: false
+        # 【可插拔基础设施,见 ADR-030】和 MLflow 是同一类(chart 只接受
+        # 一整个连接串,不是拆开的字段):airflow-metadata 这个 Secret 的
+        # connection 字段是完整 DSN(scripts/00-generate-secrets.sh 拼的),
+        # 接外部 Postgres 改这个 Secret 的值。配套的
+        # apps/airflow/manifests/create-db-job.yaml 接外部 Postgres 时
+        # 应该跳过(数据库该由 DBA 按平时流程建)。
         data:
           metadataSecretName: airflow-metadata
         fernetKeySecretName: airflow-fernet-key

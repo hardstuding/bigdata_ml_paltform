@@ -1,5 +1,9 @@
 # 和其他组件的 create-db-job.yaml 同样的模式,跑在 mlflow 命名空间(不是
 # data),连 Postgres 用完整域名,见 troubleshooting.md。
+#
+# 【可插拔基础设施,见 ADR-030】接外部 Postgres 就别装这个 Job——数据库该
+# 由 DBA 按平时流程建,同时把 apps/definitions/mlflow.yaml 里
+# mlflow-db-secret 的 uri 值改成外部实例的连接串(见那份文件里的说明)。
 apiVersion: batch/v1
 kind: Job
 metadata:

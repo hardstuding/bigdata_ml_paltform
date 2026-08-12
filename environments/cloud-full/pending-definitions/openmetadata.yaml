@@ -44,6 +44,12 @@ spec:
                 password:
                   secretRef: opensearch-admin
                   secretKey: password
+            # 【可插拔基础设施,见 ADR-030】host/port/databaseName/
+            # auth.username 都是独立字段(这几个组件里和 Keycloak 一样干净
+            # 的一个),接外部 Postgres 直接改这几行 + openmetadata-
+            # postgresql-secrets 这个 Secret 的密码。配套的
+            # apps/definitions/openmetadata-db-init.yaml 接外部 Postgres
+            # 时应该跳过(数据库该由 DBA 按平时流程建)。
             database:
               host: postgres.data.svc.cluster.local
               port: 5432

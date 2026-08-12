@@ -4,6 +4,9 @@
 # 命名空间用的,放这里避免又踩一次跨命名空间引用不了的坑(见
 # troubleshooting.md 里 Trino 连 MinIO 那次)。Job 本身通过网络连
 # postgres.data.svc.cluster.local,不需要和 Postgres 同命名空间——注意必须用完整域名,不能用短名"postgres",短名只有同命名空间才能解析(airflow/superset 的 db-init job 能用短名是因为它们本来就建在 data 命名空间里,这个不一样)。
+# 【可插拔基础设施,见 ADR-030】接外部 Postgres 就别装这个 Job——数据库该
+# 由 DBA 按平时流程建,同时把 apps/definitions/openmetadata.yaml 里
+# database.host/port/databaseName/auth.username 改成外部实例的值。
 apiVersion: batch/v1
 kind: Job
 metadata:

@@ -1,7 +1,7 @@
 # 030. 可插拔基础设施:允许接公司已有的 Postgres/Kafka/对象存储/SSO,不强制全部自建
 
-- 状态: 已采纳,**模式已在 Keycloak + Hive Metastore 上落地,其余组件待推广**
-  (2026-08-11)
+- 状态: 已采纳,**Postgres 这条已经推广到 Keycloak + Hive Metastore + MLflow +
+  Superset + OpenMetadata,S3/Kafka/SSO 待推广**(2026-08-11/13)
 
 ## 背景
 
@@ -50,12 +50,23 @@ Job 要跳过"。找起来靠 `grep -rn "可插拔基础设施"`,不靠一个中
   留作已知欠账,不在这次范围内重构(现在的 Hive Metastore 是 Phase 1
   活跃组件,风险收益比不划算现在动它)。
 
-### 还没做,按什么顺序推广
+### 2026-08-13 补充:MLflow/Superset/OpenMetadata 也标好了
 
-MLflow/Airflow/Superset/OpenMetadata 都是 `-db-init.yaml` 独立 Job
-建库的模式(不是 Hive Metastore 那种耦合进 Postgres 自己初始化脚本的
-特例),结构上和 Keycloak 是同一套,照抄这次的注释标记方式应该不难,只是
-工作量是"一个个组件过一遍",留到下次继续推。
+三个都是 `-db-init.yaml` 独立 Job 建库的模式,结构上和 Keycloak 是同一套,
+标记方式照抄,但连接串的**载体**三家都不一样,值得记一下差异,不是复制
+粘贴就完事:
+
+- **OpenMetadata** 最干净:`database.host/port/databaseName/auth.username`
+  直接是 Application yaml 里的独立字段,和 Keycloak 那个参考例子完全同款。
+- **Superset**:字段也是独立的(`DB_HOST`/`DB_USER`/`DB_PASS`/`DB_PORT`/
+  `DB_NAME`),但不在 Application yaml 里,而是在 `superset-db-secrets`
+  这个 Secret 里(chart 靠 `envFromSecret` 整体引用)——接外部 Postgres
+  改的是这个 Secret,不是 `apps/definitions/superset.yaml` 本身。
+- **MLflow** 最不灵活:chart 只接受一整个 DSN 字符串(`mlflow-db-secret`
+  的 `uri` 字段),不是拆开的字段,改的时候整个 URI 都要重新拼。
+
+Airflow 也补上了,和 MLflow 是同一类(整个 DSN 存在 `airflow-metadata`
+这个 Secret 的 `connection` 字段里,不是拆开的字段)。
 
 优先级(用户确认过的顺序):先做企业普遍已有的基础设施(Postgres、S3 兼容
 对象存储、Kafka、已有的 SSO/IdP),这些换掉能带来最大的采用门槛下降;

@@ -10,6 +10,9 @@
 # "没有资源不健康"而误报 Healthy。踩过这个坑,细节见
 # docs/operations/troubleshooting.md。就用普通资源,靠上面的幂等 SQL +
 # backoffLimit 重试保证正确性。
+# 【可插拔基础设施,见 ADR-030】接外部 Postgres 就别装这个 Job——数据库该
+# 由 DBA 按平时流程建,同时把 apps/definitions/airflow.yaml 里
+# airflow-metadata 这个 Secret 的 connection 值改成外部实例的 DSN。
 apiVersion: batch/v1
 kind: Job
 metadata:

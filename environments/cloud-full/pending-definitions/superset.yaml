@@ -66,6 +66,13 @@ spec:
           enabled: false
         cache:
           enabled: false
+        # 【可插拔基础设施,见 ADR-030】chart 默认从 DB_USER/DB_PASS/
+        # DB_HOST/DB_PORT/DB_NAME 这几个环境变量拼连接串,这几个键都在
+        # superset-db-secrets 这个 Secret 里(scripts/00-generate-
+        # secrets.sh 生成)——接外部 Postgres 改这个 Secret 的值就行,不用
+        # 改这份 Application yaml。配套的
+        # apps/superset/manifests/create-db-job.yaml 接外部 Postgres 时
+        # 应该跳过(数据库该由 DBA 按平时流程建)。
         envFromSecret: superset-db-secrets
         extraEnvRaw:
           - name: OAUTH2_CLIENT_SECRET
