@@ -1,6 +1,8 @@
 # 033. 共享 Postgres 每日自动备份
 
-- 状态: 已采纳,验证中(2026-08-12)
+- 状态: 已采纳,已验证(2026-08-12:手动触发 Job 跑通,确认
+  `postgres/postgres-20260812T012950Z.sql.gz`(466KB)真的落进了 MinIO 的
+  `backups` bucket;还没验证过恢复流程,见下面"后果")
 
 ## 背景
 
@@ -42,4 +44,9 @@
 
 ## 验证记录
 
-(跑完手动触发验证后在这里补充实际结果)
+2026-08-12:`kubectl create job --from=cronjob/postgres-backup` 手动触发,
+两个容器(dump/upload)都 `Succeeded`,直接查 MinIO(用 boto3 列 bucket,
+不是只看 Job 状态)确认文件真的在:
+`postgres/postgres-20260812T012950Z.sql.gz`,466682 字节。**恢复流程
+(`scripts/restore-postgres-backup.sh`)还没有真的跑过一次**,这是明确的
+下一步——"备份文件存在"不等于"恢复能用",不能假设脚本写对了就直接信任。
