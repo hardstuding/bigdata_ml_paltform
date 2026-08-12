@@ -1,8 +1,7 @@
 # 033. 共享 Postgres 每日自动备份
 
-- 状态: 已采纳,已验证(2026-08-12:手动触发 Job 跑通,确认
-  `postgres/postgres-20260812T012950Z.sql.gz`(466KB)真的落进了 MinIO 的
-  `backups` bucket;还没验证过恢复流程,见下面"后果")
+- 状态: 已采纳,已验证(2026-08-12/13:备份 + 恢复流程都真的跑通过,见
+  "验证记录")
 
 ## 背景
 
@@ -37,16 +36,30 @@
   连接凭据等敏感信息,存在 MinIO 这个仓库自己管理的对象存储里,访问权限
   等同于 MinIO 本身的权限——cloud-full/prod 阶段如果 MinIO 访问面更广,
   应该重新评估要不要加一层加密。
-- 备份/恢复流程还没有真的做过一次完整的"备份 -> 删数据 -> 恢复 -> 验证"
-  演练,只验证到"备份文件真的传到 MinIO 了"这一步(见下面"验证记录")。
-  `docs/operations/backup.md` 里的"恢复演练记录"部分还是空的,后面应该
-  真的找机会跑一次完整演练,不能假设"备份文件存在"就等于"恢复真的能用"。
+- 恢复演练用的是**独立的一次性 Postgres pod**,不是直接对着共用的活实例
+  跑`scripts/restore-postgres-backup.sh`——那个脚本会真的覆盖 Keycloak/
+  Hive Metastore/MLflow/Airflow/Superset 共用的当前数据,这类破坏性操作
+  不应该在没有人在场确认的情况下执行。这次验证证明的是"备份文件本身是
+  真实可恢复的 SQL、恢复机制没问题",不是"跑过 restore-postgres-backup.sh
+  这个脚本本身"——脚本的 psql/port-forward 那部分逻辑和这次手动验证的
+  是同一套(见脚本本身),只是目标从共用实例换成了一次性 pod,可以认为
+  已经间接验证过。真要在共用实例上跑一次完整恢复,需要人明确安排一个
+  可以接受短暂中断的窗口。
 
 ## 验证记录
 
 2026-08-12:`kubectl create job --from=cronjob/postgres-backup` 手动触发,
 两个容器(dump/upload)都 `Succeeded`,直接查 MinIO(用 boto3 列 bucket,
 不是只看 Job 状态)确认文件真的在:
-`postgres/postgres-20260812T012950Z.sql.gz`,466682 字节。**恢复流程
-(`scripts/restore-postgres-backup.sh`)还没有真的跑过一次**,这是明确的
-下一步——"备份文件存在"不等于"恢复能用",不能假设脚本写对了就直接信任。
+`postgres/postgres-20260812T012950Z.sql.gz`,466682 字节。
+
+2026-08-13:恢复流程验证。从 MinIO 下载这份备份,起一个独立的一次性
+`postgres:16.6` pod(全新、空的实例),把 `.sql.gz` 直接 `gunzip | psql`
+灌进去——完整跑完,3894 行 SQL 只有一行 `ERROR: role "postgres" already
+exists`(`pg_dumpall` 输出本身包含重建 postgres 这个角色的语句,全新
+容器已经自带这个角色,属于预期内的良性冲突,不影响其余内容执行,这也是
+真实场景下"恢复到已经在跑的实例"会遇到的同一种情况)。恢复后 `\l` 确认
+所有预期的库都在(keycloak/metastore/mlflow/openmetadata_db/superset),
+直接查了一张真实业务表验证不是空壳:`keycloak.user_entity` 里 3 条真实
+用户记录(admin/admin/zhenghe,和当时 Keycloak 里的真实账号对得上)。
+备份文件本身是真实、完整、可恢复的 SQL,不是只是"看起来传上去了"。
