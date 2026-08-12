@@ -106,20 +106,28 @@ data:
     # 连 argocd-application-controller 都被连带杀了几次),BestEffort 的 pod
     # 天然是 OOM killer 第一批目标。加个最小的 resources request,不求解决这台
     # 机器整体资源紧张的根因,至少让这两个任务 pod 不是最先被杀的那批。
+    #
+    # pod_override 必须是真正的 kubernetes.client.models.V1Pod 对象,不能是
+    # 普通 dict——第一次直接传 dict 时 KubernetesExecutor 内部
+    # `PodGenerator.from_obj` 会做 isinstance(k8s.V1Pod) 检查,不通过就整个
+    # executor_config 判定为 invalid,任务连 pod 都起不来就直接 fail(实测
+    # 确认,不是猜的)。
+    from kubernetes.client import models as k8s
+
     POD_OVERRIDE = {
-        "pod_override": {
-            "spec": {
-                "containers": [
-                    {
-                        "name": "base",
-                        "resources": {
-                            "requests": {"cpu": "50m", "memory": "128Mi"},
-                            "limits": {"memory": "256Mi"},
-                        },
-                    }
+        "pod_override": k8s.V1Pod(
+            spec=k8s.V1PodSpec(
+                containers=[
+                    k8s.V1Container(
+                        name="base",
+                        resources=k8s.V1ResourceRequirements(
+                            requests={"cpu": "50m", "memory": "128Mi"},
+                            limits={"memory": "256Mi"},
+                        ),
+                    )
                 ]
-            }
-        }
+            )
+        )
     }
 
 
