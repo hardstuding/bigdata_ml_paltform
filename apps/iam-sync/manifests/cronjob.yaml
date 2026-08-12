@@ -104,6 +104,13 @@ spec:
             # `Acquire::http::Timeout`/`Acquire::Retries`,让它按重试上限
             # 失败退出,而不是无限期挂着等 activeDeadlineSeconds 来兜底
             # (兜底本身也可能迟到,见上面的补充说明,不能只指望这一层)。
+            #
+            # 补充(修完 apt-get 之后又抓到一次):同一类问题不止 apt-get
+            # 一处——修完上面这条,下一次卡住的是 `curl -fsSL -o
+            # /tools/kubectl ...` 这一行,原因一样(curl 默认也不会自己
+            # 放弃一个卡住的连接),只是换了个命令而已。教训是**这个脚本
+            # 里所有会碰网络的命令都要显式给超时**,不能修一个漏一个,
+            # 每个 curl 都补了 `-m`(总超时秒数)。
             - name: fetch-kubectl
               image: python:3.12-slim
               command:
@@ -119,8 +126,8 @@ spec:
                     aarch64) KARCH=arm64 ;;
                     *) echo "未知架构: $ARCH" >&2; exit 1 ;;
                   esac
-                  KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
-                  curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KARCH}/kubectl"
+                  KUBECTL_VERSION=$(curl -fsSL -m 30 https://dl.k8s.io/release/stable.txt)
+                  curl -fsSL -m 90 -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KARCH}/kubectl"
                   chmod +x /tools/kubectl
               volumeMounts:
                 - name: tools
@@ -135,6 +142,14 @@ spec:
               # colima 后如果这个 Job 又卡在 git clone 上,先重新跑一遍这条
               # 命令确认地址没变。dl.k8s.io(kubectl 二进制)不受影响,不需要
               # 代理也能直连,只有这一步的 github.com 需要。
+              #
+              # git clone 用 `http.lowSpeedLimit`/`http.lowSpeedTime`(git
+              # 自己的传输层超时机制)而不是简单包一层 `timeout N`——这两个
+              # 参数的意思是"传输速度连续 30 秒低于 1000 字节/秒就判定为
+              # 卡死中止",能容忍真实存在的慢速网络(仓库本来就不大,慢慢
+              # 传完也行),只掐真正卡死不动的连接,和 apt-get/curl 那两处
+              # 加固定秒数超时是同一个"网络操作必须自带超时"的原则,只是
+              # git 自己提供了更贴切的机制,不需要外面再包一层。
               env:
                 - name: HTTP_PROXY
                   value: "http://192.168.5.2:1087"
@@ -150,8 +165,8 @@ spec:
                   export PATH="/tools:$PATH"
                   apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
                   apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
-                  pip install --quiet pyyaml
-                  git clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
+                  pip install --quiet --timeout 30 pyyaml
+                  git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
                   cd /tmp/repo
                   python3 scripts/12-sync-iam.py --no-create-users
               volumeMounts:
