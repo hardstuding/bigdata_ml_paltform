@@ -7,7 +7,69 @@
 # 在边缘终结(local-lite 阶段先不接 TLS,见 docs/decisions/016)。这是官方推荐的
 # "跑在反向代理后面"的标准姿势,不是本地专用的临时妥协,cloud-full/prod 也这样配,
 # 区别只是那边 ingress 会挂真实证书。
+# 之前一直没给 ArgoCD 自己这几个组件配 resources.limits——它是 GitOps 引擎
+# 本身,是这个仓库“先做一遍资源清单扫描、补全所有组件 limits”那次审计的
+# 盲区(那次只扫了 platform/apps/、apps/definitions/,没扫这个 bootstrap
+# 文件)。排查 spark-operator 那次 GitOps 同步异常(revision 更新了但子
+# Application 的 spec 没跟着变)时发现 argocd-repo-server 有过 3 次
+# 重启(exitCode 0,不是典型的 OOMKilled),且完全没配内存上限——不能排除
+# 是资源相关问题的一个诱因,先补上,数值参照 `kubectl top pod -n argocd`
+# 实测(application-controller 常驻 ~640Mi,是唯一吃内存大户,其余都是几十Mi)。
+controller:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1024Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+dex:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+applicationSet:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+notifications:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
 server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
   service:
     type: ClusterIP
   ingress:
