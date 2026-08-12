@@ -19,16 +19,15 @@ spec:
     helm:
       valuesObject:
         executor: KubernetesExecutor
-        # 任务失败/重试时 KubernetesExecutor 默认会很快删掉对应的 pod,排查
-        # 问题时经常等 kubectl 反应过来 pod 已经没了,连 crictl 都抓不到日志
-        # (实测踩过好几次)。关掉自动删除,这台本地机器不缺这点残留 pod 的
-        # 存储空间,方便调试;真要清理手动 kubectl delete 就行。用 env 而不是
-        # config.kubernetes_executor.*——试过后者,chart 的 config 合并只认
-        # 预置在模板里的固定键,新加的键会被静默丢掉(实测确认,渲染出来的
-        # airflow.cfg 里根本没有这两个键),env 是更直接、保证生效的路径。
+        # 任务失败时 KubernetesExecutor 默认会很快删掉对应的 pod,排查问题时
+        # 经常等 kubectl 反应过来 pod 已经没了,连 crictl 都抓不到日志(调试
+        # 这个 DAG 时反复踩到,靠关这个开关才第一次真正抓到失败任务的日志)。
+        # 只关"失败时删除"这一半——成功的任务 pod 还是照常清理,不然这台机器
+        # 会一直堆积 pod 对象。用 env 而不是 config.kubernetes_executor.*——
+        # 试过后者,chart 的 config 合并只认预置在模板里的固定键,新加的键会
+        # 被静默丢掉(实测确认,渲染出来的 airflow.cfg 里根本没有这个键),
+        # env 是更直接、保证生效的路径。
         env:
-          - name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS
-            value: "False"
           - name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
             value: "False"
         postgresql:
