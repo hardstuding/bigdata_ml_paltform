@@ -58,6 +58,32 @@ spec:
               memory: 512Mi
             limits:
               memory: 1024Mi
+          extraVolumes:
+            - name: dags
+              configMap:
+                name: airflow-dags
+          extraVolumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+        # dagProcessor 是 Airflow 3.x 才拆出来的独立组件(DAG 解析不再是
+        # scheduler 自己干),之前没配 resources,这次一起补上。DAG 文件同样
+        # 要挂进这里——scheduler 和 dagProcessor 都要能看到 dags 目录,不是
+        # 只挂一边。
+        dagProcessor:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+          extraVolumes:
+            - name: dags
+              configMap:
+                name: airflow-dags
+          extraVolumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
         triggerer:
           replicas: 1
           persistence:
