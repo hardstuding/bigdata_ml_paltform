@@ -66,6 +66,16 @@ spec:
       # 确认过真实原因。放宽到 10 分钟,配合 concurrencyPolicy: Forbid——
       # 跑慢的那次结束前,下一次调度会跳过,不会堆积,不会因为放宽这个值
       # 就产生并发跑多份的风险。
+      #
+      # 2026-08-12 补充(colima 内存从 9G 提到 11G、重启之后):亲眼看到一次
+      # Job 跑了 39 分钟还没被 activeDeadlineSeconds(600 秒)杀掉——不是
+      # 这个字段配错,是 k3s 的 job-controller 在集群刚重启、有一堆
+      # controller 在追之前积压的 reconcile 工作时,执行"到期检查"这个
+      # 动作本身会明显滞后,`kubectl delete job` 这种最简单的操作当时也
+      # 卡了 2 分钟才返回,side 证据指向同一个根因。真正卡住那次 Job 的
+      # 原因另有其事(见下面 apt-get 那几行的注释),但"deadline killer
+      # 本身可能会迟到"这条本身也值得记录:不能假设"设了 deadline 就一定
+      # 会准时被杀",这只是兜底,不是能百分之百依赖的即时保证。
       activeDeadlineSeconds: 600
       template:
         spec:
@@ -84,6 +94,16 @@ spec:
             # ——换成原生架构的二进制,不走模拟层,问题消失。这台机器上能
             # 装起来不代表能跑,这类"模拟执行下的真实并发 bug"只有真的调用
             # 到那条代码路径才会暴露,静态检查/helm template 都测不出来。
+            # apt-get 的 http/https 方法默认没有超时——2026-08-12 亲眼
+            # 抓到一次:一台 colima 刚重启、网络还在收敛的机器上,
+            # `apt-get install` 卡在某一次 HTTP 连接上超过半小时都不会
+            # 自己放弃(`crictl exec` 进容器用 /proc 确认了具体是
+            # `/usr/lib/apt/methods/http` 这个子进程挂着不动)——不是网络
+            # 彻底不通(同一时刻宿主机自己 curl 同样的地址是通的),是这一次
+            # TCP 连接本身卡住了,apt 不会主动放弃重连。显式加
+            # `Acquire::http::Timeout`/`Acquire::Retries`,让它按重试上限
+            # 失败退出,而不是无限期挂着等 activeDeadlineSeconds 来兜底
+            # (兜底本身也可能迟到,见上面的补充说明,不能只指望这一层)。
             - name: fetch-kubectl
               image: python:3.12-slim
               command:
@@ -91,7 +111,8 @@ spec:
                 - -c
                 - |
                   set -e
-                  apt-get update -qq && apt-get install -y -qq curl git >/dev/null
+                  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+                  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl git >/dev/null
                   ARCH=$(uname -m)
                   case "$ARCH" in
                     x86_64) KARCH=amd64 ;;
@@ -127,7 +148,8 @@ spec:
                 - |
                   set -e
                   export PATH="/tools:$PATH"
-                  apt-get update -qq && apt-get install -y -qq git >/dev/null
+                  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+                  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
                   pip install --quiet pyyaml
                   git clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
                   cd /tmp/repo

@@ -81,3 +81,28 @@ pyyaml` + `git clone` 这几步本身就可能超过 5 分钟,不是卡死,是�
 放宽到 600 秒(10 分钟),`concurrencyPolicy: Forbid` 保证不会因为放宽这个
 值就产生并发跑多份的风险。这是打开 Alertmanager 之后第一个通过告警(不是
 人肉巡检)发现的真实问题,验证了这件事本身的价值。
+
+## 2026-08-12 再补充:两个更深的坑(colima 9G→11G 重启之后暴露的)
+
+放宽到 600 秒之后,colima 从 9G 扩到 11G、重启一次,这个 CronJob 又出了
+两个新问题,都不是"deadline 设小了"这么简单:
+
+1. **`activeDeadlineSeconds` 这个兜底本身可能会迟到**:亲眼看到一个 Job
+   跑了 39 分钟都没被 600 秒的 deadline 杀掉。根因不是这个字段配错,是
+   集群刚重启、k3s 的 job-controller 在追一堆积压的 reconcile 工作,
+   "到期检查"这个动作本身被延后执行了——同一时刻 `kubectl delete job`
+   这种最简单的操作也卡了 2 分钟才返回,side 证据指向同一个原因。**教训:
+   `activeDeadlineSeconds` 是兜底,不是能百分之百按时生效的保证**,尤其是
+   集群刚经历过重启/大范围调度变化的窗口期。
+2. **`apt-get` 没有默认超时,会真的无限期挂着**:用 `crictl exec` 进卡住
+   的容器,靠 `/proc/<pid>/cmdline` 找到具体是 `apt-get install`
+   fork 出来的 `/usr/lib/apt/methods/http` 这个子进程挂住不动——不是
+   网络彻底不通(同一时刻宿主机自己 `curl` 同样的地址是通的),是这一次
+   TCP 连接本身卡住,apt 的 http/https 方法默认不会自己放弃重连。加了
+   `-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
+   -o Acquire::Retries=2`,让它按重试上限失败退出,不再依赖
+   `activeDeadlineSeconds`(本身也可能迟到,见上一条)当唯一的兜底。
+
+这两条合起来的教训:**任何会调用外部网络的脚本/命令,自己就要有超时和
+重试上限,不能指望 Kubernetes 层面的 deadline 机制来兜底**——那一层本身
+在集群压力大的时候可能也不准时。
