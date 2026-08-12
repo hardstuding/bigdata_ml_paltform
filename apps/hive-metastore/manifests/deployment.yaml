@@ -11,6 +11,26 @@
 # Hadoop 的 Configuration 只认 XML 配置文件,不会读 JVM 系统属性,-D 传
 # fs.s3a.* 完全不生效,报错还很含糊("... : null"),踩过一次坑,细节见
 # docs/operations/troubleshooting.md。
+#
+# 镜像特意钉在 3.1.3,不用官方 Docker Hub 上更新的 4.x(standalone-metastore-
+# 4.1.0/4.2.0)——验证 Spark+Iceberg 链路(ADR-036)时踩到一个真实的上游
+# 不兼容:Hive 4.x 在 HIVE-26537 里把老式 Thrift 方法 `get_table` 删掉了,
+# 换成 `get_table_req`(fixVersions 确认是 4.0.1/4.1.0,4.2.0 自然也没有,
+# Docker Hub 上又没发布 4.0.0 这个还带着老方法的版本)。Iceberg 的 Hive
+# Catalog 客户端(iceberg-spark-runtime 内置)一直绑死用 Spark 内置的
+# Hive 2.3.x 客户端,只会发 `get_table`,连 Hive 4.x metastore 直接报
+# `TApplicationException: Invalid method name: 'get_table'`——这是 Iceberg
+# 社区自己确认"还不支持 Hive 4"的已知限制(github.com/apache/iceberg/
+# issues/12878),不是这个项目配错了什么。3.1.3 是 Spark 官方文档里明确列出
+# 支持的最高 Hive 2.x 系列版本(“0.12.0 through 2.3.9 and 3.0.0 through
+# 3.1.3”),Trino 那边不受影响(Trino 自己实现了一套独立的、更宽容的 Thrift
+# 客户端,不依赖这个已废弃方法)。
+# 换版本连带 Postgres 里 metastore 库的 schema 也要重新初始化(HMS 有
+# SCHEMA_VERSION 门禁,4.x 初始化过的 schema 不能被 3.x 客户端直接复用)——
+# 这台机器上 metastore 库里当时只有 demo 数据(default/demo 两个库,一张
+# orders 表),整库 drop 重建后让 3.1.3 自己首次启动时重新建 schema,不是
+# 生产数据,可以这样处理;cloud-full/prod 上如果已经有真实数据,这个操作
+# 需要走真正的 Hive schematool 版本升降级流程,不能直接 drop。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -51,7 +71,7 @@ spec:
               mountPath: /drivers
       containers:
         - name: hive-metastore
-          image: apache/hive:standalone-metastore-4.2.0
+          image: apache/hive:3.1.3
           ports:
             - containerPort: 9083
               name: thrift
