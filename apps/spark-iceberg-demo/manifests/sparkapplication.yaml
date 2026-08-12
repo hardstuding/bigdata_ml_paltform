@@ -76,6 +76,12 @@ spec:
       - name: demo-script
         mountPath: /opt/spark-demo
   executor:
+    # 这台机器 colima 只给了 4 vCPU,跑到这一步时 Trino/Hive Metastore/
+    # ArgoCD 等常驻组件已经把 CPU request 占到 89%,executor 要 1 整核
+    # 排不进去,一直 Pending(kubectl describe 报 Insufficient cpu)。这只是
+    # 一次性验证用的 demo 作业,数据量很小,降到 500m 完全够用,不用为了
+    # 一次性验证去扩 colima 的 CPU 分配(那个改动影响整个集群,代价更大)。
+    coreRequest: "500m"
     cores: 1
     instances: 1
     memory: "1024m"
