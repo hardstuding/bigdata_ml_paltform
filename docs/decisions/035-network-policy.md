@@ -57,10 +57,24 @@ Pod/Service CIDR 范围里,egress 白名单要把这类"到宿主机某个端口
 
 ## 验证记录
 
-用真实的裸 pod(不是这个 namespace 里的正式组件,避免验证过程本身影响
-生产流量)确认了 NetworkPolicy 在这个集群上真的会拦截未授权连接,
-`default-deny-ingress` 生效后连接会超时/被拒绝,加了明确的 `allow` 规则
-之后对应的连接能重新连通。
+分两步验证,都是真实测试,不是"部署了就当它生效":
+
+1. **NetworkPolicy 在这个集群上到底有没有用**:用两个裸 pod(不是这个
+   namespace 里的正式组件,避免验证过程本身影响生产流量)——不加策略时
+   能连通,加了 `default-deny-ingress` 之后连接超时/被拒绝,证明这台
+   机器的 k3s 真的会强制执行,不是摆设。
+2. **部署到 `permission-request-app` 之后,合法/非法路径分别测试**:
+   `curl -H "Host: permission-request.local-lite.test"` 走 ingress-nginx
+   的合法路径确认还是 `302`(功能没被误伤);另起一个 `default`
+   namespace 的裸 pod 直连 app 本体的 8080 端口,确认被挡住
+   (`BLOCKED-AS-EXPECTED`,连接超时)。
+
+`allow-monitoring-scrape` 这条目前没有对应的真实抓取目标可验证——查了
+Prometheus 的 `/api/v1/targets`,这个 namespace 下没有任何 activeTarget,
+说明 permission-request-app 和它的 oauth2-proxy 本来就没配 ServiceMonitor
+/PodMonitor,是另一个独立的、更早就存在的空白(这次 NetworkPolicy 工作
+没有引入新问题,只是提前把"以后配了监控也不会被网络策略挡住"这条规则
+写好)。
 
 ## 后果
 
