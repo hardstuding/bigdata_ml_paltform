@@ -31,6 +31,19 @@
 #    没有实际去建 Grafana 面板——没有真实作业在跑,面板查询语句写出来也
 #    没法验证对不对,留到 Spark Operator 真正启用、有真实作业产生指标时
 #    再建,不做没法验证的东西。
+# 2026-08-12 补充(提交第一个真实作业时才发现):controller 默认只监听
+# `default` 这一个 namespace(`spark.jobNamespaces` 默认值就是
+# `["default"]`),提交到别的 namespace 的 SparkApplication 会被完全无视
+# ——不报错、不产生 Event、`.status` 字段永远是空的,`kubectl describe`
+# 看起来一切正常,实际上 controller 压根不知道这个对象存在。这台机器上
+# 提交作业用的是 `spark-operator` 这个 namespace(和 controller 本身同一个
+# namespace,图省事),必须显式加进 `jobNamespaces`。
+#
+# chart 还会在 `jobNamespaces` 列出的每个 namespace 里自动建一个
+# ServiceAccount + RBAC 给提交的作业用(`spark.serviceAccount.create`
+# 默认就是 true)——一开始没意识到这点,手写了一份等价的 RBAC
+# (apps/spark-iceberg-demo/manifests/spark-rbac.yaml),后来发现是重复
+# 造轮子,改用 chart 自己生成的这份,手写的那份已经删掉。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -64,6 +77,9 @@ spec:
         prometheus:
           podMonitor:
             create: true
+        spark:
+          jobNamespaces:
+            - spark-operator
   destination:
     server: https://kubernetes.default.svc
     namespace: spark-operator
