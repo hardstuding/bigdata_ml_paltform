@@ -19,6 +19,12 @@ spec:
       containers:
         - name: create-db
           image: postgres:16.6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
           env:
             - name: PGPASSWORD
               valueFrom:

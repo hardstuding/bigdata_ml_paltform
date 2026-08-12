@@ -140,6 +140,19 @@ spec:
         # KubernetesExecutor 起的任务 pod 缺这个挂载)。
         workers:
           kubernetes:
+            # 2026-08-13 补上:这是 KubernetesExecutor 每个任务起 pod 用的
+            # 默认模板,没配置的话是 BestEffort QoS——排查
+            # seatunnel_device_events 这个 DAG 时踩过一次真实的 OOM
+            # 问题,单独在那个 DAG 里用 executor_config 加了 pod_override
+            # (见 apps/airflow/dags/seatunnel_device_events.py),但那只
+            # 覆盖那一个 DAG,这里补一个平台级默认值,以后新增的 DAG
+            # 不用每次都记得自己加。
+            resources:
+              requests:
+                cpu: 50m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
             extraVolumes:
               - name: dags
                 configMap:
