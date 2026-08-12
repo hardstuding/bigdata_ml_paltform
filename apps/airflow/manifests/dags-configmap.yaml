@@ -121,8 +121,13 @@ data:
                     k8s.V1Container(
                         name="base",
                         resources=k8s.V1ResourceRequirements(
-                            requests={"cpu": "50m", "memory": "128Mi"},
-                            limits={"memory": "256Mi"},
+                            # 256Mi 太紧——实测任务 pod 直接被 SIGKILL(exit_code=
+                            # -9,这次没有任何 Python 异常堆栈,是容器自己的
+                            # cgroup 内存上限被打到,不是节点级别 OOM)。Airflow
+                            # 3.x 的任务运行时(SDK supervisor 进程 + 解析整个
+                            # DAG 文件)本身占用就不小,调到 512Mi。
+                            requests={"cpu": "50m", "memory": "256Mi"},
+                            limits={"memory": "512Mi"},
                         ),
                     )
                 ]
