@@ -23,6 +23,12 @@ spec:
     targetRevision: 0.29.0
     helm:
       valuesObject:
+        # CRD 走一次性脚本装,不靠 Helm/ArgoCD——见
+        # scripts/16-install-cloudnative-pg-crds.sh 顶部的详细说明(和
+        # KServe 的 ClusterServingRuntime 是同一类"GitOps 这条路走不通,
+        # 退回一次性脚本"的情况)。
+        crds:
+          create: false
         resources:
           requests:
             cpu: 50m
@@ -38,9 +44,13 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      # CNPG 的 Cluster CRD 是这个生态里出了名的大(实测确认 operator 装完
-      # 之后 clusters.postgresql.cnpg.io 这一个 CRD 没能真的建成,其余 8 个
-      # 小的 CRD 都建好了),超过 kubectl client-side apply 的
-      # last-applied-configuration annotation 262144 字节上限——和 KServe
-      # CRD 踩的是同一个坑(见 ADR-027),同样的解法。
+      # 先按 KServe 的经验加了 ServerSideApply=true 想解决 CRD 太大的问题
+      # (ADR-027 那个坑),实测这次不管用——加了这个选项之后
+      # clusters/poolers 这两个 CRD 还是报一模一样的
+      # "metadata.annotations: Too long: may not be more than 262144
+      # bytes"。没有深挖是 ArgoCD 处理 Helm chart `crds/` 目录这条路径本身
+      # 不完全遵守这个 sync option,还是 CNPG 这两个 CRD 就是比 server-side
+      # apply 能处理的上限还大——不重要,反正这条路走不通,退回一次性脚本
+      # (见 scripts/16-install-cloudnative-pg-crds.sh 顶部说明),这个选项
+      # 留着不影响,但不能只靠它。
       - ServerSideApply=true
