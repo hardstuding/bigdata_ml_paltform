@@ -7,6 +7,25 @@ metadata:
   name: hive-metastore-core-site
   namespace: data
 data:
+  # 【可插拔基础设施,见 ADR-030】这是 Hive Metastore 自己用的 S3A 配置,
+  # 决定它管理的所有表(Iceberg warehouse)物理数据存在哪——接外部 S3(不是
+  # MinIO)要改这几处:
+  #   - fs.s3a.endpoint 指向真实 S3(AWS 官方 S3 一般直接删掉这个属性,
+  #     用默认 endpoint;S3 兼容存储比如公司自建的才需要显式指定)
+  #   - fs.s3a.access.key/secret.key 换成外部存储的凭据(不一定非要走
+  #     MINIO_ACCESS_KEY/MINIO_SECRET_KEY 这两个环境变量名,变量名本身也
+  #     要跟着 apps/hive-metastore/manifests/deployment.yaml 里的
+  #     env 定义一起改)
+  #   - fs.s3a.path.style.access 大多数外部 S3(包括真实 AWS S3)要改成
+  #     false(虚拟主机风格寻址是现在的默认推荐方式,path-style 是 MinIO
+  #     这类自建存储的常见兼容模式,不是通用默认)
+  #   - fs.s3a.connection.ssl.enabled 大多数外部 S3 要改成 true
+  #   - fs.defaultFS 里的 bucket 名(lakehouse)要换成外部存储上实际建好
+  #     的 bucket
+  # Trino(environments/cloud-full/pending-definitions/trino.yaml)、Spark
+  # (apps/definitions/spark-operator.yaml 的注释、各 SparkApplication 的
+  # sparkConf)都是各自独立配置同一套 S3A 属性,不是共用这份 ConfigMap——
+  # 换存储时这几处要一起改,不是改一个地方就够。
   core-site.xml: |
     <?xml version="1.0" encoding="UTF-8"?>
     <configuration>

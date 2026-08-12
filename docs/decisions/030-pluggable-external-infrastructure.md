@@ -1,7 +1,9 @@
 # 030. 可插拔基础设施:允许接公司已有的 Postgres/Kafka/对象存储/SSO,不强制全部自建
 
 - 状态: 已采纳,**Postgres 这条已经推广到 Keycloak + Hive Metastore + MLflow +
-  Superset + OpenMetadata,S3/Kafka/SSO 待推广**(2026-08-11/13)
+  Superset + OpenMetadata + Airflow;对象存储(MinIO→外部 S3)这条推广到
+  Hive Metastore + Trino + Spark History Server + Postgres 备份;Kafka/SSO
+  待推广**(2026-08-11/13)
 
 ## 背景
 
@@ -67,6 +69,25 @@ Job 要跳过"。找起来靠 `grep -rn "可插拔基础设施"`,不靠一个中
 
 Airflow 也补上了,和 MLflow 是同一类(整个 DSN 存在 `airflow-metadata`
 这个 Secret 的 `connection` 字段里,不是拆开的字段)。
+
+### 2026-08-13 补充:对象存储(MinIO → 外部 S3)也开始推广
+
+背景那段提到的"S3 兼容对象存储"这条,标了四处:Hive Metastore 的
+`core-site-configmap.yaml`(整个平台最核心的一份 S3A 配置,Iceberg
+warehouse 物理数据存哪由它决定)、Trino 的 catalog 配置、Spark History
+Server 的 `SPARK_HISTORY_OPTS`、Postgres 备份 CronJob 的 `mc alias set`。
+
+**这里暴露了一个和 Postgres 那条不一样的、更麻烦的现实**:S3A 相关配置
+在这几个组件里是**各自独立配置的**,不像 Postgres 连接串大多能收敛到一两
+个 Secret——Hive Metastore、Trino、Spark(History Server + 各个
+SparkApplication 的 `sparkConf`)都各自写了一份 `fs.s3a.endpoint` /
+`s3.endpoint` 等等,互相不共用。换外部 S3 时,这几处**要一起改,改一处
+不够**——这是当前架构的真实限制,不是这次顺手就能解决的(要收敛成
+"一份配置源、多处引用"需要更大的重构,比如所有组件都从同一个
+ConfigMap/Secret 读 S3 端点,类似 Postgres 连接串现在的做法,留作后续
+课题,不在这次范围内)。这次先把"这几处分别在哪、换的时候要注意什么
+差异(path-style-access/ssl 等)"标清楚,降低"改了一处、以为全换完了、
+结果另一处还连着 MinIO"这种半吊子迁移的风险。
 
 优先级(用户确认过的顺序):先做企业普遍已有的基础设施(Postgres、S3 兼容
 对象存储、Kafka、已有的 SSO/IdP),这些换掉能带来最大的采用门槛下降;

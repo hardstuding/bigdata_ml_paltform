@@ -53,6 +53,9 @@ spec:
               resources:
                 requests: {cpu: 100m, memory: 128Mi}
                 limits: {memory: 512Mi}
+          # 【可插拔基础设施,见 ADR-030】mc 本身就是通用 S3 兼容客户端,不是
+          # MinIO 专用的——接外部 S3 只用改下面 `mc alias set` 那行的 endpoint
+          # + 这两个凭据 Secret,备份逻辑本身不用动。
           containers:
             - name: upload
               image: minio/mc:RELEASE.2025-08-13T08-35-41Z
