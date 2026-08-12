@@ -38,3 +38,9 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # CNPG 的 Cluster CRD 是这个生态里出了名的大(实测确认 operator 装完
+      # 之后 clusters.postgresql.cnpg.io 这一个 CRD 没能真的建成,其余 8 个
+      # 小的 CRD 都建好了),超过 kubectl client-side apply 的
+      # last-applied-configuration annotation 262144 字节上限——和 KServe
+      # CRD 踩的是同一个坑(见 ADR-027),同样的解法。
+      - ServerSideApply=true
