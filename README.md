@@ -139,14 +139,19 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 | `scripts/06-configure-superset-datasources.sh` | 给 Superset 注册 Trino 数据源(服务账号认证) | Superset 或 Trino 任一个被重建之后 |
 | `scripts/07-fix-trino-liveness-probe.sh` | 修 Trino chart 里硬编码错的 livenessProbe(见 ADR-017) | **每次** `trino-coordinator` 这个 Deployment 被重新创建(不是重启,是整个 Deployment 对象重建)都要重跑,否则会一直被 kubelet 杀死重启 |
 | `scripts/10-install-kserve-serving-runtimes.sh` | 装 KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等,官方 chart 不带) | KServe 装完之后跑一次;这些是集群级资源,自身不占用运行时资源,不需要跟着组件重建反复重跑 |
+| `scripts/14-configure-airflow-seatunnel-variable.sh` | 给 `seatunnel_device_events` 这个 DAG 写 MinIO 凭据(Airflow Variable) | Airflow 从 `pending-definitions/` 拉回来、webserver 第一次起来之后 |
 
 ### Demo / 演示脚本(可选,验证平台端到端能力用)
 
 `scripts/08-create-demo-data.sh`(湖仓核心:Iceberg → Trino → Superset)、
 `scripts/09-train-demo-model.sh`(AI/ML:训练 → MLflow 注册)、
-`scripts/11-deploy-demo-inference-service.sh`(AI/ML:MLflow → KServe 上线)——
-这三个不是平台必需的初始化步骤,是用来验证端到端链路真的打通的演示脚本,
-随时可以重跑重建,细节和已知坑见 ADR-021/023/027。
+`scripts/11-deploy-demo-inference-service.sh`(AI/ML:MLflow → KServe 上线)、
+`scripts/13-run-spark-iceberg-demo.sh`(湖仓核心:Spark 通过 Spark Operator
+读写 Iceberg,见 ADR-036)、
+`scripts/15-create-device-events-dashboard.sh`(数据工程:SeaTunnel 写的表
+在 Superset 建看板,见 ADR-037)——
+这几个不是平台必需的初始化步骤,是用来验证端到端链路真的打通的演示脚本,
+随时可以重跑重建,细节和已知坑见对应的 ADR。
 
 ## 文档地图
 
@@ -159,4 +164,4 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 
 ## 当前状态
 
-Phase 0(平台底座)、Phase 1(湖仓核心)、Phase 3(AI/ML:JupyterHub/Argo Workflows/MLflow/KServe)核心链路已验证。Phase 2(数据工程:Kafka/Spark/Airflow/SeaTunnel)配置就绪、当前收在 `pending-definitions/` 按需拉起。企业级权限管理(组织架构同步、按组分角色)已落地,细粒度数据权限(Trino 行列级)、可插拔基础设施(目前只做了 Postgres 的参考例子)还在推进。完整的、持续更新的状态见 [`docs/architecture.md`](docs/architecture.md) 的路线图表格——这里不重复维护一份会过时的清单。
+Phase 0(平台底座)、Phase 1(湖仓核心)、Phase 2(数据工程:SeaTunnel → Iceberg → Airflow 调度 → Superset 看板)、Phase 3(AI/ML:JupyterHub/Argo Workflows/MLflow/KServe)核心链路均已验证;这台本机资源有限,验证过的组件按需收在 `pending-definitions/`,不是常驻全开。Kafka 单独验证过健康,还没接进端到端数据管道。企业级权限管理(组织架构同步、按组分角色)已落地,可插拔基础设施(Postgres/对象存储都已经推广到多个组件,见 ADR-030)持续推进中,细粒度数据权限(Trino 行列级)还没开始。完整的、持续更新的状态见 [`docs/architecture.md`](docs/architecture.md) 的路线图表格——这里不重复维护一份会过时的清单。
