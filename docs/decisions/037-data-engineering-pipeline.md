@@ -1,6 +1,6 @@
 # 037. 数据工程主线端到端验证:SeaTunnel → Iceberg → Airflow
 
-- 状态: 已采纳,已验证 SeaTunnel→Iceberg→Airflow 这段(2026-08-12);Superset 看板待补
+- 状态: 已采纳,已验证(2026-08-12/13):SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通
 
 ## 背景
 
@@ -141,6 +141,25 @@ parquet 文件真实落到了 `demo.device_events` 表下(和 ADR-036 那次手�
 失败的任务 pod,成功的照常自动清理)——链路跑通后保留这个设置,不只是
 调试期间的临时开关,因为这类"最后一步失败、pod 秒删、日志抓不到"的情况
 在这个环境里反复出现,值得作为长期配置。
+
+### 最后一步:Superset 看板
+
+DAG 验证通过之后,SeaTunnel 本身按惯例收回(`environments/cloud-full/
+pending-definitions/`)释放资源,拉起 Trino + Superset 补上退出标准里最后
+一段。`scripts/15-create-device-events-dashboard.sh` 在 `demo.device_events`
+表上建了 Dataset + Chart + Dashboard,走 Superset 真实的查询执行链路验证
+(`QueryContextFactory`,不是只存了个连接串),返回 60 行(三次成功写入各
+20 行累加,`data_save_mode` 默认是 `APPEND_DATA`,数字对得上)。图表故意用
+Table 视图,不用按 `event_type`/`device_id` 分组的柱状图——这两个字段是
+FakeSource 默认随机字符串模式,没有真实分类语义,分组图没有意义。
+
+验证完之后 Trino/Superset 也按惯例收回,只有 Hive Metastore/MinIO 这两个
+存储层组件继续跑——`demo.device_events` 表和数据留在 Iceberg 里,不受
+影响。Airflow DAG 本身也已经确认能正常调度/触发,收回不影响这个结论,
+下次要跑数据工程相关验证时再按需拉起。
+
+至此,`docs/architecture.md` Phase 2 退出标准("SeaTunnel → Iceberg →
+Airflow 调度 → Superset 看板端到端跑通")完整验证通过。
 
 ## 后果
 

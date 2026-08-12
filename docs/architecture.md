@@ -86,7 +86,7 @@
 |---|---|---|
 | 0 | 平台底座 | ✅ 改一个 values 文件、push,ArgoCD 能自动同步到集群。✅ 企业级权限管理(2026-08-11/12,见 ADR-028/031/032):组织架构/角色数据表(`platform/iam/`)声明式同步进 Keycloak Group/Role,ArgoCD/Grafana/JupyterHub/MLflow 都已改成按 group 映射角色(不再是"登进来就是管理员"),真实浏览器验证过;CronJob 每 5 分钟自动同步(ADR-031,已验证);权限自助申请门户已部署、SSO 链路已验证,git 写权限凭据待人工配置(ADR-032)。可插拔外部基础设施(ADR-030)起步,目前只做了 Postgres 的参考例子(Keycloak + Hive Metastore) |
 | 1 | 湖仓核心(local-lite) | ✅ 建一张 Iceberg 表、写入,Trino 读出、Superset 出图(2026-08-10 验证,见 `scripts/08-create-demo-data.sh`);✅ Spark 通过 Spark Operator 真实读写同一张表(2026-08-12 验证,见 ADR-036——过程中连带把 Hive Metastore 降级到 3.1.3,因为 Iceberg 客户端还不支持 Hive 4.x) |
-| 2 | 数据工程(转 cloud-full) | SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通。Spark 权限/可观测性配置已就绪(ADR-029:History Server + oauth2-proxy SSO,Grafana 指标暴露),等 Spark Operator 真正启用时一起验证 |
+| 2 | 数据工程(转 cloud-full) | ✅ SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通(2026-08-12/13 验证,见 ADR-037)。Kafka 不在这次验证范围内(退出标准文字上没写它)。Spark 权限/可观测性配置已就绪(ADR-029:History Server + oauth2-proxy SSO,Grafana 指标暴露) |
 | 3 | AI/ML | ✅ 核心链路已验证(2026-08-11,见 ADR-025/026/027):JupyterHub/Argo Workflows/MLflow 接了 Keycloak SSO,模型训练 → MLflow 注册 → KServe(Standard 模式)部署成 InferenceService,V2 协议推理请求验证通过(`scripts/09-train-demo-model.sh` + `scripts/11-deploy-demo-inference-service.sh`)。算法/模型 A-B 实验用 KServe 原生的 canary 流量切分这条还没做(不是单独部署一套产品分析工具,见下面"还没定的事"里 2026-08-11 那条) |
 | 3.5 | AI 闭环验证 | Feast 打通离线/在线特征,接入模型服务 |
 | 4 | 企业化增强(prod) | Harbor + 遗留集群正式联邦对接,可作为旧平台替代方案上生产。Trino 细粒度数据权限倾向于用 OPA 而不是 Ranger——Ranger 官方(Apache 项目本身)没有维护 Helm chart,不满足这个项目"只用官方支持的部署方式"的门槛,OPA 有官方 chart 且 Trino 原生支持行过滤/列脱敏,见 ADR-028"后续"部分 |
