@@ -1,6 +1,6 @@
 # 037. 数据工程主线端到端验证:SeaTunnel → Iceberg → Airflow
 
-- 状态: 已采纳,验证中(2026-08-12)
+- 状态: 已采纳,已验证 SeaTunnel→Iceberg→Airflow 这段(2026-08-12);Superset 看板待补
 
 ## 背景
 
@@ -86,7 +86,61 @@ REST API 才真正可用,这个 API 之前只验证过集群健康(GET /overview
 
 ## 验证记录
 
-(跑完 Airflow DAG `seatunnel_device_events` 之后补充实际结果)
+### DAG 从裸逻辑到真正跑通,又踩了 5 个真实 bug
+
+先手动调用 SeaTunnel REST API 验证了 job 配置本身没问题(`jobStatus:
+FINISHED`,MinIO 里确认了真实的 parquet + Iceberg metadata),把同样的逻辑
+包成 Airflow DAG 之后,又是一路踩坑才真正跑通(和 ADR-036 的 Spark+Iceberg
+demo 是同一种"每一层都要真跑一遍才会暴露"的情况):
+
+1. **KubernetesExecutor 的任务 pod 用的是单独一份 pod 模板**:一开始只把
+   DAG 文件挂进了 `scheduler`/`dagProcessor`,任务 pod(`workers.kubernetes`
+   这份模板)里没挂,报 `Dag not found during start up`。用
+   `airflow tasks test` 在 scheduler pod 里直接跑过 DAG 逻辑本身完全正常,
+   问题只在任务 pod 缺这个挂载——这个排查步骤本身也值得记一下:遇到"逻辑
+   看起来对但真实调度失败"时,`tasks test` 能快速把"代码逻辑"和"调度/
+   pod 环境"这两类问题分开。
+2. **pod_override 必须是真正的 `kubernetes.client.models.V1Pod` 对象**:
+   第一次直接传了个普通 dict 想给任务 pod 加 resources request(为了下面
+   第 3 点的 OOM 问题),KubernetesExecutor 内部 `PodGenerator.from_obj` 会
+   做 `isinstance(k8s.V1Pod)` 检查,不通过就整个 `executor_config` 判定
+   invalid,任务直接 fail,pod 都不会起。
+3. **这台机器当时确实在被反复 OOM**:第一次真实调度时任务 pod 被 SIGKILL
+   (exit_code=-9)。查 `journalctl -k` 确认节点当时在被反复触发内核 OOM
+   killer(连 `argocd-application-controller` 都被连带杀了几次,尽管它自己
+   配了 2Gi 限制——是节点级压力,不是它自己碰到 cgroup 上限)。
+   KubernetesExecutor 起的任务 pod 默认不带任何 resources(BestEffort
+   QoS),天然是 OOM killer 第一批目标,加了最小 resources request/limit。
+4. **`context['ts_nodash']` 在手动触发的 DAG 里不存在**:这个 DAG 是
+   `schedule=None`,没有真正的 `logical_date`/`data_interval`。查了
+   Airflow 3.x 的 context 构建源码(`execution_time/task_runner.py`)确认
+   `ts_nodash` 这类从 `logical_date` 派生的键在这种情况下压根不会塞进
+   context,只有 `run_id` 是无条件总在的——改用 `run_id` 拼作业名。
+5. **第 3 点加的内存 limit(256Mi)本身也不够**:修完第 4 点之后任务 pod
+   还是被 SIGKILL,这次没有任何 Python 异常堆栈(容器自己的 cgroup 内存
+   上限被打到,不是节点级 OOM)。Airflow 3.x 任务运行时本身(SDK
+   supervisor 进程 + 解析整个 DAG 文件)占用不小,调到 512Mi。
+
+排查过程中还确认了一个和这个仓库其他地方一致的环境特性:ArgoCD 的
+Application 显示 `Synced`/`Succeeded` 不代表活的资源已经真的更新(好几次
+"改完代码重新跑还是报同一个旧 bug",查下去发现是 ConfigMap 的 subPath
+挂载有 kubelet 本地缓存延迟,或者是 sync 状态和实际子资源 spec 不同步)。
+
+### 最终验证结果
+
+`seatunnel_device_events` DAG 触发,两个任务(`submit_seatunnel_job`、
+`wait_for_completion`)都是 `success`。SeaTunnel 侧确认
+`jobName=device-events-manual__2026-08-12T1551086004610000`、
+`jobStatus: FINISHED`;MinIO 里确认这次运行对应时间戳(15:51:19)的新
+parquet 文件真实落到了 `demo.device_events` 表下(和 ADR-036 那次手动
+提交 Spark 作业写的表在同一个 `demo` 数据库,进一步印证共享元数据这个
+结论)。
+
+调试期间为了能抓到失败任务的日志,给 Airflow 加了
+`AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE=False`(只保留
+失败的任务 pod,成功的照常自动清理)——链路跑通后保留这个设置,不只是
+调试期间的临时开关,因为这类"最后一步失败、pod 秒删、日志抓不到"的情况
+在这个环境里反复出现,值得作为长期配置。
 
 ## 后果
 
