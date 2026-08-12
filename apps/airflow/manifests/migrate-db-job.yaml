@@ -1,0 +1,62 @@
+# chart 自带的 migrateDatabaseJob 是 Helm 原生 hook(post-install,
+# post-upgrade),ArgoCD 对这类 hook 的处理是"等主 Sync 阶段的资源都健康了
+# 才触发 PostSync"——但这里刚好是个死锁:Deployment 的 wait-for-airflow-
+# migrations 这个 initContainer 要等 migrate job 跑完才能启动,Deployment
+# 永远到不了 Healthy,PostSync 永远不触发,migrate job 永远不会被创建
+# (`kubectl get jobs -n airflow` 空的,`argocd app` 的 syncResult 里也没有
+# 这个 Job,只有它的 ServiceAccount——实测确认过,不是猜的)。
+#
+# 和 apps/airflow/manifests/create-db-job.yaml 踩过的坑是同一类:这个仓库
+# 已经在别处明确记录过"不要给 Job 加 argocd.argoproj.io/hook 之类的 hook
+# 注解"这个教训,这次是 chart 自带的 Helm hook 触发了同一类问题。改成普通
+# 资源,不依赖任何 hook 语义——`airflow db migrate` 本身是幂等的(没有新
+# migration 时是空操作),可以放心每次 sync 都重新跑。命令/环境变量照抄
+# chart 渲染出来的 migrate-database-job.yaml(`helm template airflow
+# airflow/airflow --version 1.22.0` 核对过)。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-migrate-db
+  namespace: airflow
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        tier: airflow
+        component: migrate-db
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: airflow-migrate-database-job
+      securityContext:
+        runAsUser: 50000
+        fsGroup: 0
+      containers:
+        - name: migrate-db
+          image: apache/airflow:3.2.2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          args:
+            - bash
+            - -c
+            - "exec airflow db migrate"
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: AIRFLOW_HOME
+              value: /opt/airflow
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-fernet-key
+                  key: fernet-key
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-metadata
+                  key: connection

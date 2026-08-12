@@ -32,15 +32,16 @@ spec:
         # 历史),关掉改用 scripts/05-configure-airflow.sh 走 Secret 建管理员账号。
         createUserJob:
           enabled: false
-        # 2026-08-12 补上 limits,和 cert-manager 那次是同一轮扫描发现的
-        # 同一类缺口(这个组件本身还是 park 状态,还没真实跑过,先修好)。
+        # 2026-08-12 实测发现:chart 自带的 migrateDatabaseJob 是 Helm 原生
+        # post-install/post-upgrade hook,ArgoCD 要等主 Sync 阶段所有资源
+        # Healthy 才会触发 PostSync——但 Deployment 的 initContainer 又要等
+        # 这个 migrate job 跑完才能启动,死锁(Deployment 永远到不了
+        # Healthy,hook 永远不触发,`kubectl get jobs -n airflow` 里这个
+        # Job 从始至终没被创建过)。关掉 chart 自带的这个,改用
+        # apps/airflow/manifests/migrate-db-job.yaml 里手写的普通 Job(不带
+        # 任何 hook 注解,和 create-db-job.yaml 是同一个思路)。
         migrateDatabaseJob:
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              memory: 512Mi
+          enabled: false
         webserver:
           replicas: 1
           resources:
