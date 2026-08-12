@@ -1,0 +1,89 @@
+# 每天备份一次共享 Postgres(Keycloak/Hive Metastore/MLflow/Airflow/
+# Superset 等好几个组件共用同一个实例,见 apps/postgres/)。之前这块完全
+#是空白——见 docs/operations/backup.md 和 docs/decisions/033-postgres-backup.md。
+#
+# pg_dumpall(不是 pg_dump 单个库):这个 Postgres 是共享实例,一次性把
+# 所有数据库都备份,不用逐个组件维护一份备份配置。
+#
+# initContainer 用官方 postgres:16.6 镜像(和 apps/postgres/ 本体同一个
+# 镜像,自带 pg_dumpall,不用额外装东西)做 dump,主容器用官方
+# minio/mc(MinIO 项目自己的客户端工具,这个仓库里 apps/definitions/
+# minio.yaml 已经在用,不是新引入的镜像来源)上传到 MinIO 的 backups
+# bucket——两步分开是因为没有一个官方镜像同时装了 psql 工具链和 mc,
+# 不想为了省一个 initContainer 去装一个不知道来源的第三方镜像。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: data
+spec:
+  # 【可调参数,见 docs/operations/tuning.md】每天 02:00(UTC)跑一次。
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          initContainers:
+            - name: dump
+              image: postgres:16.6
+              env:
+                - name: PGHOST
+                  value: postgres.data.svc.cluster.local
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: {name: postgres-root, key: username}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: postgres-root, key: password}
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  pg_dumpall | gzip > /backup/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+                  ls -lh /backup
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {memory: 512Mi}
+          containers:
+            - name: upload
+              image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+              env:
+                - name: MINIO_USER
+                  valueFrom:
+                    secretKeyRef: {name: minio-root, key: rootUser}
+                - name: MINIO_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: minio-root, key: rootPassword}
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  mc alias set backupminio http://minio.minio.svc.cluster.local:9000 "$MINIO_USER" "$MINIO_PASSWORD"
+                  mc mb --ignore-existing backupminio/backups
+                  for f in /backup/*.sql.gz; do
+                    mc cp "$f" "backupminio/backups/postgres/$(basename "$f")"
+                  done
+                  # 【可调参数,见 docs/operations/tuning.md】保留 14 天,更久的自动清掉,
+                  # 不然会一直无限增长。
+                  mc rm --older-than 14d --recursive --force backupminio/backups/postgres/ || true
+                  echo "=== 当前 backups/postgres/ 下的文件 ==="
+                  mc ls backupminio/backups/postgres/
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 128Mi}
+          volumes:
+            - name: backup
+              emptyDir: {}

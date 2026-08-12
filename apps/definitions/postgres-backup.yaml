@@ -1,0 +1,23 @@
+# 每天自动备份共享 Postgres,见 docs/decisions/033-postgres-backup.md。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres-backup
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/postgres-backup/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
