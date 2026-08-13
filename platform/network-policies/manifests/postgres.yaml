@@ -1,0 +1,84 @@
+# 推广 NetworkPolicy 到核心命名空间,见 docs/decisions/035-network-policy.md
+# 的"后果"部分和 keycloak.yaml 顶部的说明。这个是这几个里入站来源最杂的
+# 一个——共享 Postgres 实例(见 ADR-008),好几个组件各自的
+# create-db-job.yaml + 各自的运行时连接都要连进来,不是单一入口。
+#
+# 消费者列表是查代码库里所有引用 `postgres.data.svc.cluster.local` 的
+# manifest 得出的,不是凭印象列的:
+#   - data(同一个命名空间,postgres-backup、hive-metastore)
+#   - keycloak(keycloak-create-db 这个 Job + keycloakx 运行时连接)
+#   - mlflow / openmetadata / superset / airflow(各自的 create-db-job.yaml
+#     + 组件本身运行时连接——这几个组件目前大多是 park 状态,不是当前
+#     活跃流量,但写策略时按"迟早会被拉起来"覆盖,不是只覆盖此刻在跑的,
+#     不然某天拉起 MLflow 会因为一条网络策略连不上库,查半天才发现是这里
+#     漏了,这种"过一阵子才会被发现的坑"就是 ADR-035 明确想避免的那类)
+#
+# 端口是 5432(容器端口和 Service 端口一致,`kubectl get pod postgres-0
+# -o jsonpath='{.spec.containers[0].ports}'` 确认过)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: data
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-consumers-to-postgres
+  namespace: data
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: data
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mlflow
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openmetadata
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: superset
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: airflow
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# 这个命名空间里其他资源(比如 postgres-backup 这个 CronJob 起的 pod)
+# 不需要被别的东西连进来,不需要单独的 ingress 规则,default-deny 之后
+# 保持全拒绝就是对的——它们只是 Postgres 的消费者/维护者,不是被消费方。
+#
+# 目前没有配 postgres-exporter 之类的东西给 Prometheus 抓(实测确认
+# `kubectl get servicemonitor,podmonitor -A | grep postgres` 没有结果),
+# 但和 keycloak.yaml/minio.yaml 保持同一个思路:提前把"以后配了监控也
+# 不会被网络策略挡住"这条规则写好,不是等发现问题才补。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: data
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring

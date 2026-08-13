@@ -1,0 +1,75 @@
+# 推广 NetworkPolicy 到核心命名空间,见 docs/decisions/035-network-policy.md
+# 的"后果"部分和 keycloak.yaml 顶部的说明。
+#
+# 消费者列表是查代码库里所有引用 `minio.minio.svc.cluster.local` 的
+# manifest 得出的:
+#   - data(hive-metastore、postgres-backup)
+#   - spark-operator(spark-history-server 也部署在这个命名空间,还有
+#     各个 SparkApplication 的 driver/executor)
+#   - mlflow、trino、airflow(SeaTunnel 的 DAG 任务 pod)、seatunnel——
+#     这几个目前大多是 park 状态,和 postgres.yaml 一样按"迟早会被拉起来"
+#     覆盖,不是只覆盖此刻在跑的。
+#
+# 端口只放行 9000(API,S3A 客户端连的端口)。9001(console,管理界面)
+# 没有开——实测确认 `kubectl get ingress -n minio` 没有资源,这个管理界面
+# 现在压根没有任何入口能访问到(没有 Ingress,也没有任何组件的代码引用
+# 这个端口),不放行不影响任何现有功能,真要用再加。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: minio
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-consumers-to-minio
+  namespace: minio
+spec:
+  podSelector:
+    matchLabels:
+      app: minio
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: data
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: spark-operator
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mlflow
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: trino
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: airflow
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: seatunnel
+      ports:
+        - protocol: TCP
+          port: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: minio
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring

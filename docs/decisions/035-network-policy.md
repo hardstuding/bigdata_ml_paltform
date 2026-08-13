@@ -1,6 +1,7 @@
 # 035. NetworkPolicy 试点(permission-request-app namespace)
 
-- 状态: 已采纳,试点已验证(2026-08-12),**只覆盖一个 namespace,不是全量**
+- 状态: 已采纳,试点已验证(2026-08-12);2026-08-13 推广到
+  keycloak/data(Postgres)/minio 这三个核心命名空间,见文末补充
 
 ## 背景
 
@@ -78,13 +79,61 @@ Prometheus 的 `/api/v1/targets`,这个 namespace 下没有任何 activeTarget,
 
 ## 后果
 
-- **`keycloak`、`data`(Postgres)、`minio` 这些真正核心、被好几个组件
-  共用的 namespace 现在还没有 NetworkPolicy**——这是刻意的,不是漏做。
-  这些 namespace 的入站流量来源比 permission-request-app 复杂得多(好几个
-  组件都要连 Postgres/Keycloak),策略写起来风险更高,应该在有人盯着、
-  能随时回滚的时候单独做,不适合在这次深夜作业里顺手做掉。
-- egress 完全没做,任何 pod(包括这次上了 NetworkPolicy 的
-  permission-request-app)出网还是不受限制。
+- egress 完全没做,任何 pod(包括已经上了 NetworkPolicy 的这几个
+  namespace)出网还是不受限制。
 - 没有做团队/namespace 之间的隔离(比如"data-analysts 用的 namespace 不能
   连 algorithm-team 的 namespace")——现在还没有真正意义上按团队拆分
   namespace 的实践,这条要等真的有多团队各自独立部署工作负载时才有意义。
+
+## 2026-08-13 补充:推广到 keycloak/data(Postgres)/minio
+
+用户在场(重启电脑之后重新上线),风险可控,把试点阶段刻意跳过的三个核心
+命名空间补上。
+
+### 消费者列表是查代码,不是凭印象列的
+
+写允许规则前,先 `grep -rl` 了整个仓库里所有引用
+`postgres.data.svc.cluster.local`/`minio.minio.svc.cluster.local` 的
+manifest,逐个确认它们各自部署在哪个 namespace(`destination.namespace`
+字段,不是猜)。允许列表里故意包含了目前是 park 状态的组件(MLflow/
+OpenMetadata/Superset/Airflow/Trino/SeaTunnel)对应的 namespace——按
+"迟早会被拉起来"覆盖,不是只覆盖此刻在跑的,不然某天拉起某个组件却因为
+一条网络策略连不上库/存储,排查半天才发现是这里漏了,这种"过一阵子才会
+被发现的坑"正是这次要避免的。
+
+### Keycloak 比预想中简单:所有消费者其实都走同一个入口
+
+一开始以为要给每个用 SSO 的组件(ArgoCD/Grafana/JupyterHub/Argo
+Workflows/Trino/Superset/OpenMetadata/MLflow/permission-request-app 等)
+各自的 namespace 都开一条规则,查了
+`platform/coredns-custom/manifests/configmap.yaml` 才发现完全不需要:
+所有 pod 对 `*.local-lite.test` 的 DNS 查询都解析到
+ingress-nginx-controller 的 ClusterIP,意味着所有走 OIDC discovery 的
+组件都是经 ingress-nginx 连过来的,不是直连 keycloak 这个 namespace 的
+Service。只放行 ingress-nginx 一个来源就够,不用逐个组件列。
+
+`iam-sync` 这个 CronJob 虽然也在 keycloak namespace 里、要 `pods/exec`
+进 keycloak-keycloakx-0(ADR-031),但 `kubectl exec` 走 API server →
+kubelet → 容器运行时这条路径,不经过 pod 的网络接口,不受 NetworkPolicy
+影响,不需要额外规则。
+
+### 端口都是容器端口,不是 Service 端口,逐个 `kubectl get pod ...
+### -o jsonpath='{.spec.containers[0].ports}'` 实测确认过
+
+Keycloak 是 8080(不是 Service 暴露的 80/8443/9000),Postgres 是 5432,
+MinIO 只放行 9000(API,S3A 客户端用),9001(管理控制台)没开——实测
+`kubectl get ingress -n minio` 没有任何资源,这个控制台现在压根没有入口
+能访问到,不放行不影响任何现有功能。
+
+### 部署顺序:一个 namespace 一个 namespace 上,不是一次性铺开
+
+三个都是真正核心、有活跃流量在跑的命名空间,不是 permission-request-app
+那种"错了也不影响别的东西"的低风险目标——按风险从低到高的顺序
+(MinIO → Postgres → Keycloak)依次部署,每上一个都先用真实的合法/
+非法路径各测一遍再上下一个,任何一个环节验证不通过就先回滚
+(`kubectl delete networkpolicy default-deny-ingress -n <ns>` 立即恢复
+全通)再排查,不会带着一个没验证过的策略继续往下一个 namespace 走。
+
+## 验证记录(2026-08-13,核心命名空间)
+
+(部署 + 验证完之后补充实际结果)

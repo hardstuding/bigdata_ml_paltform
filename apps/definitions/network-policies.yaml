@@ -1,6 +1,8 @@
-# NetworkPolicy 试点,见 docs/decisions/035-network-policy.md。这个
-# Application 只覆盖 permission-request-app 这一个 namespace,不是全量
-# 铺开——先在一个"错了也不影响核心链路"的目标上验证。
+# NetworkPolicy,见 docs/decisions/035-network-policy.md。试点阶段
+# (2026-08-12)只覆盖 permission-request-app 这一个 namespace;2026-08-13
+# 推广到 keycloak/data(Postgres)/minio 这三个核心命名空间——这个
+# Application 的 `destination.namespace` 字段本身只是个默认值,实际每份
+# manifest 都显式写了自己的 `metadata.namespace`,不受这个字段影响。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
