@@ -1,0 +1,56 @@
+# 2026-08-13 补建:hive-metastore 一直没有自己的 create-db-job,以前是靠老的
+# apps/postgres/manifests/init-configmap.yaml(Postgres StatefulSet 首次初始化
+# 时跑的 docker-entrypoint-initdb.d 脚本)建的 hive 角色 + metastore 库——
+# 这个机制换成 CloudNativePG(ADR-038)之后就已经失效(CNPG 自己的 initdb
+# 引导流程不认这个 ConfigMap),后来那份 init-configmap.yaml 又在下线老
+# postgres-0 StatefulSet 时被删掉(见那次 commit),这条创建逻辑就彻底没了,
+# 只是因为一直没有真正从空 Postgres 重新拉起过 hive-metastore 才没暴露。
+# 真正推倒重建测试时实测踩到:`schematool -initSchema` 报 "password
+# authentication failed for user hive"(角色根本不存在)。
+#
+# 和 mlflow/openmetadata/keycloak/airflow/superset 的 create-db-job.yaml
+# 同样的模式,同一个"新 pod 首连延迟"加固(pg_isready)也一起带上。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hive-metastore-create-db
+  namespace: data
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: create-db
+          image: postgres:16.6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-root
+                  key: password
+            - name: HIVE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-metastore-db
+                  key: password
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              for i in $(seq 1 10); do
+                pg_isready -h postgres.data.svc.cluster.local -p 5432 -U postgres >/dev/null 2>&1 && break
+                echo "第 ${i} 次探测 postgres 未就绪,3 秒后重试" >&2
+                sleep 3
+              done
+              psql -h postgres.data.svc.cluster.local -U postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='hive'" | grep -q 1 \
+                || psql -h postgres.data.svc.cluster.local -U postgres -c "CREATE USER hive WITH PASSWORD '${HIVE_DB_PASSWORD}';"
+              psql -h postgres.data.svc.cluster.local -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='metastore'" | grep -q 1 \
+                || psql -h postgres.data.svc.cluster.local -U postgres -c "CREATE DATABASE metastore OWNER hive;"
