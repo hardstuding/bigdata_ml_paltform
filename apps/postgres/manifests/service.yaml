@@ -1,11 +1,27 @@
+# CloudNativePG 迁移(ADR-038)的实际切流量点:这份 Service 名字还是叫
+# `postgres`,是所有组件连接串里已经在用的域名
+# (postgres.data.svc.cluster.local),selector 从老 StatefulSet 的
+# `app: postgres` 改成指向 CNPG Cluster 的主实例——所有组件的连接串/
+# Secret 一个字都不用改,不用逐个组件重新配置。
+#
+# 用 ExternalName 指向 CNPG 自己生成、自己维护的 `postgres-cnpg-rw` 这个
+# Service(读写、总是指向当前主实例的那个,CNPG 官方约定的命名后缀:
+# -rw 读写、-ro 只读副本、-r 任意实例),不是自己重新写一遍 selector
+# 去匹配 CNPG 打的 label——那样等于自己维护一份"如何找到当前主实例"的
+# 逻辑,一旦 CNPG 未来改了 label 方案就会静默失效(没有任何报错,只是
+# selector 突然匹配不到东西)。用 ExternalName 别名到 CNPG 自己的 Service,
+# 这部分逻辑完全交给 CNPG 自己维护,故障转移时主实例变了,
+# `postgres-cnpg-rw` 会自动跟着变,我们这层不用管。
+#
+# 老的 StatefulSet(statefulset.yaml)先保留、不删除,只是不再接收流量了
+# ——数据还在它的 PVC 里,是切流量出问题时最快的回滚手段
+# (`git revert` 这个改动、重新 sync 就能秒级切回去),等确认新实例稳定
+# 运行一段时间之后再单独清理。
 apiVersion: v1
 kind: Service
 metadata:
   name: postgres
   namespace: data
 spec:
-  selector:
-    app: postgres
-  ports:
-    - port: 5432
-      targetPort: 5432
+  type: ExternalName
+  externalName: postgres-cnpg-rw.data.svc.cluster.local
