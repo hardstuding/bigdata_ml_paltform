@@ -54,7 +54,7 @@
 | 底座 | Prometheus + Grafana + Loki | 指标 + 日志 | 中 | ✅ | ✅ | ✅ | Phase 0 |
 | 底座 | Harbor | 私有镜像仓库 | 轻 | — | ✅ | ✅ | Phase 4 |
 | 湖仓 | MinIO | S3 兼容对象存储 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
-| 湖仓 | Postgres(单实例 → CloudNativePG) | 元数据库共用 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
+| 湖仓 | Postgres(CloudNativePG operator 管理) | 元数据库共用 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
 | 湖仓 | Hive Metastore | 表元数据 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
 | 湖仓 | Iceberg | 开放表格式 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
 | 湖仓 | Trino | 交互式 SQL / 联邦查询 | 重 | — | ✅ | ✅ | Phase 1 |
@@ -84,9 +84,9 @@
 
 | Phase | 目标 | 退出标准 |
 |---|---|---|
-| 0 | 平台底座 | ✅ 改一个 values 文件、push,ArgoCD 能自动同步到集群。✅ 企业级权限管理(2026-08-11/12,见 ADR-028/031/032):组织架构/角色数据表(`platform/iam/`)声明式同步进 Keycloak Group/Role,ArgoCD/Grafana/JupyterHub/MLflow 都已改成按 group 映射角色(不再是"登进来就是管理员"),真实浏览器验证过;CronJob 每 5 分钟自动同步(ADR-031,已验证);权限自助申请门户已部署、SSO 链路已验证,git 写权限凭据待人工配置(ADR-032)。可插拔外部基础设施(ADR-030)起步,目前只做了 Postgres 的参考例子(Keycloak + Hive Metastore) |
-| 1 | 湖仓核心(local-lite) | ✅ 建一张 Iceberg 表、写入,Trino 读出、Superset 出图(2026-08-10 验证,见 `scripts/08-create-demo-data.sh`);✅ Spark 通过 Spark Operator 真实读写同一张表(2026-08-12 验证,见 ADR-036——过程中连带把 Hive Metastore 降级到 3.1.3,因为 Iceberg 客户端还不支持 Hive 4.x) |
-| 2 | 数据工程(转 cloud-full) | ✅ SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通(2026-08-12/13 验证,见 ADR-037)。Kafka 不在这次验证范围内(退出标准文字上没写它)。Spark 权限/可观测性配置已就绪(ADR-029:History Server + oauth2-proxy SSO,Grafana 指标暴露) |
+| 0 | 平台底座 | ✅ 改一个 values 文件、push,ArgoCD 能自动同步到集群——**2026-08-13 真的验证过这句话不是空话**:删掉本机整个 colima VM 从零重建,严格按 README 走完整个部署流程,过程中发现并修复 5 个之前从未暴露过的真实 bug(密钥生成脚本的命名空间顺序、README 漏了一步 CRD 安装、hive-metastore 缺建库 Job、DNS 硬编码了会漂移的 ClusterIP、NetworkPolicy 漏了自己的命名空间),最终全部 26 个 Application 收敛到 `Synced`/`Healthy`,见 [ADR-039](decisions/039-teardown-rebuild-test.md)。✅ 企业级权限管理(2026-08-11/12,见 ADR-028/031/032):组织架构/角色数据表(`platform/iam/`)声明式同步进 Keycloak Group/Role,ArgoCD/Grafana/JupyterHub/MLflow 都已改成按 group 映射角色(不再是"登进来就是管理员"),真实浏览器验证过;CronJob 每 5 分钟自动同步(ADR-031,已验证);权限自助申请门户已部署、SSO 链路已验证、git 写权限已配置(ADR-032)。✅ 安全与可靠性补强(2026-08-12/13):NetworkPolicy 推广到核心命名空间,default-deny + 按实际引用关系放行(ADR-035);共享 Postgres 每日自动备份 + 真实恢复演练验证过(ADR-033);Alertmanager 打开,告警规则已生效可查,邮箱/企业微信/Slack 等通知渠道模板已预留待接(ADR-034)。可插拔外部基础设施(ADR-030)起步,目前只做了 Postgres 的参考例子(Keycloak + Hive Metastore) |
+| 1 | 湖仓核心(local-lite) | ✅ 建一张 Iceberg 表、写入,Trino 读出、Superset 出图(2026-08-10 验证,见 `scripts/08-create-demo-data.sh`);✅ Spark 通过 Spark Operator 真实读写同一张表(2026-08-12 验证,见 ADR-036——过程中连带把 Hive Metastore 降级到 3.1.3,因为 Iceberg 客户端还不支持 Hive 4.x);✅ 共享 Postgres 从单实例 StatefulSet 迁移到 CloudNativePG operator 管理(2026-08-13,见 ADR-038),含真实数据迁移、切流量、连带发现修复的 TLS 版本兼容问题,老实例确认稳定后已正式下线 |
+| 2 | 数据工程(转 cloud-full) | ✅ SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通(2026-08-12/13 验证,见 ADR-037)。✅ Kafka(Strimzi KRaft 单节点)已验证部署,真实生产/消费一条消息跑通(2026-08-13)。Spark 权限/可观测性配置已就绪(ADR-029:History Server + oauth2-proxy SSO,Grafana 指标暴露) |
 | 3 | AI/ML | ✅ 核心链路已验证(2026-08-11,见 ADR-025/026/027):JupyterHub/Argo Workflows/MLflow 接了 Keycloak SSO,模型训练 → MLflow 注册 → KServe(Standard 模式)部署成 InferenceService,V2 协议推理请求验证通过(`scripts/09-train-demo-model.sh` + `scripts/11-deploy-demo-inference-service.sh`)。算法/模型 A-B 实验用 KServe 原生的 canary 流量切分这条还没做(不是单独部署一套产品分析工具,见下面"还没定的事"里 2026-08-11 那条) |
 | 3.5 | AI 闭环验证 | Feast 打通离线/在线特征,接入模型服务 |
 | 4 | 企业化增强(prod) | Harbor + 遗留集群正式联邦对接,可作为旧平台替代方案上生产。Trino 细粒度数据权限倾向于用 OPA 而不是 Ranger——Ranger 官方(Apache 项目本身)没有维护 Helm chart,不满足这个项目"只用官方支持的部署方式"的门槛,OPA 有官方 chart 且 Trino 原生支持行过滤/列脱敏,见 ADR-028"后续"部分 |
@@ -109,10 +109,15 @@
   不再计划单独部署 PostHog 或者同类产品分析工具。
 - 云服务器什么时候接入、大概配置 —— 决定 Phase 2 什么时候能开始
 - GitHub 仓库建在个人账号还是组织下,是否私有
-- **2026-08-13,共享 Postgres 的 HA 迁移什么时候做**:CloudNativePG 已经
-  评估过(见 ADR-038),operator 已装、单实例测试 Cluster 验证通过,但
-  真正切换现有共享实例这个动作牵一发动全身(几乎所有组件都连着它),
-  需要用户在场安排一个可以接受短暂中断的窗口,不是自动就该做的下一步
+- **企业内部 Prometheus/Grafana 对接**(用户明确说不急,先搁置):现有的
+  kube-prometheus-stack 是 local-lite 自己独立一套,还没评估要不要 /
+  怎么接到公司现有的监控体系
+- ~~共享 Postgres 的 HA 迁移什么时候做~~ **已解决(2026-08-13,ADR-038/039)**:
+  用户在场安排了迁移窗口,真正切换了共享实例到 CloudNativePG operator
+  管理,含真实数据迁移、切流量、TLS 兼容问题修复;老实例确认稳定后已
+  正式下线。（真正的多副本 HA 要等接入 cloud-full/生产、有多个节点能
+  分布副本才有意义,local-lite 单节点机器上做的是"operator 管理带来的
+  运维能力",不是"现在就有高可用"）
 - ~~Ranger 的插拔式授权点现在要不要在 Trino/Hive 配置里提前占位~~ **已解决(2026-08-11,ADR-028)**:倾向于 OPA 不用 Ranger(Ranger 官方没有维护 Helm chart),Trino 原生支持通过 OPA 做行过滤/列脱敏,设计留到真正要做的时候展开
 - ~~Superset 查 Trino 用什么身份~~ **已解决(2026-08-10,ADR-021)**:方案 (a),
   给 Trino 加了并存的 PASSWORD 认证方式,专门给 Superset 用的服务账号

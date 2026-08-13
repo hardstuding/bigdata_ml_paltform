@@ -500,3 +500,48 @@
   临时去掉 `-qq`/加输出重定向到文件),再判断问题到底出在哪一层。这次
   一开始猜错了方向(以为是 initContainer 没配代理),多花了一轮才找到
   真正原因。
+
+### 推倒重建集群之后,ArgoCD/Trino/Superset/OpenMetadata/MLflow 这类做 OIDC discovery 的组件全部连超时
+
+- **背景**:ADR-039,真的删掉本机 colima VM 重建一次才第一次暴露。
+- **现象**:`curl http://keycloak.local-lite.test/...` 之类的请求 5 秒
+  超时(`Connection timed out`),不是报错,是单纯连不上——但 DNS 解析
+  本身"成功"了,能拿到一个 IP。
+- **原因**:`platform/coredns-custom/` 把 `*.local-lite.test` 硬编码指向
+  `ingress-nginx-controller` 这个 Service 的 ClusterIP 字面量。ClusterIP
+  是集群创建时按 Service CIDR 分配的,不是固定不变的值——重建集群后
+  `ingress-nginx-controller` 分到了一个新的 ClusterIP,旧的硬编码值就是
+  一个查得到但完全连不上的废 IP。
+- **处理**:改用 CoreDNS 的 `rewrite name regex ... answer auto` 把查询
+  重写成 `ingress-nginx-controller.ingress-nginx.svc.cluster.local`,交给
+  同一个 server block 里的 `kubernetes` 插件动态解析,不管 ClusterIP
+  怎么变、集群重建几次都不用再改这份配置。
+- **教训**:任何写死 ClusterIP 字面量的配置都是定时炸弹,只是触发条件
+  (集群重建/该 Service 被删重建)平时很少见——`kubectl get svc` 之类的
+  命令确认过"IP 对不对"不代表这份配置本身是对的,要看它是不是把 IP
+  写死进了另一份配置文件里。
+
+### 同一个命名空间里的 Job 连不上同命名空间的 pod,NetworkPolicy 报 "connection refused"
+
+- **背景**:ADR-039,推倒重建集群时暴露。MinIO chart 的
+  `buckets:` 声明式配置靠一个 Helm post-install hook Job(`minio-post-job`)
+  执行 `mc mb` 建 bucket,这个 Job 建在 `minio` 命名空间里,要连同一个
+  命名空间里的 `minio` pod。
+- **现象**:`mc: <ERROR> Unable to initialize new alias ...: connect:
+  connection refused`,不是超时(NetworkPolicy 挡掉的连接通常表现为
+  `connection refused`,不是 `timeout`——这个特征在这次和上一条 DNS 问题
+  之间是一个有用的区分信号)。
+- **原因**:`platform/network-policies/manifests/minio.yaml` 里
+  `allow-consumers-to-minio` 的允许来源列表只列了外部消费命名空间
+  (`data`/`spark-operator`/`mlflow`/`trino`/`airflow`/`seatunnel`),漏了
+  `minio` 自己这个命名空间——默认 `default-deny-ingress` 把同命名空间的
+  流量也一起挡了。之前没暴露是因为这个 Job 是 Helm 的 `post-install`
+  (不是 `post-upgrade`)hook,只在最初第一次装的时候跑,而那时候这条
+  NetworkPolicy 还没加上去。
+- **处理**:把 `minio` 自己也加进允许来源的 `namespaceSelector` 列表。
+- **教训**:写 NetworkPolicy 的允许来源列表时,不要只想"谁会从**别的**
+  命名空间连进来",同一个命名空间里如果有 Job/CronJob 之类的东西要连
+  该命名空间自己的其他 pod(常见于 Helm chart 自带的 post-install/
+  post-upgrade hook),也要把自己的命名空间加进允许列表——这类同命名空间
+  自连的需求容易被忽略,因为直觉上会觉得"同一个命名空间应该默认互通",
+  但 `default-deny-ingress` 一旦生效,这个直觉是错的。

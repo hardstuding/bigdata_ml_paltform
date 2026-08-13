@@ -35,28 +35,30 @@ issue/升级指南去官方仓库找,不在这个项目里重复维护):
 | alloy | [alloy](https://grafana.github.io/helm-charts) | 1.11.1 | 启用 |
 | argo-workflows | [argo-workflows](https://argoproj.github.io/argo-helm) | 1.0.24 | 启用 |
 | cert-manager | [cert-manager](https://charts.jetstack.io) | v1.21.1 | 启用 |
+| cloudnative-pg-operator | [cloudnative-pg](https://cloudnative-pg.github.io/charts) | 0.29.0 | 启用(2026-08-13 起共享 Postgres 迁移到这个 operator 管理,见 ADR-038) |
 | ingress-nginx | [ingress-nginx](https://kubernetes.github.io/ingress-nginx) | 4.15.1 | 启用 |
 | jupyterhub | [jupyterhub](https://hub.jupyter.org/helm-chart/) | 4.4.1 | 启用 |
 | kafka-operator(Strimzi) | [strimzi-kafka-operator](https://strimzi.io/charts/) | 1.1.0 | park(按需拉起) |
 | keycloak | [keycloakx](https://codecentric.github.io/helm-charts) | 7.2.2 | 启用 |
 | kserve-crd | kserve-crd(oci://ghcr.io/kserve/charts/kserve-crd) | v0.19.0 | 启用 |
 | kserve-resources | kserve-resources(oci://ghcr.io/kserve/charts/kserve-resources) | v0.19.0 | 启用 |
-| kube-prometheus-stack | [kube-prometheus-stack](https://prometheus-community.github.io/helm-charts) | 88.2.0 | 启用 |
+| kube-prometheus-stack | [kube-prometheus-stack](https://prometheus-community.github.io/helm-charts) | 88.2.0 | 启用(含 Alertmanager,2026-08-12 起打开,见 ADR-034) |
 | loki | [loki](https://grafana.github.io/helm-charts) | 7.2.0 | 启用 |
 | minio | [minio](https://charts.min.io/) | 5.4.0 | 启用 |
 | mlflow | mlflow(oci://ghcr.io/mlflow/charts/mlflow) | 0.1.0 | park(按需拉起) |
-| oauth2-proxy(MLflow/Spark History Server 各一份) | [oauth2-proxy](https://oauth2-proxy.github.io/manifests) | 10.7.0 | park(按需拉起) |
+| oauth2-proxy(MLflow/permission-request-app/Spark History Server 各一份) | [oauth2-proxy](https://oauth2-proxy.github.io/manifests) | 10.7.0 | permission-request-app 那份启用,其余 park(按需拉起) |
 | openmetadata | [openmetadata](https://helm.open-metadata.org/) | 1.13.3 | park(按需拉起) |
 | opensearch | [opensearch](https://opensearch-project.github.io/helm-charts/) | 3.8.0 | park(按需拉起) |
-| spark-operator | [spark-operator](https://kubeflow.github.io/spark-operator) | 2.5.2 | park(按需拉起) |
+| spark-operator | [spark-operator](https://kubeflow.github.io/spark-operator) | 2.5.2 | 启用 |
 | superset | [superset](https://apache.github.io/superset) | 0.22.4 | park(按需拉起) |
 | trino | [trino](https://trinodb.github.io/charts) | 1.42.2 | park(按需拉起) |
 
 **这个仓库自己维护的部分**(没有独立版本号,`targetRevision: main` 就是
 这个仓库当前的 git 状态本身——包括建库用的 `*-db-init` Job、`postgres`/
-`hive-metastore`/`spark-history-server` 这几个没有官方 chart、自己写的裸
-manifest、`coredns-custom`/`grafana-audit-dashboard`/
-`cert-manager-issuers` 这类平台自己的配置):跟着这个仓库的 git 历史走,
+`hive-metastore`/`spark-history-server`/`permission-request-app` 这几个
+没有官方 chart、自己写的裸 manifest、`coredns-custom`/
+`grafana-audit-dashboard`/`cert-manager-issuers`/`network-policies`/
+`postgres-backup` 这类平台自己的配置):跟着这个仓库的 git 历史走,
 `git log` 就是它们的"版本历史"。用到的具体镜像(比如 `postgres:16.6`、
 `apache/spark:3.5.9`)固定写在各自的 manifest 里,见
 [`scripts/list-project-images.py`](../../scripts/list-project-images.py)
