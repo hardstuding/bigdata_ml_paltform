@@ -45,7 +45,21 @@ spec:
                 - -c
                 - |
                   set -e
-                  pg_dumpall | gzip > /backup/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+                  # 2026-08-13 实测发现的真实 bug:`pg_dumpall | gzip > file`
+                  # 这种写法,`set -e` 在管道里只检查最后一个命令
+                  # (gzip)的退出码——这是 POSIX shell 的标准行为,不是
+                  # 这个镜像的 bug(bash 的 `set -o pipefail` 能解决,但
+                  # 这里的 /bin/sh 不一定是 bash,不能假设有这个选项)。
+                  # 实测确认过:pg_dumpall 因为一次真实的连接失败报错
+                  # (Connection refused),但 gzip 收到空输入照样能成功
+                  # 压缩出一个 20 字节的"空"文件,`set -e` 完全没察觉,
+                  # 整个 Job 照常标记成功——一次"看起来备份成功、实际是
+                  # 空文件"的真实事故,不是假设性风险。改成先落盘再单独
+                  # 压缩,两步分开,`set -e` 才能真正捕捉到 pg_dumpall
+                  # 自己的失败。
+                  pg_dumpall > /tmp/dump.sql
+                  gzip -c /tmp/dump.sql > /backup/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+                  rm -f /tmp/dump.sql
                   ls -lh /backup
               volumeMounts:
                 - name: backup
@@ -74,6 +88,19 @@ spec:
                   mc alias set backupminio http://minio.minio.svc.cluster.local:9000 "$MINIO_USER" "$MINIO_PASSWORD"
                   mc mb --ignore-existing backupminio/backups
                   for f in /backup/*.sql.gz; do
+                    # 第二道防线,不指望它是唯一防线:dump 那一步已经改成
+                    # 会在 pg_dumpall 真的失败时让整个 Job 失败(见
+                    # initContainer 的注释,那次真实事故的根因在那一层),
+                    # 这里再加一道体积检查——哪怕以后又出现别的、还没
+                    # 遇到过的失败模式导致产出一个异常小的文件,也不会
+                    # 被当成正常备份传上去。这个仓库里真实的
+                    # `pg_dumpall` 输出压缩后是几百 KB 量级,1KB 是一个
+                    # 明显留有余量、不会误伤正常备份的下限。
+                    SIZE=$(stat -c%s "$f")
+                    if [ "$SIZE" -lt 1024 ]; then
+                      echo "!!! $f 只有 ${SIZE} 字节,明显不是一份完整的备份,拒绝上传" >&2
+                      exit 1
+                    fi
                     mc cp "$f" "backupminio/backups/postgres/$(basename "$f")"
                   done
                   # 【可调参数,见 docs/operations/tuning.md】保留 14 天,更久的自动清掉,
