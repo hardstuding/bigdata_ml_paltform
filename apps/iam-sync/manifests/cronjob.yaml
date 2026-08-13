@@ -127,6 +127,14 @@ spec:
               # 修法是外面套一层 `timeout`,和这个脚本其他地方"网络操作必须
               # 自带超时"是同一个原则,不追究 apt 内部这个机制为什么不听
               # Acquire::Retries 的话——够用就行,不用把 apt 的重试语义摸透。
+              # 加了 `-k 10`(超时后先发 SIGTERM,10 秒内还没退出就补一发
+              # SIGKILL)——第一版只有 `timeout 90` 没加 `-k`,单独测试时看
+              # 起来有效,但接上真实的 CronJob 之后观察到一次 fetch-kubectl
+              # 卡在这个 delayed-item 循环里超过 90 秒还没退出(`crictl
+              # exec` 进容器确认 apt-get 进程仍在),没有确认是 apt/dpkg
+              # 忽略了普通 SIGTERM、还是别的原因,但 `timeout` 默认只发
+              # 一次信号不会自动升级——不管具体机制是什么,加 `-k` 保证
+              # 最终一定能被强杀,是更保险的写法,没有理由不加。
               env:
                 - name: HTTP_PROXY
                   value: "http://192.168.5.2:1087"
@@ -139,8 +147,8 @@ spec:
                 - -c
                 - |
                   set -e
-                  timeout 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
-                  timeout 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl git >/dev/null
+                  timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+                  timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl git >/dev/null
                   ARCH=$(uname -m)
                   case "$ARCH" in
                     x86_64) KARCH=amd64 ;;
@@ -172,7 +180,7 @@ spec:
               # 加固定秒数超时是同一个"网络操作必须自带超时"的原则,只是
               # git 自己提供了更贴切的机制,不需要外面再包一层。
               #
-              # apt-get install 这行也套了 `timeout 90`——原因见上面
+              # apt-get install 这行也套了 `timeout -k 10 90`——原因见上面
               # fetch-kubectl 那个 initContainer 的注释(apt 自己的
               # "delayed item" 重试队列不受 Acquire::Retries 约束,会话死
               # 循环),这里是同一个命令、同一个镜像,没道理不会踩到同一个
@@ -190,8 +198,8 @@ spec:
                 - |
                   set -e
                   export PATH="/tools:$PATH"
-                  timeout 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
-                  timeout 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
+                  timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+                  timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
                   pip install --quiet --timeout 30 pyyaml
                   git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
                   cd /tmp/repo
