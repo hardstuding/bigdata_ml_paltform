@@ -1,0 +1,42 @@
+# 三档 PriorityClass,对应 ADR-040 里"队列资源管理"这条诉求在本机
+# 单节点场景下唯一诚实能做到的等价物:没有多节点、没有 cluster-
+# autoscaler,做不到真正的弹性扩容,能做的是"资源紧张时优雅降级"——
+# 节点内存/CPU 紧张、kubelet 需要驱逐 pod 腾资源时,优先牺牲低优先级的
+# batch 类负载,保住平台底座和交互式组件。cloud-full/prod 阶段接入
+# 真实多节点集群、有 cluster-autoscaler 之后,这几档同样适用(优先级
+# 语义和节点数量无关),届时再叠加真正的弹性扩容能力。
+#
+# 不设置 PriorityClass 的 pod 默认优先级是 0,比这里最低的 batch(100)
+# 还低——意味着任何没有显式打标签的负载,资源紧张时会比这三档都先被
+# 驱逐,这是刻意的(倒逼新增的组件明确想清楚自己该归哪一档,而不是
+# 默默吃到默认值)。
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: platform-critical
+value: 1000
+globalDefault: false
+description: >-
+  平台底座,不能被驱逐:Keycloak、Postgres(CNPG)、MinIO、ArgoCD、
+  ingress-nginx、cert-manager 这类"挂了会带崩一大片"的组件。
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: interactive
+value: 500
+globalDefault: false
+description: >-
+  交互式、用户直接在等结果的组件:Trino、JupyterHub、Superset、
+  OpenMetadata——响应慢会被用户直接感知到,优先级高于批处理类负载。
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: batch
+value: 100
+globalDefault: false
+description: >-
+  批处理/后台类负载:Airflow(含 KubernetesExecutor 起的任务 pod)、
+  Spark Operator 的 driver/executor、Kafka、SeaTunnel、MLflow 的训练
+  任务——一般能容忍被抢占后重跑,资源紧张时第一批被牺牲。

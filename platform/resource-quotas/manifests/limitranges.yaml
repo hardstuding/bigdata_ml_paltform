@@ -1,0 +1,91 @@
+# LimitRange,和 quotas.yaml 配套——一旦命名空间里有 ResourceQuota 管了
+# CPU/内存,k8s 会要求这个命名空间里**所有**新建 pod 的**所有**容器都
+# 显式声明 requests(没有例外)。实测确认过(2026-08-14)这台机器上不是
+# 每个容器都做到了这一点:JupyterHub 的 `continuous-image-puller`(负责
+# 提前把 singleuser 镜像拉到节点上,不是用户会话本身)那几个容器完全没
+# 配 resources.requests。这类容器现在能正常跑是因为它创建的时候命名
+# 空间里还没有配额;一旦上线 ResourceQuota,它下次被重建(节点重启、
+# DaemonSet 更新、命名空间重新同步)时会因为"没有 requests"被 admission
+# 直接拒绝创建——不是配额太小拒绝,是完全没有配额判断的依据。
+#
+# 与其去审计、修改每一个组件各自的 chart values(不可能穷尽,以后新增
+# 组件也可能重蹈覆辙),用 LimitRange 给每个命名空间设一个兜底默认值:
+# 容器没写 requests/limits 时自动补上这个默认值,写了的话以容器自己
+# 写的为准,不会覆盖。这是 requests.cpu quota 落地时的标准配套做法,
+# 不是这次专门为 continuous-image-puller 发明的变通方案。
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: trino
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {memory: 128Mi}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: jupyterhub
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {memory: 128Mi}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: superset
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {memory: 128Mi}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: openmetadata
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {memory: 128Mi}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: airflow
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {memory: 128Mi}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: spark-operator
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {memory: 128Mi}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: mlflow
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {memory: 128Mi}

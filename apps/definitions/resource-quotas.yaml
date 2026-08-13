@@ -1,0 +1,27 @@
+# ResourceQuota + LimitRange + PriorityClass,见
+# docs/decisions/041-queue-resource-management.md。这个 Application 的
+# `destination.namespace` 字段只是个默认值,实际每份 manifest 都显式写了
+# 自己的 `metadata.namespace`(PriorityClass 是集群级资源,不受命名空间
+# 字段影响),不受这个字段影响——和 network-policies.yaml 是同一个模式。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: resource-quotas
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/resource-quotas/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

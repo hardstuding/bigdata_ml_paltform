@@ -1,0 +1,93 @@
+# ResourceQuota,见 docs/decisions/040-enterprise-governance-roadmap.md
+# 里"资源隔离"这条需求和 docs/architecture.md"还没定的事"的对应记录。
+#
+# 这些是**保护性上限**,不是精确的容量分配承诺——local-lite 这台机器
+# 总共只有 4 vCPU / 10Gi 内存,下面每个命名空间的配额单独看都在合理
+# 范围内,但全部同时打满会远超机器总容量。这是刻意的:这个项目一贯的
+# 工作模式是"一次验证一个组件、验证完 park 回去"(见
+# environments/cloud-full/pending-definitions/README.md),不是所有
+# 组件同时常驻满载。这里要防的是"一个组件本身出问题失控增长,把整台
+# 机器拖死"(2026-08-08 真实发生过:同时部署 Kafka/Spark Operator/
+# Airflow 把 6GB 内存打满,kernel OOM,连 argocd-application-controller
+# 都被连带杀掉),不是要在多个组件之间做精确的资源仲裁。
+#
+# 只覆盖当前会常驻/被多个使用者共享的命名空间;kafka/seatunnel/
+# opensearch 这几个 park 状态下命名空间还不存在,ResourceQuota 是
+# namespaced 对象建不出来,等它们被 un-park 时需要补一份同款配额
+# (park/unpark 流程见对应组件的 pending-definitions 目录说明)。
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: trino
+spec:
+  hard:
+    requests.cpu: "1500m"
+    requests.memory: 3Gi
+    limits.memory: 5Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: jupyterhub
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.memory: 6Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: superset
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 2Gi
+    limits.memory: 3Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: openmetadata
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.memory: 6Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: airflow
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.memory: 6Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: spark-operator
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.memory: 6Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: mlflow
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 2Gi
+    limits.memory: 3Gi
