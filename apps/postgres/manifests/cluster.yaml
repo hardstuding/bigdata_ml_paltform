@@ -1,0 +1,44 @@
+# 共享 Postgres 迁移到 CloudNativePG operator 管理(见 ADR-038 的评估
+# 结论、ADR-033 的备份/恢复验证)。statefulset.yaml 顶部早就写了"cloud-full/
+# prod 起换成 CloudNativePG operator,到时候这个文件整体替换"——这次是
+# 提前把这条路走通,不是临时起意。
+#
+# local-lite 现实是单节点机器,`instances: 1`——真正有意义的多副本 HA
+# 要等接入 cloud-full/生产、有多个节点能分布副本才有意义(ADR-038 已经
+# 记录过这个结论),这次迁移换的是"operator 管理带来的运维能力"(原生
+# 备份/恢复、更规范的升级路径),不是"现在就有高可用"。
+#
+# 名字故意叫 postgres-cnpg,不是直接叫 postgres——旧的 StatefulSet
+# (apps/postgres/manifests/statefulset.yaml)还在同一个 namespace 里跑着,
+# 两边不能抢同一个 Service 名字。迁移完成、验证过所有消费者都切过去之后,
+# 会加一个名字叫 `postgres` 的兼容 Service 指向这个 Cluster 的主实例
+# (见 service-compat.yaml),这样所有组件现在连的
+# `postgres.data.svc.cluster.local` 这个域名不用改一个字,不需要逐个组件
+# 改连接串/Secret。
+#
+# imageName 锁定 16.6(和旧实例的 postgres:16.6 大版本一致)——这次只想
+# 验证"换成 operator 管理"这一件事,不想把"换 operator"和"顺带大版本
+# 升级"这两个风险叠在一起做,CNPG operator 默认拉的是 18.4,显式锁定版本。
+#
+# superuserSecret 直接复用现有的 postgres-root 这个 Secret(username=
+# postgres,password=<既有值>,key 名字正好符合 CNPG 的约定)——这样迁移
+# 完之后 superuser 密码不变,不用同步更新到任何用到它的地方。
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres-cnpg
+  namespace: data
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.6
+  superuserSecret:
+    name: postgres-root
+  enableSuperuserAccess: true
+  storage:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
