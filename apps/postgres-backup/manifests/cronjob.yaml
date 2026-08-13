@@ -57,9 +57,30 @@ spec:
                   # 空文件"的真实事故,不是假设性风险。改成先落盘再单独
                   # 压缩,两步分开,`set -e` 才能真正捕捉到 pg_dumpall
                   # 自己的失败。
-                  pg_dumpall > /tmp/dump.sql
+                  #
+                  # 修完上面那个 bug、实测验证时又抓到一个真实现象:刚
+                  # 创建的 pod 第一次连 Postgres 有一定概率报
+                  # Connection refused(不是超时、不是 DNS 解析失败,是
+                  # 明确的连接被拒),几秒后用一个新 pod 重试就正常了——
+                  # 怀疑是这台机器上 k3s/Flannel 的 NetworkPolicy 规则对
+                  # 新 pod 生效有一个短暂的编程延迟(同一类现象在这次会话
+                  # 里验证 NetworkPolicy 时也见过,见 ADR-035),没有深挖
+                  # 确认,不重要——按这个仓库一贯的原则(网络操作必须自带
+                  # 重试/超时),加个简单的重试,不去猜/等这个延迟具体多长。
+                  for i in 1 2 3 4 5; do
+                    if pg_dumpall > /tmp/dump.sql 2>/tmp/dump.err; then
+                      break
+                    fi
+                    echo "第 ${i} 次 pg_dumpall 失败,5 秒后重试:" >&2
+                    cat /tmp/dump.err >&2
+                    if [ "$i" = 5 ]; then
+                      echo "重试 5 次都失败,放弃" >&2
+                      exit 1
+                    fi
+                    sleep 5
+                  done
                   gzip -c /tmp/dump.sql > /backup/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
-                  rm -f /tmp/dump.sql
+                  rm -f /tmp/dump.sql /tmp/dump.err
                   ls -lh /backup
               volumeMounts:
                 - name: backup
