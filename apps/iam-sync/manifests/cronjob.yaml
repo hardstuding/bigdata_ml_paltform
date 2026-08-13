@@ -79,6 +79,8 @@ spec:
       activeDeadlineSeconds: 600
       template:
         spec:
+          # 见 ADR-041(队列资源管理):定时批处理任务,归 batch 档。
+          priorityClassName: batch
           serviceAccountName: iam-sync
           restartPolicy: Never
           initContainers:

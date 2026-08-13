@@ -36,6 +36,8 @@ spec:
       labels:
         app: permission-request-app
     spec:
+      # 见 ADR-041(队列资源管理):人在等审批结果,归 interactive 档。
+      priorityClassName: interactive
       containers:
         - name: app
           image: python:3.12-slim

@@ -27,6 +27,9 @@ spec:
       activeDeadlineSeconds: 1800
       template:
         spec:
+          # 见 ADR-041(队列资源管理):定时批处理任务,能容忍被抢占后
+          # 下次调度重跑,归 batch 档。
+          priorityClassName: batch
           restartPolicy: Never
           initContainers:
             - name: dump

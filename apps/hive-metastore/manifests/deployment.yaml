@@ -48,6 +48,10 @@ spec:
       labels:
         app: hive-metastore
     spec:
+      # 见 ADR-041(队列资源管理):裸 manifest,不像 Helm chart 那样要
+      # 先确认 values 有没有暴露这个字段,直接加。表元数据服务,归
+      # platform-critical 档。
+      priorityClassName: platform-critical
       initContainers:
         - name: fetch-postgres-driver
           image: curlimages/curl:8.11.0

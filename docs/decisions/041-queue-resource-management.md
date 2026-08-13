@@ -64,14 +64,32 @@ autoscaler 之后,这几档优先级语义依然适用,届时再叠加真正的�
 
 ## 后果
 
-- 这次只落地了 `ResourceQuota`/`LimitRange`/`PriorityClass` 定义本身
-  (`platform/resource-quotas/manifests/`),**PriorityClass 定义完成
-  之后还需要给每个组件的 pod 模板加上 `priorityClassName` 字段才会
-  真正生效**——定义了但没人引用的 PriorityClass 不会自动起作用。这一步
-  工作量分散在十几个组件的 Application 定义里,如果这次会话时间/精力
-  允许会接着做,记录在这里防止漏做:检查 `git log` 里这篇 ADR 之后
-  有没有紧跟着的"给 XX 组件加 priorityClassName"的 commit,没有就是
-  还没做完。
+- **`priorityClassName` 的实际覆盖情况,按组件类型分两半**:
+  - **裸 manifest / CRD 原生支持的组件已经加上了**:Postgres(CNPG
+    的 `Cluster` CRD 原生支持这个字段,`kubectl explain
+    cluster.spec.priorityClassName` 确认过)、Hive Metastore、
+    `permission-request-app`、`postgres-backup`/`iam-sync` 这两个
+    CronJob——这几个我直接控制完整的 pod spec,加一行字段的事。
+  - **Helm chart 管理的组件目前做不到,不是漏做,是查证过确实没有
+    现成的路径**:实测检查过 `codecentric/keycloakx`、`minio/minio`、
+    `trinodb/trino`、`open-metadata/openmetadata`、`apache/airflow`、
+    `kubeflow/spark-operator`、`apache/superset` 这几个 chart 的
+    `helm show values`,**都没有暴露 `priorityClassName`(或者
+    `podSpec`/`extraPodSpec` 这类能间接塞进去的字段)**——不是这次
+    没查,是查了确实没有。要接这几个组件,需要 Helm `postRenderers`
+    或者 ArgoCD 的 Kustomize patch 机制在渲染后二次改写 pod spec,
+    这类"绕过 chart 本身限制"的方案有实际的维护成本(chart 升级后
+    patch 可能失效,需要人回头确认),这次判断不值得为了这一项相对
+    次要的收益(PriorityClass 只在节点资源紧张、真的要驱逐 pod 时才
+    起作用,不是日常路径)引入这层复杂度,留着不做,不是遗漏。
+  - 换句话说:**平台底座(Postgres/Hive Metastore)和这次新加的
+    `permission-request-app` 已经受保护,真正会抢占资源的"消费型"
+    组件(Trino/JupyterHub/Superset/OpenMetadata/Airflow/Spark
+    Operator/Kafka/MLflow)目前还是默认优先级(0,比 batch 还低)**——
+    ResourceQuota/LimitRange 已经在生效,这些组件本身不会失控增长,
+    只是"节点整体资源紧张时谁先被驱逐"这一层保护还没覆盖到它们。
+    如果以后真的要补这一块,从 Helm `postRenderers` 或者
+    Kustomize patch 这个方向展开。
 - 没有引入 Trino 自己的 resource group 或者其他专门的调度器队列
   ——local-lite 单机、组件轮流验证的使用模式下,k8s 原生这三件套已经
   够用,更专门的调度器队列留到真的有多用户并发访问 cloud-full/prod
