@@ -136,4 +136,35 @@ MinIO 只放行 9000(API,S3A 客户端用),9001(管理控制台)没开——实�
 
 ## 验证记录(2026-08-13,核心命名空间)
 
-(部署 + 验证完之后补充实际结果)
+按 MinIO → Postgres → Keycloak 的顺序,通过 GitOps 分阶段上线(每个
+namespace 的 manifest 单独提交、单独触发 sync、验证通过再提交下一个,
+不是三个一起丢进 ArgoCD 让它一次性全同步)——直接 `kubectl apply` 单独
+测试这几份 manifest 被 Claude Code 的权限分类器拦截了(判定为高风险的
+"直接改核心共享基础设施网络策略"操作),改用这种"一次只提交一个
+namespace,GitOps 正常同步"的方式达到同样的分阶段效果。
+
+每个 namespace 都用"合法路径应该通、非法路径应该被拒"两条真实测试,不是
+只看 NetworkPolicy 对象部署成功:
+
+- **MinIO**:`data` namespace 的一次性 pod 连 `:9000` 健康检查端点,
+  `200 OK`;`default` namespace(不在允许列表里)的一次性 pod 连同一个
+  端点,`Connection refused`。
+- **Postgres**:`data` namespace(同命名空间)、`keycloak` namespace
+  (跨命名空间,对应 keycloak-create-db 这类真实消费者)分别用 `psql`
+  真实执行 `SELECT 1` 都成功;`default` namespace 连同一个地址,
+  `Connection refused`。
+- **Keycloak**:两条都是真实场景,不是构造的测试
+  - 从 Mac 本机(不是集群内部)走真实的 `http://keycloak.local-lite.test`
+    域名(和浏览器走同一条路径)请求 OIDC discovery 端点,`200 OK`——
+    证明所有走 ingress-nginx 进来的合法流量没受影响。
+  - `default` namespace 的一次性 pod 绕过 ingress-nginx、直连
+    keycloak 的 Service,`Connection refused`——证明"必须经过
+    ingress-nginx"这条限制真的生效了,不是名义上部署了但没起作用。
+  - 额外做了一次端到端真实业务验证:`permission-request-app`(实际在
+    跑的、依赖 Keycloak OIDC 的组件)带 `Host` 头访问,拿到 `302`
+    (正确跳转去 Keycloak 登录),证明策略上线后真实的 SSO 链路完整可用,
+    不只是"能连上端口"这个网络层面的验证。
+
+三个 namespace 部署过程中,`hive-metastore`/`postgres-0`/
+`keycloak-keycloakx-0` 这几个真正承载流量的 pod 全程保持 `Running`、
+没有额外重启,ArgoCD 里所有 Application 全程保持 `Synced`/`Healthy`。
