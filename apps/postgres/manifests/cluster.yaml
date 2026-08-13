@@ -1,15 +1,16 @@
 # 共享 Postgres 迁移到 CloudNativePG operator 管理(见 ADR-038 的评估
-# 结论、ADR-033 的备份/恢复验证)。statefulset.yaml 顶部早就写了"cloud-full/
-# prod 起换成 CloudNativePG operator,到时候这个文件整体替换"——这次是
-# 提前把这条路走通,不是临时起意。
+# 结论、ADR-033 的备份/恢复验证)。老的 statefulset.yaml 顶部早就写了
+# "cloud-full/prod 起换成 CloudNativePG operator,到时候这个文件整体
+# 替换"——这次是提前把这条路走通,不是临时起意(那份文件 2026-08-13
+# 确认迁移稳定后已经删除)。
 #
 # local-lite 现实是单节点机器,`instances: 1`——真正有意义的多副本 HA
 # 要等接入 cloud-full/生产、有多个节点能分布副本才有意义(ADR-038 已经
 # 记录过这个结论),这次迁移换的是"operator 管理带来的运维能力"(原生
 # 备份/恢复、更规范的升级路径),不是"现在就有高可用"。
 #
-# 名字故意叫 postgres-cnpg,不是直接叫 postgres——旧的 StatefulSet
-# (apps/postgres/manifests/statefulset.yaml)还在同一个 namespace 里跑着,
+# 名字故意叫 postgres-cnpg,不是直接叫 postgres——迁移过程中旧的
+# StatefulSet(已删除)和这个 Cluster 曾经在同一个 namespace 里并存过,
 # 两边不能抢同一个 Service 名字。切流量走的是 service.yaml:那份文件
 # 名字还是 `postgres`,原来 selector 指向老 StatefulSet,已经改成
 # ExternalName 别名到这个 Cluster 自动生成的 `postgres-cnpg-rw` 这个

@@ -13,10 +13,11 @@
 # 这部分逻辑完全交给 CNPG 自己维护,故障转移时主实例变了,
 # `postgres-cnpg-rw` 会自动跟着变,我们这层不用管。
 #
-# 老的 StatefulSet(statefulset.yaml)先保留、不删除,只是不再接收流量了
-# ——数据还在它的 PVC 里,是切流量出问题时最快的回滚手段
-# (`git revert` 这个改动、重新 sync 就能秒级切回去),等确认新实例稳定
-# 运行一段时间之后再单独清理。
+# 老的 StatefulSet 切流量后先保留了一段时间(数据还在它的 PVC 里,是
+# 切流量出问题时最快的回滚手段——`git revert` 这个改动、重新 sync 就能
+# 秒级切回去),2026-08-13 确认新实例稳定运行、MLflow 等消费方也验证过
+# 之后,已经正式下线(见 ADR-038"实际迁移记录"),`statefulset.yaml`/
+# `init-configmap.yaml` 两个文件删了,PVC 也手动清理了释放存储空间。
 apiVersion: v1
 kind: Service
 metadata:

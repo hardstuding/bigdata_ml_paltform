@@ -151,11 +151,14 @@ JDBC 驱动比较老)。修法:在 Cluster 的 `spec.postgresql.parameters` 里�
   同一件事,真正迁移到 CNPG 的时候需要决定留哪一个,不是并存。
 - 没有评估 CNPG 的 Pooler(内置 PgBouncer 连接池)要不要用——现在的
   组件都是直连,连接数还没到需要连接池的规模。
-- **老的 `postgres-0` StatefulSet 还没有正式下线**,切完流量后刻意保留
-  作为回滚安全网(见上面"实际迁移记录")。等确认新实例稳定运行一段
-  时间之后,需要单独清理:删除 `apps/postgres/manifests/statefulset.yaml`
-  和 `init-configmap.yaml`(数据已经通过 `pg_dumpall`/restore 迁移完整,
-  这两个文件的作用已经被 CNPG Cluster 取代),释放它占用的 PVC 存储空间。
+- **2026-08-13 补充:老的 `postgres-0` StatefulSet 已正式下线。** 切完
+  流量后刻意保留了一段时间作为回滚安全网,MLflow 验证通过、确认新实例
+  稳定运行之后,用户明确同意清理(这是不可逆操作,提前问过):删除
+  `apps/postgres/manifests/statefulset.yaml`/`init-configmap.yaml`
+  两个文件(git commit + push,ArgoCD 自动 prune 掉 StatefulSet),
+  再手动删除它的 PVC(`data-postgres-0`,5Gi)释放存储空间。回滚安全网
+  正式撤除,后续如果新实例出问题,只能靠 ADR-033 的每日备份恢复,不再
+  有"秒级切回老实例"这条路。
 - MLflow/OpenMetadata/Superset/Airflow 这几个目前是 park 状态的组件,
   还没有实际验证过它们连新的 CNPG 实例(包括这次发现的 TLS 版本问题)
   没有问题——按"迟早会被拉起来"的原则,`platform/network-policies/
