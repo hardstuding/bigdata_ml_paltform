@@ -112,6 +112,44 @@ spec:
         - protocol: TCP
           port: 5432
 ---
+# 2026-08-13 补充:un-park Trino 验证部署时实测发现的真实缺口——
+# hive-metastore(同样在 data 命名空间)从 ADR-035 推广 NetworkPolicy
+# 到现在,一直没有任何 ingress 允许规则,只被 default-deny 挡住了自己
+# (Trino 查 `SHOW SCHEMAS FROM iceberg` 报 "Failed connecting to Hive
+# metastore",不是超时慢, 是连接被拒,`kubectl get networkpolicy -n data`
+# 逐条查证实确认根本没有覆盖到 app=hive-metastore 这个 pod)。消费者
+# 列表按代码库里实际引用 `hive-metastore.data.svc.cluster.local:9083`
+# 的地方定的(不是凭印象列):trino(Iceberg catalog)、spark-operator
+# (apps/spark-iceberg-demo 的 SparkApplication 建在这个命名空间)、
+# airflow(seatunnel_device_events 这个 DAG 的 worker pod 建在 airflow
+# 命名空间里)。端口 9083(`kubectl get pod ... -o jsonpath=
+# '{.spec.containers[0].ports}'` 确认过是 thrift 协议)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-consumers-to-hive-metastore
+  namespace: data
+spec:
+  podSelector:
+    matchLabels:
+      app: hive-metastore
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: trino
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: spark-operator
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: airflow
+      ports:
+        - protocol: TCP
+          port: 9083
+---
 # 这个命名空间里其他资源(比如 postgres-backup 这个 CronJob 起的 pod)
 # 不需要被别的东西连进来,不需要单独的 ingress 规则,default-deny 之后
 # 保持全拒绝就是对的——它们只是 Postgres 的消费者/维护者,不是被消费方。
