@@ -84,7 +84,7 @@
 
 | Phase | 目标 | 退出标准 |
 |---|---|---|
-| 0 | 平台底座 | ✅ 改一个 values 文件、push,ArgoCD 自动同步——2026-08-13 用真正的推倒重建验证过这句话不是空话,不只是文档(ADR-039)。✅ 企业级权限管理:组织架构/角色同步进 Keycloak,按 group 分权限,自助申请门户,已验证(ADR-028/031/032)。✅ 安全与可靠性补强:NetworkPolicy 推广到核心命名空间(ADR-035)、Postgres 每日备份 + 恢复演练验证过(ADR-033)、Alertmanager 打开(ADR-034)。可插拔外部基础设施起步(ADR-030) |
+| 0 | 平台底座 | ✅ 改一个 values 文件、push,ArgoCD 自动同步——2026-08-13 用真正的推倒重建验证过这句话不是空话,不只是文档(ADR-039)。✅ 企业级权限管理:组织架构/角色同步进 Keycloak,按 group 分权限,自助申请门户,已验证(ADR-028/031/032)。✅ 安全与可靠性补强:NetworkPolicy 推广到核心命名空间(ADR-035)、Postgres 每日备份 + 恢复演练验证过(ADR-033)、Alertmanager 打开(ADR-034)、队列资源管理(ResourceQuota/LimitRange/PriorityClass,ADR-041)。可插拔外部基础设施起步(ADR-030) |
 | 1 | 湖仓核心(local-lite) | ✅ 建一张 Iceberg 表、写入,Trino 读出、Superset 出图(2026-08-10,`scripts/08-create-demo-data.sh`);✅ Spark 通过 Spark Operator 真实读写同一张表(ADR-036);✅ 共享 Postgres 迁移到 CloudNativePG operator 管理,老实例已下线(ADR-038) |
 | 2 | 数据工程(转 cloud-full) | ✅ SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通(2026-08-12/13 验证,见 ADR-037)。✅ Kafka(Strimzi KRaft 单节点)已验证部署,真实生产/消费一条消息跑通(2026-08-13)。Spark 权限/可观测性配置已就绪(ADR-029:History Server + oauth2-proxy SSO,Grafana 指标暴露) |
 | 3 | AI/ML | ✅ 核心链路已验证(2026-08-11,见 ADR-025/026/027):JupyterHub/Argo Workflows/MLflow 接了 Keycloak SSO,模型训练 → MLflow 注册 → KServe(Standard 模式)部署成 InferenceService,V2 协议推理请求验证通过(`scripts/09-train-demo-model.sh` + `scripts/11-deploy-demo-inference-service.sh`)。算法/模型 A-B 实验用 KServe 原生的 canary 流量切分这条还没做(不是单独部署一套产品分析工具,见下面"还没定的事"里 2026-08-11 那条) |
@@ -118,7 +118,10 @@
   丢了",这次已经完整找回并写进 [ADR-040](decisions/040-enterprise-governance-roadmap.md)。
   结论仍然是"权限 OA 审批系统是最重的一块,建议等平台核心稳定后单独
   立项",这里只是确保这个待办不会再丢一次,不代表已经开始实现——
-  其中"资源隔离"相对独立,可以不等其他条目单独先做。
+  其中"资源隔离"相对独立,**已经单独做完并验证过,见
+  [ADR-041](decisions/041-queue-resource-management.md)**,其余几条
+  (建表工具/权限 OA/血缘/权限交接/资源回收/深度回溯/AI 角色化/知识
+  沉淀)仍然是待规划状态。
 - ~~共享 Postgres 的 HA 迁移什么时候做~~ **已解决(2026-08-13,ADR-038/039)**:
   用户在场安排了迁移窗口,真正切换了共享实例到 CloudNativePG operator
   管理,含真实数据迁移、切流量、TLS 兼容问题修复;老实例确认稳定后已
