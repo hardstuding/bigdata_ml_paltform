@@ -15,6 +15,7 @@ Kubernetes-native 的 Data + AI 平台骨架:统一身份认证、GitOps 驱动�
 ```bash
 git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
 ./scripts/00-generate-secrets.sh
+./scripts/17-load-image-cache.sh          # 可选:本机之前用 export-image-cache.sh 存过镜像备份的话,先灌回本地,后面部署不用逐个连外网拉
 ./scripts/01-bootstrap-argocd.sh          # 需要代理才能出网的环境:NEEDS_LOCAL_PROXY=1 ./scripts/01-bootstrap-argocd.sh
 ./scripts/02-bootstrap-root-apps.sh
 ./scripts/04-install-kube-prometheus-crds.sh
@@ -97,6 +98,13 @@ git add -A && git commit -m "chore: 迁移仓库地址" && git push
 
 # 3. 生成各组件的管理员密码,建好对应的 Secret(幂等,重复跑不会轮换已有密码)
 ./scripts/00-generate-secrets.sh
+
+# 3.5 可选:这台机器之前用 export-image-cache.sh 存过镜像备份的话(比如
+#     重建同一台 colima、或者从别的机器搬了一份 image-cache/ 过来),先灌回
+#     本地 docker——k3s 走 cri-dockerd,和 docker 是同一份存储,灌进去
+#     kubelet 立刻能直接用,不用后面每个组件都连外网现拉(实测过差距:
+#     一个 400MB 的镜像,网络拉取 5 分钟以上,本地灌只要 5.7 秒)。
+./scripts/17-load-image-cache.sh
 
 # 4. 装 ArgoCD 本身(唯一一次手动 helm install,之后全部交给 GitOps)
 #    本机+colima 这种需要过代理才能出网的环境,前面加 NEEDS_LOCAL_PROXY=1
