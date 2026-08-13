@@ -80,6 +80,10 @@ echo "镜像是二进制大文件,不适合放 git 历史)"
 echo "总大小:"
 du -sh "$OUT_DIR"
 echo
+echo "在这台机器上直接把缓存灌回本地 docker(k3s 走 cri-dockerd,和 docker 是"
+echo "同一份存储,灌进去 kubelet 立刻能用,不用再连外网拉):"
+echo "  ./scripts/17-load-image-cache.sh"
+echo
 echo "以后要在别的机器上用:"
 echo "  gunzip -c <文件>.tar.gz | docker load"
 echo "  docker tag <原名> <公司内部仓库地址>/<原名>"
