@@ -545,3 +545,33 @@
   post-upgrade hook),也要把自己的命名空间加进允许列表——这类同命名空间
   自连的需求容易被忽略,因为直觉上会觉得"同一个命名空间应该默认互通",
   但 `default-deny-ingress` 一旦生效,这个直觉是错的。
+
+### `kubectl delete pod` 删 CNPG 的 Postgres pod 卡在 `Terminating` 十几分钟不退出
+
+- **背景**:ADR-041,给 Postgres 加 `priorityClassName` 之后,想通过
+  删 pod 触发重建来让字段生效,结果卡住了。
+- **现象**:`kubectl delete pod postgres-cnpg-1 -n data` 之后,pod 一直
+  停在 `Terminating`,`kubectl get events` 能看到 17 分钟前就有
+  `Killing: Stopping container postgres` 这条事件,但迟迟没有真正终止。
+  `crictl logs` 进去看,postgres 进程本身已经在响应停止信号(持续拒绝
+  新连接,报 `FATAL: the database system is shutting down`),不是进程
+  完全没反应,只是没有真正完成关闭流程。
+- **原因**:没有深挖到底(不确定是 CNPG 自己的 shutdown 钩子卡住,还是
+  这台机器磁盘 I/O 慢导致 checkpoint flush 慢),但确认了一个关键背景:
+  CNPG 默认的 `terminationGracePeriodSeconds` 是 **1800 秒(30 分钟)**
+  ——`kubectl delete pod`(不加 `--force`)默认会一直等到这个宽限期
+  结束才会强制杀掉,这台机器上单实例、数据量很小的 Postgres 实测都能
+  卡这么久,不是配置错误导致的异常长等待,是这个默认值本来就很宽松。
+- **处理**:`kubectl delete pod <name> -n <ns> --grace-period=0 --force`
+  跳过优雅关闭直接强杀。Postgres 自身的 WAL 崩溃恢复机制是为这种场景
+  设计的,不是赌运气——实测这台机器上新 pod 23 秒就变成 `1/1 Ready`、
+  Cluster 状态回到 healthy,真实数据(`keycloak.user_entity` 表的行数)
+  核对过和崩溃前一致,没有丢失或损坏。全程也确认了下游组件
+  (Keycloak/Hive Metastore)的 pod 重启次数在这次操作前后没有变化,
+  说明它们的连接重试机制扛住了这段 Postgres 不可用的窗口,没有级联
+  故障。
+- **教训**:CNPG(或者任何设了很长 `terminationGracePeriodSeconds` 的
+  有状态组件)卡在 `Terminating` 不一定是真的出问题了,先查一下这个
+  字段的值,别死等——但也别一遇到"卡住"就本能地强杀,Postgres 这类
+  数据库能这么干是因为它有崩溃恢复机制托底,是这次先确认了这一点才
+  敢这么做,不是所有卡在 `Terminating` 的组件都能安全地这样处理。

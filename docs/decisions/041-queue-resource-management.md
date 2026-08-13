@@ -109,3 +109,22 @@ autoscaler 之后,这几档优先级语义依然适用,届时再叠加真正的�
 确认 `jupyterhub` 命名空间原有的 pod(包括没有独立配 requests 的
 `continuous-image-puller`)在配额上线后重新创建时,靠 LimitRange 补上
 默认值,没有被拒绝创建。测试用的临时 pod 已清理。
+
+`priorityClassName` 加到 Postgres(CNPG Cluster)之后,验证需要真的
+重建一次 pod 才能让字段生效——`kubectl delete pod postgres-cnpg-1`
+过程中意外撞上一个真实问题:**CNPG 默认的 `terminationGracePeriodSeconds`
+是 1800 秒(30 分钟),这次实测这个 pod 卡在 `Terminating` 超过 18 分钟
+没有真正退出**(`crictl logs` 能看到 postgres 进程本身已经收到停止信号、
+持续拒绝新连接报 `the database system is shutting down`,但迟迟没有
+完成关闭)——根因没有深挖(不确定是 CNPG 的 shutdown 钩子本身卡住,还是
+这台机器磁盘 I/O 慢导致 checkpoint flush 慢),不重要,重要的是恢复
+手段:`kubectl delete pod ... --grace-period=0 --force` 跳过优雅关闭
+直接强杀,CNPG 立刻拉起新 pod,**Postgres 自身的 WAL 崩溃恢复机制在
+23 秒内就让新 pod 变成 `1/1 Ready`、Cluster 状态回到 healthy**——
+真实数据完整性用 `keycloak.user_entity` 表核对过(3 条用户记录,和
+崩溃前一致),`\l` 确认所有库都在。全程盯着看了一遍下游组件
+(Keycloak/Hive Metastore)有没有被这次意外的 20 分钟 Postgres 不可用
+连带出问题——两边的 pod 重启次数在这次操作前后没有变化,说明连接层的
+重试机制扛住了这段窗口,没有级联故障。这个"CNPG pod 删除后卡在
+Terminating 很久,强制删除 + 崩溃恢复是安全的兜底手段"的教训已经补进
+`docs/operations/troubleshooting.md`。
