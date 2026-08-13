@@ -12,9 +12,26 @@
 # 这条路走不通。改成在集群 DNS 层面一次性解决,所有 pod 都能解析,不用每个
 # chart 单独想办法。
 #
-# 全部指向 ingress-nginx-controller 的 ClusterIP——和浏览器走同一个 Ingress
+# 全部指向 ingress-nginx-controller 这个 Service——和浏览器走同一个 Ingress
 # 入口,只是浏览器经 127.0.0.1,pod 内部经集群网络到达同一个 Service。
 # cloud-full/prod 用真实 DNS 后,这个 ConfigMap 整个删掉。
+#
+# 2026-08-13 推倒重建测试实测踩到的真实坑:这里原来是硬编码
+# ingress-nginx-controller 的 ClusterIP 字面量(`10.43.102.204`)——
+# ClusterIP 是集群创建时按 Service CIDR 分配的,不是固定不变的值,重建
+# 集群之后 ingress-nginx-controller 分到了一个新的 ClusterIP
+# (`10.43.157.123`),这份写死旧 IP 的 ConfigMap 完全没跟着变,导致
+# ArgoCD/Trino/Superset/OpenMetadata/MLflow/Argo Workflows 这些做 OIDC
+# discovery 的组件全部连超时(`curl` 直接确认过:DNS 解析"成功"但解出来
+# 的 IP 是废的,TCP connect 5 秒超时)——是那种平时改动配置根本不会触发、
+# 只有整个集群重建才会暴露的坑。
+#
+# 改用 `rewrite name ... answer auto` + `kubernetes` 插件:把
+# *.local-lite.test 的查询在内部重写成
+# ingress-nginx-controller.ingress-nginx.svc.cluster.local 这个稳定的
+# k8s Service DNS 名字,交给 kubernetes 插件按当前实际的 ClusterIP 解析,
+# `answer auto` 让返回给客户端的记录名字自动换回原本查询的域名——服务
+# 的 ClusterIP 不管怎么变、集群重建几次,这里都不用跟着改。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,11 +47,9 @@ data:
   # *.local-lite.test 的查询路由到这个 block。
   local-lite.server: |
     local-lite.test:53 {
-      hosts {
-        10.43.102.204 argocd.local-lite.test
-        10.43.102.204 keycloak.local-lite.test
-        10.43.102.204 grafana.local-lite.test
-        10.43.102.204 trino.local-lite.test
-        fallthrough
+      rewrite name regex (.*)\.local-lite\.test\.$ ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+      kubernetes cluster.local in-addr.arpa ip6.arpa {
+        pods insecure
+        fallthrough in-addr.arpa ip6.arpa
       }
     }
