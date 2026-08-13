@@ -1,7 +1,7 @@
 # 038. CloudNativePG 评估:给共享 Postgres 找 HA 升级路径
 
-- 状态: 已采纳,**operator 已装、单实例测试 Cluster 已验证,真正的迁移
-  (切现有共享实例)还没做**(2026-08-13)
+- 状态: 已采纳,**已完成实际迁移和切流量**(2026-08-13,用户在场安排的
+  窗口,见文末"实际迁移记录")
 
 ## 背景
 
@@ -51,15 +51,93 @@ Helm chart 的 `crds.create` 关掉,避免同一份资源被两条路径重复�
 - 测试完已经删除(`kubectl delete -f` 那个一次性 Cluster 定义),operator
   本身保留,为后续迁移做准备。
 
+## 实际迁移记录(2026-08-13,用户在场)
+
+评估完成后,用户明确表示"反正都要做,不用管优先级",在场安排了这次
+迁移。切流量这个动作本身触发了 Claude Code 权限分类器的拦截(连续拦了
+两次:一次是给 `postgres` 这个 ArgoCD Application 触发 sync,一次是同一个
+动作的重试),按规则停下来跟用户说清楚在做什么、为什么需要这个权限,
+用户确认后由用户自己执行了那条 `kubectl patch` 命令触发同步——高风险
+动作最终还是要经过人明确点头这一步,不是"之前说过随便做"就能一路做到底。
+
+### 数据迁移:两轮 pg_dumpall/restore,把"最新鲜"这件事当真
+
+第一轮 dump/restore 完成后,又等了一段时间(中间在处理其他事),担心
+这段时间里旧实例可能有新写入,于是在真正切流量前又做了一轮:先
+`DROP DATABASE`(只删数据库,不删角色,重跑 dump 时角色相关的
+`CREATE ROLE` 报"already exists"是预期的良性冲突)、再从旧实例重新
+`pg_dumpall`、重新 restore 一遍,把"最后一次快照"和"真正切流量"之间
+的时间窗口压到最小。恢复后用真实数据核对过(`keycloak.user_entity` 的
+行数和内容),不是只看 `pg_dumpall`/`psql` 命令退出码是 0 就当完事。
+
+### 切流量机制:ExternalName 别名,不是自己重写 selector
+
+一开始想直接把 `postgres` 这个 Service 的 selector 从
+`app: postgres`(老 StatefulSet)改成手写的 `cnpg.io/cluster: postgres-cnpg`
++ `role: primary`——**这里写错了一次**:CNPG 打在当前主实例 pod 上的
+label 键名是 `cnpg.io/instanceRole`,不是 `role`(用
+`kubectl get svc postgres-cnpg-rw -o jsonpath='{.spec.selector}'` 查
+CNPG 自己生成的 Service 才发现这个键名不对)。与其自己维护一份"如何
+识别当前主实例"的 selector 逻辑(未来 CNPG 换了 label 方案会静默失效),
+改用 `type: ExternalName` 直接别名到 CNPG 自己生成、自己维护的
+`postgres-cnpg-rw` 这个 Service——这部分逻辑完全交给 CNPG 维护,故障
+转移时主实例变了,`postgres-cnpg-rw` 自动跟着变,这一层不用管。真正
+执行前用一个临时 Service 名字实测过 ExternalName 在这个集群上确实能
+正确解析 DNS + 建立连接,不是先猜后套。
+
+老的 StatefulSet 切完流量后没有立刻删除,只是不再接收流量(Service
+改了 selector/type 之后自动生效)——数据还在它的 PVC 里,是最快的回滚
+手段。
+
+### 切完流量之后踩到的真实 bug:CNPG 默认 TLS 1.3,老 JDBC 驱动握手失败
+
+切完流量、重启 `keycloak-keycloakx`/`hive-metastore` 让它们真正用上新
+连接(而不是继续用切流量前就已经建立的老连接——这一点专门确认过,
+DNS 解析改了不代表已经建立的 TCP 连接会自动切换,必须重启才能验证"真
+的切过去了"而不是"看起来切了"),Keycloak 很快恢复正常,但
+Hive Metastore 陷入崩溃重启循环。
+
+排查:`crictl exec` 进容器看 `schematool -info` 的输出,报
+`SSL error: Received fatal alert: protocol_version`——不是被拒绝、
+重试明文连接失败,是 SSL 握手本身失败,`schematool` 因此判定"schema 不
+存在"要重新 `initSchema`(所幸 `apps/hive-metastore/manifests/
+deployment.yaml` 里那层"先探测 schema 是否已存在"的幂等检查生效,
+`initSchema` 卡在 SSL 握手这步就失败了,没有真的跑到会冲突/破坏数据的
+那一步——数据全程没有损坏,`kubectl exec ... psql ... SELECT` 直接查
+证实过)。
+
+查证:`SHOW ssl_min_protocol_version` 确认 CNPG 默认给的值是
+`TLSv1.3`——比大多数生产环境的默认值都严格。旧的 `postgres:16.6` 官方
+镜像默认没开 SSL,现有所有组件的连接方式从来没考虑过这一层,不会只有
+Hive Metastore 会踩到,只是它先撞上了(apache/hive:3.1.3 镜像自带的
+JDBC 驱动比较老)。修法:在 Cluster 的 `spec.postgresql.parameters` 里把
+`ssl_min_protocol_version` 降到 `TLSv1.2`(仍然是加密连接,只是对老
+客户端更宽容),这是**服务端一次性配置**,不用逐个组件的连接串加
+`sslmode=disable`。改完不需要重启 Postgres(reload 级别的参数),
+`SHOW ssl_min_protocol_version` 确认生效后,`hive-metastore` 的 pod
+不用手动干预,几分钟内自己从崩溃重启循环里恢复,`schematool -info`
+探测正确识别出 schema 已存在,启动了真正的 Hive Metastore 服务
+(日志里能看到 "Starting Hive Metastore Server",不是卡在探测步骤)。
+
+**教训**:换 Postgres 发行版/管理方式的时候,不能只关注"数据能不能
+迁移过去"这一个维度——连接层面的默认行为(这次是 TLS 最低版本)也可能
+和旧环境不一样,而且不一定在迁移那一刻就暴露,是"服务重启、真正走
+新连接"的时候才会暴露,验证清单里要包含这一类"连接协议层面的默认值
+差异",不只是"数据对不对"。
+
+### 最终验证
+
+切流量 + 修完 SSL 问题之后:
+- `keycloak-keycloakx-0`、`hive-metastore` 两个 pod 都是 `1/1 Running`,
+  重启次数不再增长。
+- 真实业务检查:外部走 `keycloak.local-lite.test`(和浏览器同一条路径)
+  请求 OIDC discovery 端点,`200 OK`——这个端点要读 Postgres 里的 realm
+  配置,能返回正确内容证明不是"进程活着但读不到数据"这种假健康。
+- 老的 `postgres-0`(StatefulSet)全程没有被删除,保留作为回滚安全网。
+- ArgoCD 全部 Application 保持 `Synced`/`Healthy`。
+
 ## 后果
 
-- **真正的迁移(切现有共享实例)这次没做**,评估的是"CNPG 这条路能不能
-  走通",不是"已经切过去了"。迁移涉及:建一个新的 HA Cluster(至少
-  2-3 副本)、把现有数据(`pg_dumpall`,ADR-033 已经验证过备份/恢复机制
-  真实可用)导进去、把 Keycloak/Hive Metastore/MLflow/Airflow/Superset
-  等所有组件的连接串/Secret 逐个切过去、验证、最后下线旧实例——这是
-  牵一发动全身的动作(几乎所有组件都连着这个共享实例),需要用户在场
-  安排一个可以接受短暂中断的窗口,不适合无人监督执行。
 - **这台本机大概率跑不起真正的 HA(2-3 副本)配置**——单实例测试已经
   接近现有 Postgres 的资源画像,3 副本 HA 会是现在的 2-3 倍开销,加上
   WAL 归档/备份组件的额外开销,`local-lite` 这台 10GB 内存的机器上,
@@ -73,3 +151,15 @@ Helm chart 的 `crds.create` 关掉,避免同一份资源被两条路径重复�
   同一件事,真正迁移到 CNPG 的时候需要决定留哪一个,不是并存。
 - 没有评估 CNPG 的 Pooler(内置 PgBouncer 连接池)要不要用——现在的
   组件都是直连,连接数还没到需要连接池的规模。
+- **老的 `postgres-0` StatefulSet 还没有正式下线**,切完流量后刻意保留
+  作为回滚安全网(见上面"实际迁移记录")。等确认新实例稳定运行一段
+  时间之后,需要单独清理:删除 `apps/postgres/manifests/statefulset.yaml`
+  和 `init-configmap.yaml`(数据已经通过 `pg_dumpall`/restore 迁移完整,
+  这两个文件的作用已经被 CNPG Cluster 取代),释放它占用的 PVC 存储空间。
+- MLflow/OpenMetadata/Superset/Airflow 这几个目前是 park 状态的组件,
+  还没有实际验证过它们连新的 CNPG 实例(包括这次发现的 TLS 版本问题)
+  没有问题——按"迟早会被拉起来"的原则,`platform/network-policies/
+  manifests/postgres.yaml` 的允许列表已经覆盖了它们的 namespace,
+  `ssl_min_protocol_version` 的修复也是服务端全局生效,理论上应该没
+  问题,但没有真的拉起来跑一遍验证过,等这几个组件下次被拉起来时需要
+  留意。
