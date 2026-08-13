@@ -163,3 +163,18 @@ JDBC 驱动比较老)。修法:在 Cluster 的 `spec.postgresql.parameters` 里�
   `ssl_min_protocol_version` 的修复也是服务端全局生效,理论上应该没
   问题,但没有真的拉起来跑一遍验证过,等这几个组件下次被拉起来时需要
   留意。
+
+  **2026-08-13 补充:MLflow 已验证。** un-park 后真实调用 REST API
+  (`POST /api/2.0/mlflow/experiments/create` + `search`)确认:能正常
+  写入新数据(拿到新 `experiment_id`),旧数据(迁移前就有的
+  `demo-experiment`/`demo-classification` 等)完整保留,psycopg2 连
+  CNPG 没有像 Hive 的老 JDBC 驱动那样撞上 TLS 协议版本问题。验证过程中
+  顺带发现并修复了一个和 CNPG 本身无关、但同一批组件共用的真实 bug:
+  `create-db-job.yaml` 这个模板(mlflow/openmetadata/keycloak-db-init/
+  airflow/superset 五个组件共用同一套模式)会在"刚创建的 pod 首次连接
+  Postgres"这个已知延迟窗口里把 `backoffLimit` 耗尽而彻底失败(不是
+  等一下自己会好,是 4 次重试全灭),因为每次重试都是全新 pod、各自
+  重新踩一次同一个延迟——已经给全部 5 个组件加上 `pg_isready` 重试
+  循环(和 ADR-033 补充里 `postgres-backup` 的修法同一个原则),
+  OpenMetadata/Airflow/Superset 还没有实际验证但用的是同一个模板,
+  等它们下次被拉起来时应该会直接受益。
