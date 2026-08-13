@@ -113,6 +113,23 @@ spec:
             # 每个 curl 都补了 `-m`(总超时秒数)。
             - name: fetch-kubectl
               image: python:3.12-slim
+              # 2026-08-13 colima 重启之后补的:这个 initContainer 的
+              # apt-get 一直没配代理(当初以为"dl.k8s.io 不需要代理"这条
+              # 结论顺带覆盖了 apt-get,其实 apt-get 连的是 deb.debian.org,
+              # 完全是另一个目的地,没有任何理由假设它不需要代理)。之前一直
+              # "凑巧能用"是因为直连 deb.debian.org 大部分时候能通,直到这次
+              # colima 重启后连续 3 次都卡死在 `/usr/lib/apt/methods/http`
+              # (crictl exec 进容器用 /proc/*/cmdline 实测确认,不是猜的;
+              # Acquire::http::Timeout 是空闲超时,连接如果在极慢地收数据、
+              # 不是完全没反应,不会触发)。sync 容器(下面)一直有这几个
+              # env 、apt-get 也一直很稳定,直接照抄。
+              env:
+                - name: HTTP_PROXY
+                  value: "http://192.168.5.2:1087"
+                - name: HTTPS_PROXY
+                  value: "http://192.168.5.2:1087"
+                - name: NO_PROXY
+                  value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
               command:
                 - sh
                 - -c
