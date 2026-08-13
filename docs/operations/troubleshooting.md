@@ -464,3 +464,34 @@
   卡在"为什么这个选项不管用"上深挖太久**——三次里两次都是不管用的,
   与其排查 ArgoCD 内部机制,不如直接跳到"摘出 Helm 管理范围、走一次性
   脚本"这个总是有效的方案,省时间。
+
+### `apt-get install` 卡死不动,`Acquire::Retries` 不管用:apt 自己的 "delayed item" 重试队列是另一套机制
+
+- **现象**:`apt-get install` 挂着不动,`crictl exec` 进容器用
+  `/proc/*/cmdline` 看,进程还在 `/usr/lib/apt/methods/http` 这个子进程
+  里,和"CRD 太大"、"kubectl logs 报 Privoxy Error"这几条不是同一类
+  问题——已经加了 `Acquire::http::Timeout`/`Acquire::Retries` 这几个选项
+  (见 `apps/iam-sync/manifests/cronjob.yaml` 的教训),理论上应该会按
+  重试次数失败退出,但实际上不会。
+- **原因**:用 `kubectl run --rm -i` 单独复现、把完整输出重定向落地(不要
+  用 `-qq`,或者至少留一份不加 `-qq` 的输出用于排查)才能看清楚:apt 在
+  某个具体包下载失败之后,会把它放进一个叫 "delayed item" 的内部重试
+  队列,一直刷 `W: Tried to start delayed item <包名> ..., but failed`,
+  这个循环**不受 `Acquire::Retries` 这个参数约束**——它是 apt pipelining/
+  并行下载机制里一个独立的子系统,和 `Acquire::http::Timeout`(单个 HTTP
+  请求的空闲超时)、`Acquire::Retries`(单个 URI 的重试次数)都不是一回事,
+  加再多这两个选项也管不到这个队列。哪个具体包会触发这个问题看起来是
+  偶发的(这次是 `perl`),不是固定复现某一个包,大概率和当时那个包的
+  连接/传输状态有关,不值得深究"为什么偏偏是这个包"。
+- **处理**:不追究 apt 内部这个机制的细节,直接在外面套一层
+  `timeout N`(比如 `timeout 90 apt-get ... install ...`),配合脚本本身
+  的 `set -e`,让整个命令在合理时间内快速失败退出,而不是无限期挂着。
+  这样一次性 Job/CronJob 的正常重试机制(`backoffLimit`)才有机会在
+  `activeDeadlineSeconds` 这个大限之内真正多试几次,而不是一次尝试就把
+  整个时间窗口耗光在一个注定要失败的包上。
+- **教训**:这类"看着像网络卡住,加了标准的 HTTP 超时选项却没用"的情况,
+  不要预设是网络层的问题、也不要预设是自己漏配了哪个 apt 选项——先把
+  完整、不省略的日志/进程状态拿到手(`crictl exec` 直接看 `/proc`,或者
+  临时去掉 `-qq`/加输出重定向到文件),再判断问题到底出在哪一层。这次
+  一开始猜错了方向(以为是 initContainer 没配代理),多花了一轮才找到
+  真正原因。
