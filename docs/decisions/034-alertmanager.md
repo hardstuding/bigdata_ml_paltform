@@ -58,3 +58,36 @@ persistence(和这个项目 local-lite 阶段其他非核心数据一致的取�
 - `defaultRules` 覆盖的是通用 K8s 层面的问题(Pod 崩溃、Job 失败、资源
   紧张),不覆盖这个项目自己的业务语义(比如"Trino 查询失败率异常"这类),
   这类自定义告警规则还没有,等真的需要的时候再加。
+
+## 2026-08-13 补充:预留多渠道通知配置(还没激活)
+
+用户要求:邮箱、企业微信必须最终接上;飞书、Slack、其他主流办公/协作
+软件(钉钉、Teams、Telegram 等)尽量都覆盖,"像很多开源工具一样"。同时
+明确这几个渠道现在都**不需要真的配到能收到通知**,不用测试,先把结构
+预留好、以后需要哪个填真实凭据就能生效即可。
+
+按这个要求,在 `platform/apps/kube-prometheus-stack.yaml` 的
+`alertmanager.config.receivers` 里加了一大段**全部注释掉**的 receiver
+模板(邮箱/企业微信/Slack 各给了一份可直接抄的配置,`route` 没有指向
+任何一个),对现在"能查不推送"的现状零影响——ArgoCD 同步这个文件不会
+有任何实际行为变化,纯文档性质的改动。
+
+- 邮箱(`email_configs`)、企业微信(`wechat_configs`)、Slack
+  (`slack_configs`)都是 Alertmanager 原生支持的渠道,不需要额外组件,
+  模板已经给好,激活只需要填真实凭据(敏感值走 Secret +
+  `alertmanagerSpec.secrets` 挂载 + `_file` 字段引用,不直接写进 Git)、
+  再给 `route.routes` 加一条匹配规则。
+- 飞书(Feishu/Lark)**没有** Alertmanager 原生 receiver——它的"自定义
+  机器人"webhook 要求的 JSON 格式和 Alertmanager 发出的 webhook
+  payload 不兼容,需要一个小的转换服务做格式转换才能真正用起来,不是
+  填几个字段的事,这次只记录了这个结论,没有实现这个转换服务。
+- 钉钉的自定义机器人和飞书是同一类情况(格式不兼容、需要转换服务);
+  Teams/Telegram/Discord 有 Alertmanager 原生 receiver,和邮箱/企业
+  微信/Slack 是同一个模式,真要接入时照抄模板改字段即可。
+- 电话/语音告警评估过(见更早的讨论):没有现成的免费自建方案,通常要接
+  商用按次计费的语音 API(阿里云语音服务/Twilio 一类),这次用户没有
+  这类账号,不在预留范围内,如果以后有对应账号可以再补。
+- 之所以不逐个渠道都预写模板(比如钉钉/Teams/Telegram 都还没写):这类
+  "没人验证过是否正确"的死配置攒多了本身是一种负债,等真的要用某个
+  渠道时再照着已有模板抄一份、顺手验证一次,比现在批量预写但从来没跑
+  通过更可靠。

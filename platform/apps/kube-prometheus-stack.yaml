@@ -50,6 +50,71 @@ spec:
                     - alertname = "Watchdog"
             receivers:
               - name: "null"
+              # ============================================================
+              # 2026-08-13 预留:邮箱/企业微信/Slack/飞书等通知渠道(见
+              # ADR-034"预留通知渠道"一节)。用户明确要求先把结构搭好,现在
+              # 不需要真的能收到通知——下面全部注释掉,route 也没有指向
+              # 它们,对现在"能查不推送"的现状(ADR-034)零影响。这是
+              # "照抄可用、换成真实凭据就生效"的模板,不是随手写的占位符。
+              #
+              # 激活步骤(以任意一个为例):
+              #   1. 取消对应 receivers 条目的注释,REPLACE_ME 换成真实值;
+              #      密码/token 类敏感值不要直接写在这个文件里——建一个
+              #      Secret,在 alertmanagerSpec.secrets 里挂载,用下面
+              #      标了 _file 后缀的字段引用挂载路径(和这个仓库其他敏感
+              #      凭据"不进 Git 明文"的处理方式一致)。
+              #   2. 在上面 route.routes 里加一条 matchers 规则,receiver
+              #      指到对应渠道名字——只在 receivers 里配、不在 route 里
+              #      指过去,不会有任何告警真的路由过去。
+              #
+              # - name: "email"
+              #   email_configs:
+              #     - to: "REPLACE_ME@example.com"
+              #       send_resolved: true
+              #   # smarthost/from/auth 是全局设置,需要在这个 config 顶层
+              #   # (和 route/receivers 同级)加一段:
+              #   #   global:
+              #   #     smtp_smarthost: "smtp.example.com:587"
+              #   #     smtp_from: "alertmanager@example.com"
+              #   #     smtp_auth_username: "REPLACE_ME"
+              #   #     smtp_auth_password_file: /etc/alertmanager/secrets/<secret名>/<key名>
+              #
+              # - name: "wechat"
+              #   # 企业微信是 Alertmanager 原生支持的渠道(wechat_configs),
+              #   # 不需要额外的转换服务。corp_id/agent_id 在企业微信管理
+              #   # 后台"应用管理"里创建一个自建应用拿到,api_secret 是该
+              #   # 应用的 Secret。
+              #   wechat_configs:
+              #     - corp_id: "REPLACE_ME"
+              #       api_secret_file: /etc/alertmanager/secrets/<secret名>/<key名>
+              #       agent_id: "REPLACE_ME"
+              #       to_user: "@all"
+              #       send_resolved: true
+              #
+              # - name: "slack"
+              #   # Slack incoming webhook URL,在 Slack 里建一个
+              #   # "Incoming Webhook" App 拿到。
+              #   slack_configs:
+              #     - api_url_file: /etc/alertmanager/secrets/<secret名>/<key名>
+              #       channel: "#alerts"
+              #       send_resolved: true
+              #
+              # 飞书(Feishu/Lark)没有 Alertmanager 原生 receiver——飞书
+              # "自定义机器人"webhook 要求的 JSON 格式和 Alertmanager 发出
+              # 的 webhook payload 不兼容,需要一个小的转换服务(接收
+              # webhook_configs 发来的请求、转换格式、转发给飞书机器人的
+              # webhook)才能真正用起来,不是填几个字段就行——真要激活时
+              # 需要额外部署这个转换服务,这次预留范围里先不展开实现。
+              #
+              # 其他主流办公/协作软件(钉钉、Microsoft Teams、Telegram、
+              # Discord 等):大部分和 Slack/企业微信一样有 Alertmanager
+              # 原生 receiver(msteams_configs/telegram_configs/
+              # discord_configs),或者和飞书一样需要走 webhook_configs +
+              # 一个转换服务(钉钉自定义机器人的格式也和 Alertmanager 原生
+              # webhook 不兼容)。真要接入哪个,照上面的模板抄一份改字段
+              # 即可,这次不逐个预写,等真的要用再加,避免维护一堆没人验证
+              # 过是否正确的死配置。
+              # ============================================================
         # k3s 把 controller-manager/scheduler/kube-proxy 内置在同一个二进制
         # 里,不像标准 kubeadm 集群那样有独立的、chart 期望的 metrics
         # 端口可以抓——这三个开着只会产生"Down"假阳性(实测确认过:

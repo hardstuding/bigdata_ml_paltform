@@ -44,8 +44,17 @@ spec:
             - -c
             - |
               set -e
-              apt-get update -qq && apt-get install -y -qq git >/dev/null
-              pip install --quiet flask
+              # 2026-08-13 加固:同一个 apt-get 卡死的坑再次踩到(见
+              # apps/iam-sync/manifests/cronjob.yaml 的注释——apt 自己的
+              # "delayed item" 重试队列不受 Acquire::Retries 约束,会卡死
+              # 循环,不受普通超时选项控制)。这次是重启这个 Deployment 去
+              # 生效新配的 GIT_TOKEN Secret 时实测复现:apt-get update 卡住
+              # 不动超过 9 分钟(`crictl exec` 进容器确认一条 ESTABLISHED
+              # 的 TCP 连接一直不传数据,不是慢,是真的卡死),外面套
+              # `timeout -k 10 90` 是同一个已验证过的修法。
+              timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+              timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
+              pip install --quiet --timeout 30 flask
               python3 /src/app.py
           env:
             - name: DB_PATH
