@@ -32,6 +32,15 @@ TLS 握手超时、整个集群一度失联,靠重启 colima 才恢复。
 - **Kafka(operator + KRaft 单节点集群)**:再次验证,`Kafka` CR
   `READY: True`,真实创建了一个 topic、生产+消费一条消息,完整走通,
   验证完重新 park。
+- **Trino(+TLS)**:验证时顺带发现一个真实缺口——`hive-metastore` 自
+  ADR-035 推广 NetworkPolicy 以来从来没有配过任何 ingress 允许规则,
+  一直被 default-deny 挡着,查 `SHOW SCHEMAS FROM iceberg` 直接报连接
+  失败。已经在 `platform/network-policies/manifests/postgres.yaml` 里
+  补上 trino/spark-operator/airflow 三个消费方的 9083 端口规则。修完
+  之后真实查询验证通过:`SHOW TABLES`/`SELECT count(*)` 都能读到迁移
+  前就有的真实数据(`iceberg.demo.orders` 10 行),Hive Metastore → MinIO
+  这条链路完整走通,liveness probe 那个已知坑(`scripts/07-fix-trino-
+  liveness-probe.sh`)也照常跑了一遍。验证完重新 park。
 
 ## 怎么重新启用
 
