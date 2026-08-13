@@ -3,9 +3,18 @@
 ## Postgres
 
 见 ADR-033。共享 Postgres 实例(Keycloak/Hive Metastore/MLflow/Airflow/
-Superset 共用)每天 02:00 UTC 由 `apps/postgres-backup/manifests/cronjob.yaml`
-这个 CronJob 用 `pg_dumpall` 整体备份,传到 MinIO 的 `backups/postgres/`
-路径下,保留最近 14 天。
+Superset 共用,2026-08-13 起由 CloudNativePG operator 管理,见 ADR-038,
+但备份机制本身不受影响——CronJob 照样是连
+`postgres.data.svc.cluster.local` 这个域名做逻辑备份,不关心背后是
+StatefulSet 还是 CNPG Cluster)每天 02:00 UTC 由
+`apps/postgres-backup/manifests/cronjob.yaml` 这个 CronJob 用
+`pg_dumpall` 整体备份,传到 MinIO 的 `backups/postgres/` 路径下,保留
+最近 14 天。
+
+**2026-08-13 真实事故**:曾经因为 `pg_dumpall | gzip > file` 这种写法在
+管道里悄悄吞掉失败,产出过一次 20 字节的空"备份"文件,Job 还报告成功
+——详细过程和修复见 ADR-033 的补充记录。教训是备份这类系统不能只信任
+Job/Pod 的退出码,要定期抽查产出物本身。
 
 恢复用 `scripts/restore-postgres-backup.sh`——不带参数列出所有可用备份,
 带上文件名会真的执行恢复(需要手动输入 `yes` 确认,这是刻意设计,恢复是
