@@ -428,3 +428,39 @@
   ls -la <path>` 进容器实际看一眼(不要只看宿主机上文件存不存在),符号
   链接指向哪里一目了然,比看 chart 文档去猜"是不是该开某个 mount 开关"
   快得多。
+
+### CRD 太大报 "annotations too long",`ServerSideApply=true` 不是每次都管用
+
+- **现象**:`CustomResourceDefinition.apiextensions.k8s.io "xxx" is invalid:
+  metadata.annotations: Too long: may not be more than 262144 bytes`。这
+  个仓库里至少踩到过三次,都是同一个根因:CRD 内嵌的 OpenAPI schema 太大,
+  ArgoCD 默认走 client-side apply 会把整份 manifest 写进
+  `kubectl.kubernetes.io/last-applied-configuration` 这个注解,超过 k8s
+  单个注解 262144 字节的硬限制。
+  - **kube-prometheus-stack**(`prometheuses.monitoring.coreos.com` 等):
+    加了 `ServerSideApply=true` **没用**,还是报一样的错("具体是 ArgoCD
+    内部哪个环节导致的还没深究" ——见本文件靠前的那一条)。
+  - **KServe**(`inferenceservices.serving.kserve.io`,ADR-027):加
+    `ServerSideApply=true` **有用**,官方文档也推荐这么做,这是唯一一次
+    这个选项真的解决了问题。
+  - **CloudNativePG**(`clusters.postgresql.cnpg.io` /
+    `poolers.postgresql.cnpg.io`,ADR-038):加了 `ServerSideApply=true`
+    **没用**,还是一样的错。
+- **结论**:`ServerSideApply=true` 值得先试(免费、不会有副作用),但**不能
+  假设它总能解决这类问题**——三次里只有一次真的管用,具体是 ArgoCD 处理
+  Helm chart `crds/` 目录这条路径本身不完全遵守这个 sync option、还是
+  CRD 大小已经超出 server-side apply 本身能处理的上限,这几次都没有深挖,
+  经验上也分不出规律(比如猜"越大的 CRD 越容易失败"目前看不出来,KServe
+  和 CNPG 的 CRD 大小同一个量级)。
+- **实际总是有效的处理**:把 CRD 从 Helm/ArgoCD 的管理范围里摘出去——
+  chart 的 `crds.enabled: false`(kube-prometheus-stack)或
+  `crds.create: false`(CloudNativePG),用一次性脚本
+  `kubectl apply --server-side --force-conflicts` 直接装(KServe 的
+  ClusterServingRuntime 走的是同一个"GitOps 这条路走不通,退回一次性
+  脚本"模式,虽然那个不是 annotations-too-long 这个具体问题,但处理思路
+  一样)。涉及脚本:`scripts/04-install-kube-prometheus-crds.sh`、
+  `scripts/16-install-cloudnative-pg-crds.sh`。
+- **教训**:遇到这个报错,先加 `ServerSideApply=true` 试一下,但**不要
+  卡在"为什么这个选项不管用"上深挖太久**——三次里两次都是不管用的,
+  与其排查 ArgoCD 内部机制,不如直接跳到"摘出 Helm 管理范围、走一次性
+  脚本"这个总是有效的方案,省时间。
