@@ -19,6 +19,7 @@ git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
 ./scripts/01-bootstrap-argocd.sh          # 需要代理才能出网的环境:NEEDS_LOCAL_PROXY=1 ./scripts/01-bootstrap-argocd.sh
 ./scripts/02-bootstrap-root-apps.sh
 ./scripts/04-install-kube-prometheus-crds.sh
+./scripts/16-install-cloudnative-pg-crds.sh
 kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application/keycloak --timeout=300s
 ./scripts/03-configure-keycloak.sh
 ```
@@ -116,6 +117,11 @@ git add -A && git commit -m "chore: 迁移仓库地址" && git push
 # 6. kube-prometheus-stack 的 CRD 太大,ArgoCD 应付不了,单独装一次
 #    (只在第一次装、或者升级这个组件版本时需要跑)
 ./scripts/04-install-kube-prometheus-crds.sh
+
+# 6.5 CloudNativePG 的 CRD(clusters/poolers 这两个太大,同样的坑,见
+#     ADR-038)也要单独装一次,不然 apps/definitions/postgres.yaml 这个
+#     Application 会一直卡在 Missing(`Cluster` 这个 kind 不存在)。
+./scripts/16-install-cloudnative-pg-crds.sh
 
 # 7. 等 keycloak Application Synced/Healthy 之后,建 platform realm +
 #    ArgoCD/Grafana 等组件的 OIDC client + 一个初始登录用户。SSO 能不能用
