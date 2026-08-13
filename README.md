@@ -178,4 +178,4 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 
 ## 当前状态
 
-Phase 0(平台底座)、Phase 1(湖仓核心)、Phase 2(数据工程:SeaTunnel → Iceberg → Airflow 调度 → Superset 看板)、Phase 3(AI/ML:JupyterHub/Argo Workflows/MLflow/KServe)核心链路均已验证;这台本机资源有限,验证过的组件按需收在 `pending-definitions/`,不是常驻全开。Kafka 单独验证过健康,还没接进端到端数据管道。企业级权限管理(组织架构同步、按组分角色)已落地,可插拔基础设施(Postgres/对象存储都已经推广到多个组件,见 ADR-030)持续推进中,细粒度数据权限(Trino 行列级)还没开始。完整的、持续更新的状态见 [`docs/architecture.md`](docs/architecture.md) 的路线图表格——这里不重复维护一份会过时的清单。
+Phase 0(平台底座)、Phase 1(湖仓核心)、Phase 2(数据工程:SeaTunnel → Iceberg → Airflow 调度 → Superset 看板)、Phase 3(AI/ML:JupyterHub/Argo Workflows/MLflow/KServe)核心链路均已验证;这台本机资源有限,验证过的组件按需收在 `pending-definitions/`,不是常驻全开。Kafka 单独验证过健康,还没接进端到端数据管道。企业级权限管理(组织架构同步、按组分角色)已落地,可插拔基础设施(Postgres/对象存储都已经推广到多个组件,见 ADR-030)持续推进中,细粒度数据权限(Trino 行列级)还没开始。共享 Postgres 已迁移到 CloudNativePG operator 管理(ADR-038),NetworkPolicy 推广到核心命名空间(ADR-035),每日自动备份 + 恢复演练验证过(ADR-033),Alertmanager 已打开(ADR-034)。"从零拉起整套服务"这条路径 2026-08-13 真的从空集群完整跑通过一次,不只是写在文档里(ADR-039)。完整的、持续更新的状态见 [`docs/architecture.md`](docs/architecture.md) 的路线图表格——这里不重复维护一份会过时的清单。
