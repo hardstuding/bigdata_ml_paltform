@@ -60,6 +60,58 @@ spec:
         - protocol: TCP
           port: 5432
 ---
+# 2026-08-13 补充(CloudNativePG 迁移,见 ADR-038):CNPG 的实例 pod 和
+# 老的 StatefulSet 用的是完全不同的一套 label(`cnpg.io/cluster=<name>`,
+# 不是 `app: postgres`),上面那条 `allow-consumers-to-postgres` 的
+# podSelector 匹配不到它,需要单独一条。而且这条不只是给"消费者"用的
+# 5432 端口——CNPG operator(在 cnpg-system 这个 namespace 里)要定期
+# 连实例 pod 的 8000 端口(status,容器自己声明的端口名,`kubectl get pod
+# ... -o jsonpath='{.spec.containers[0].ports}'` 确认过)上报健康状态,
+# 一开始漏了这条,新 Cluster 卡在
+# "Instance Status Extraction Error: HTTP communication issue"
+# 起不来(实测确认,不是猜的)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-consumers-and-operator-to-cnpg
+  namespace: data
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: postgres-cnpg
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 8000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: data
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mlflow
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openmetadata
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: superset
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: airflow
+      ports:
+        - protocol: TCP
+          port: 5432
+---
 # 这个命名空间里其他资源(比如 postgres-backup 这个 CronJob 起的 pod)
 # 不需要被别的东西连进来,不需要单独的 ingress 规则,default-deny 之后
 # 保持全拒绝就是对的——它们只是 Postgres 的消费者/维护者,不是被消费方。
