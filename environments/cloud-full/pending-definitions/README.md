@@ -41,6 +41,15 @@ TLS 握手超时、整个集群一度失联,靠重启 colima 才恢复。
   前就有的真实数据(`iceberg.demo.orders` 10 行),Hive Metastore → MinIO
   这条链路完整走通,liveness probe 那个已知坑(`scripts/07-fix-trino-
   liveness-probe.sh`)也照常跑了一遍。验证完重新 park。
+- **SeaTunnel(Zeta 单节点 Hybrid)**:`seatunnel-0` `1/1 Running`,真实
+  通过 REST API 提交了一个 FakeSource->Console 的作业,`jobStatus:
+  FINISHED`,source/sink 两边都确认处理了 5 行,是真的跑通了一次数据
+  同步,不是只看进程起没起来。验证完重新 park。
+
+至此这份清单里 Kafka/Trino/SeaTunnel 也都验证过了,一次只拉一个、验证完
+立刻 park,没有重演最早那次同时全开导致 OOM 的情况。Airflow 已经在
+[ADR-038](../../docs/decisions/038-cloudnativepg-evaluation.md) 里验证过
+连新 Postgres,同样留在这里是"按需 park"的常态,不是没验证过。
 
 ## 怎么重新启用
 
