@@ -24,6 +24,15 @@ TLS 握手超时、整个集群一度失联,靠重启 colima 才恢复。
   scheduler/triggerer/dag-processor 一直卡在等数据库迁移完成的 init 阶段,
   没有真正验证通。等重新启用时这部分要重新走一遍。
 
+**2026-08-13 补充(CloudNativePG 迁移之后,一次只拉一个、验证完就 park
+回去,没有重演这次同时全开导致 OOM 的情况)**:
+
+- **MLflow/OpenMetadata(+OpenSearch)/Superset/Airflow**:全部验证通过,
+  连新的 CNPG Postgres 实例正常,细节见 [ADR-038](../../docs/decisions/038-cloudnativepg-evaluation.md)。
+- **Kafka(operator + KRaft 单节点集群)**:再次验证,`Kafka` CR
+  `READY: True`,真实创建了一个 topic、生产+消费一条消息,完整走通,
+  验证完重新 park。
+
 ## 怎么重新启用
 
 有了 cloud-full 环境(云服务器或公司 IDC,内存建议 ≥32GB)之后:
