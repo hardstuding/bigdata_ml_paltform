@@ -113,16 +113,20 @@ spec:
             # 每个 curl 都补了 `-m`(总超时秒数)。
             - name: fetch-kubectl
               image: python:3.12-slim
-              # 2026-08-13 colima 重启之后补的:这个 initContainer 的
-              # apt-get 一直没配代理(当初以为"dl.k8s.io 不需要代理"这条
-              # 结论顺带覆盖了 apt-get,其实 apt-get 连的是 deb.debian.org,
-              # 完全是另一个目的地,没有任何理由假设它不需要代理)。之前一直
-              # "凑巧能用"是因为直连 deb.debian.org 大部分时候能通,直到这次
-              # colima 重启后连续 3 次都卡死在 `/usr/lib/apt/methods/http`
-              # (crictl exec 进容器用 /proc/*/cmdline 实测确认,不是猜的;
-              # Acquire::http::Timeout 是空闲超时,连接如果在极慢地收数据、
-              # 不是完全没反应,不会触发)。sync 容器(下面)一直有这几个
-              # env 、apt-get 也一直很稳定,直接照抄。
+              # 2026-08-13 colima 重启之后(用户重启了电脑)连续 3 次卡死,
+              # crictl exec 进容器看 /proc/*/cmdline 显示卡在
+              # `/usr/lib/apt/methods/http`,一开始怀疑是这个 initContainer
+              # 的 apt-get 没配代理(加了 HTTP_PROXY/HTTPS_PROXY,下面还留着,
+              # 无害、可能确实有帮助),但加完代理还是卡在同一个地方——用
+              # `kubectl run --rm -i` 单独起一个 pod 复现、这次让完整输出
+              # 落地才看清真正原因:apt 自己的 "delayed item" 重试机制卡死
+              # 循环,一直刷 `W: Tried to start delayed item ... perl ...
+              # but failed`(某一个具体包,这次是 perl,下载失败后进了这个
+              # 内部重试队列,不受 `Acquire::Retries` 这个选项约束,是 apt
+              # 一个独立的、不受这个参数控制的子系统,一直循环不放弃)。
+              # 修法是外面套一层 `timeout`,和这个脚本其他地方"网络操作必须
+              # 自带超时"是同一个原则,不追究 apt 内部这个机制为什么不听
+              # Acquire::Retries 的话——够用就行,不用把 apt 的重试语义摸透。
               env:
                 - name: HTTP_PROXY
                   value: "http://192.168.5.2:1087"
@@ -135,8 +139,8 @@ spec:
                 - -c
                 - |
                   set -e
-                  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
-                  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl git >/dev/null
+                  timeout 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+                  timeout 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl git >/dev/null
                   ARCH=$(uname -m)
                   case "$ARCH" in
                     x86_64) KARCH=amd64 ;;
@@ -167,6 +171,12 @@ spec:
               # 传完也行),只掐真正卡死不动的连接,和 apt-get/curl 那两处
               # 加固定秒数超时是同一个"网络操作必须自带超时"的原则,只是
               # git 自己提供了更贴切的机制,不需要外面再包一层。
+              #
+              # apt-get install 这行也套了 `timeout 90`——原因见上面
+              # fetch-kubectl 那个 initContainer 的注释(apt 自己的
+              # "delayed item" 重试队列不受 Acquire::Retries 约束,会话死
+              # 循环),这里是同一个命令、同一个镜像,没道理不会踩到同一个
+              # bug,提前一起加固。
               env:
                 - name: HTTP_PROXY
                   value: "http://192.168.5.2:1087"
@@ -180,8 +190,8 @@ spec:
                 - |
                   set -e
                   export PATH="/tools:$PATH"
-                  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
-                  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
+                  timeout 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+                  timeout 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
                   pip install --quiet --timeout 30 pyyaml
                   git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
                   cd /tmp/repo
