@@ -59,6 +59,17 @@ copy_secret() {
     echo "已存在,跳过: ${dst_ns}/${name}(复制自 ${src_ns})"
     return
   fi
+  # 2026-08-13 推倒重建测试时实测踩到的坑:在全新集群上,这个脚本比 ArgoCD
+  # 装的还早(见 README"从零拉起整套服务"的步骤顺序),spark-operator/
+  # seatunnel 这类命名空间是它们各自 Application 的 CreateNamespace=true
+  # 建的,这时候还不存在——直接 kubectl apply 会报 "namespaces ... not
+  # found" 让整个脚本中止。和下面 spark-operator/permission-request-app 的
+  # oauth2-proxy-secret 是同一个模式,跳过、等对应 Application 先同步一次、
+  # namespace 建出来之后重跑这个脚本(幂等,不会重复复制/覆盖)。
+  if ! kubectl get namespace "$dst_ns" >/dev/null 2>&1; then
+    echo "跳过: ${dst_ns}/${name}(namespace 还不存在,等对应 Application 先同步一次)"
+    return
+  fi
   kubectl -n "$src_ns" get secret "$name" -o json \
     | python3 -c "
 import json,sys
