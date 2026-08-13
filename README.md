@@ -178,6 +178,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 - [`docs/operations/backup.md`](docs/operations/backup.md) —— 备份策略
 - [`docs/operations/tuning.md`](docs/operations/tuning.md) —— 哪些参数预期要按自己情况调,调哪个文件
 - [`docs/operations/onboarding-offboarding.md`](docs/operations/onboarding-offboarding.md) —— 新人怎么拿到权限、人离开时怎么收回,这套机制覆盖到哪、覆盖不到哪
+- [`environments/cloud-full/README.md`](environments/cloud-full/README.md)、[`environments/prod/README.md`](environments/prod/README.md) —— 接入 cloud-full/prod 硬件时的资源规划参考(不是自动生效的配置,现状和取舍原因见文档开头)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 想贡献代码/提 PR,先看这个
 - [`SECURITY.md`](SECURITY.md) —— 安全问题怎么报告,当前已知的安全假设
 
