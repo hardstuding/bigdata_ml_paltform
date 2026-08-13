@@ -1,5 +1,7 @@
 # bigdata_ml_paltform
 
+[![Validate](https://github.com/hardstuding/bigdata_ml_paltform/actions/workflows/validate.yml/badge.svg)](https://github.com/hardstuding/bigdata_ml_paltform/actions/workflows/validate.yml)
+
 Kubernetes-native 的 Data + AI 平台骨架:统一身份认证、GitOps 驱动的部署方式、按规模分级的环境画像(本机验证 → 云端集成 → 生产)。目标不是照抄一套 CDH,而是给还在用 YARN 时代大数据平台的团队一条能力对等、但运维模型现代化的迁移路径,同时兼容接入现有的遗留 Hadoop 集群做渐进迁移。
 
 ## 这个项目提供什么
@@ -176,6 +178,8 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 - [`docs/operations/backup.md`](docs/operations/backup.md) —— 备份策略
 - [`docs/operations/tuning.md`](docs/operations/tuning.md) —— 哪些参数预期要按自己情况调,调哪个文件
 - [`docs/operations/onboarding-offboarding.md`](docs/operations/onboarding-offboarding.md) —— 新人怎么拿到权限、人离开时怎么收回,这套机制覆盖到哪、覆盖不到哪
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 想贡献代码/提 PR,先看这个
+- [`SECURITY.md`](SECURITY.md) —— 安全问题怎么报告,当前已知的安全假设
 
 ## 当前状态
 
