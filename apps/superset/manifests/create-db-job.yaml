@@ -41,6 +41,15 @@ spec:
             - -c
             - |
               set -euo pipefail
+              # 见 apps/mlflow/manifests/create-db-job.yaml 的注释:同一个
+              # "刚创建的 pod 第一次连接 Postgres 有短暂延迟"的坑,每个
+              # backoffLimit 重试都是全新 pod、各自要重新等,容易把重试
+              # 次数耗尽——用 pg_isready 在同一个 pod 内先等到位。
+              for i in $(seq 1 10); do
+                pg_isready -h postgres -U postgres >/dev/null 2>&1 && break
+                echo "第 ${i} 次探测 postgres 未就绪,3 秒后重试" >&2
+                sleep 3
+              done
               psql -h postgres -U postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='superset'" | grep -q 1 \
                 || psql -h postgres -U postgres -c "CREATE USER superset WITH PASSWORD '${SUPERSET_DB_PASSWORD}';"
               psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='superset'" | grep -q 1 \

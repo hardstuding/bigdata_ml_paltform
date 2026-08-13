@@ -39,6 +39,19 @@ spec:
             - -c
             - |
               set -euo pipefail
+              # 2026-08-13 实测踩到的坑:un-park MLflow 时这个 Job 连续 4 次
+              # (backoffLimit 上限)都是 "Connection refused",不是 Postgres
+              # 没启动(postgres-cnpg 当时已经稳定跑了 3 小时多)——和
+              # apps/postgres-backup 那次一样,是"刚创建的 pod 第一次连接
+              # 有短暂延迟"这个模式,只是这次每次重试都是全新 pod、每个新 pod
+              # 各自都要重新等这个延迟,4 次(约 70 秒)加起来还没等过去,
+              # 直接把 backoffLimit 耗尽。用 pg_isready 在同一个 pod 内先
+              # 等到位,不依赖"换一个新 pod 重试"。
+              for i in $(seq 1 10); do
+                pg_isready -h postgres.data.svc.cluster.local -p 5432 -U postgres >/dev/null 2>&1 && break
+                echo "第 ${i} 次探测 postgres 未就绪,3 秒后重试" >&2
+                sleep 3
+              done
               psql -h postgres.data.svc.cluster.local -U postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='mlflow'" | grep -q 1 \
                 || psql -h postgres.data.svc.cluster.local -U postgres -c "CREATE USER mlflow WITH PASSWORD '${MLFLOW_DB_PASSWORD}';"
               psql -h postgres.data.svc.cluster.local -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='mlflow'" | grep -q 1 \
