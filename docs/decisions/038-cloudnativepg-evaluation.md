@@ -146,11 +146,32 @@ JDBC 驱动比较老)。修法:在 Cluster 的 `spec.postgresql.parameters` 里�
   好处是有了 operator 管理的自动化运维能力:自动备份、更规范的升级流程),
   真正体现 HA 价值要等接入 cloud-full/生产环境、有多个节点可以分布副本
   的时候。
-- 没有评估 CNPG 自带的备份能力(`Backup`/`ScheduledBackup` CRD,原生支持
-  对象存储)是否应该取代 ADR-033 那套手写的 CronJob 方案——两者做的是
-  同一件事,真正迁移到 CNPG 的时候需要决定留哪一个,不是并存。
-- 没有评估 CNPG 的 Pooler(内置 PgBouncer 连接池)要不要用——现在的
-  组件都是直连,连接数还没到需要连接池的规模。
+- **2026-08-13 补充:评估过 CNPG 自带的 Backup/ScheduledBackup,结论是
+  暂不采用。** 查了当前装的 CNPG 版本(1.30.0)和这台机器的实际情况:
+  - `method: volumeSnapshot` 直接不可行——这台机器的 StorageClass 是
+    `rancher.io/local-path`(local-path-provisioner),集群里根本没装
+    VolumeSnapshot 相关 CRD(`kubectl get volumesnapshotclass` 直接报
+    "server doesn't have a resource type"),没有 CSI 快照能力。
+  - `method: barmanObjectStore`(接 MinIO 这类对象存储做 WAL 归档 +
+    基础备份,支持任意时间点恢复 PITR)理论上可行,但 CNPG 1.26 起这
+    条路径已经从 operator 内置能力拆成一个独立的 Barman Cloud
+    plugin,要另外装一个 plugin 组件,不是改几行 Cluster 配置就行,
+    多一层运维复杂度。
+  - 现在这套手写 CronJob(ADR-033)已经经过两轮真实验证(备份+恢复
+    演练都跑通,还实测抓到过一次真实的静默失败并修复),只是逻辑备份
+    (`pg_dumpall`,粒度是"天",不是任意时间点),RPO 最坏情况丢一天
+    数据——对 local-lite 这个开发/测试阶段的平台可以接受,换 PITR
+    带来的价值(更小的 RPO)配不上多装一个 plugin 组件的复杂度。
+    结论:local-lite 阶段继续用现在这套,等接入 cloud-full/prod、
+    真的需要更小 RPO 的时候,再评估装 Barman Cloud plugin(那时候
+    大概率也会有支持 CSI 快照的存储,`volumeSnapshot` 方式也重新
+    可选)。
+- **2026-08-13 补充:评估过 CNPG 的 Pooler(内置 PgBouncer),结论是
+  暂不采用。** 现在所有组件都是直连 Postgres,连接数量级很小(个位数到
+  十几个常驻连接),远没到 Postgres 自己处理连接会成为瓶颈的规模,加一层
+  连接池目前是纯增加复杂度(多一个组件、连接串要改指向 Pooler 而不是
+  直接指向 Postgres)、没有对应收益。等接入 cloud-full/prod、并发连接数
+  真的上来之后再评估。
 - **2026-08-13 补充:老的 `postgres-0` StatefulSet 已正式下线。** 切完
   流量后刻意保留了一段时间作为回滚安全网,MLflow 验证通过、确认新实例
   稳定运行之后,用户明确同意清理(这是不可逆操作,提前问过):删除
