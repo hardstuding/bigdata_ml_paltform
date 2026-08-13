@@ -167,7 +167,16 @@ JDBC 驱动比较老)。修法:在 Cluster 的 `spec.postgresql.parameters` 里�
   问题,但没有真的拉起来跑一遍验证过,等这几个组件下次被拉起来时需要
   留意。
 
-  **2026-08-13 补充:MLflow 已验证。** un-park 后真实调用 REST API
+  **2026-08-13 补充:MLflow、OpenMetadata 已验证。**
+
+  OpenMetadata(Java/JDBC 客户端,和当初撞坑的 Hive Metastore 同一类
+  技术栈风险)un-park 后:`run-db-migrations` 这个 initContainer(Flyway
+  schema 迁移)对着新 CNPG 实例干净跑完,没有重复 Hive 那次的 TLS 协议
+  版本报错——推测是 OpenMetadata 打包的 PostgreSQL JDBC 驱动版本比较新,
+  原生支持 TLS 1.3,不像 Hive 那次的老驱动。主容器 `1/1 Running`,
+  `/api/v1/system/version` 返回 200,日志里没有任何 postgres/jdbc/ssl
+  相关报错。验证完按本机资源紧张的惯例重新 park 回去(OpenSearch + 
+  OpenMetadata 一起跑对内存压力不小)。 un-park 后真实调用 REST API
   (`POST /api/2.0/mlflow/experiments/create` + `search`)确认:能正常
   写入新数据(拿到新 `experiment_id`),旧数据(迁移前就有的
   `demo-experiment`/`demo-classification` 等)完整保留,psycopg2 连
