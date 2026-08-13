@@ -167,7 +167,8 @@ JDBC 驱动比较老)。修法:在 Cluster 的 `spec.postgresql.parameters` 里�
   问题,但没有真的拉起来跑一遍验证过,等这几个组件下次被拉起来时需要
   留意。
 
-  **2026-08-13 补充:MLflow、OpenMetadata、Superset 已验证。**
+  **2026-08-13 补充:MLflow、OpenMetadata、Superset、Airflow 已验证,
+  四个都过了,`park 状态的组件` 这份清单到此清空。**
 
   OpenMetadata(Java/JDBC 客户端,和当初撞坑的 Hive Metastore 同一类
   技术栈风险)un-park 后:`run-db-migrations` 这个 initContainer(Flyway
@@ -182,7 +183,19 @@ JDBC 驱动比较老)。修法:在 Cluster 的 `spec.postgresql.parameters` 里�
   `superset-init-db` 这个 chart 自带的 init Job 里 alembic 迁移干净跑完,
   日志里能看到"Admin user already exists, skipping"——确认迁移前的
   admin 账号数据完整保留,不是全新空库。主 pod `1/1 Running`,
-  `/health` 返回 200。验证完同样重新 park 回去。 un-park 后真实调用 REST API
+  `/health` 返回 200。验证完同样重新 park 回去。
+
+  Airflow(同样 psycopg2)un-park 后:`airflow-migrate-db`(自己手写的
+  普通 Job,不是 chart 的 hook,原因见 apps/airflow/manifests/
+  migrate-db-job.yaml 的注释)日志里明确一行"Database migration done!"。
+  webserver(api-server)/scheduler/dagProcessor/triggerer 全部
+  `Running`/`Ready`,健康检查 API 返回 200,直接查 Postgres 里的
+  `dag` 表确认之前配的 `seatunnel_device_events` 这条 DAG 记录还在,
+  不是空库。验证完重新 park 回去——这是四个里资源占用最重的一个
+  (webserver+scheduler+dagProcessor+triggerer 四个常驻组件),过程中
+  持续盯着 `free -h`,内存最紧张时可用还剩 2.5Gi,没有复现
+  2026-08-08 那次同时拉起多个重组件导致 VM 打满的情况(这次是一次
+  只拉一个、验证完立刻 park 回去,不是同时叠加)。 un-park 后真实调用 REST API
   (`POST /api/2.0/mlflow/experiments/create` + `search`)确认:能正常
   写入新数据(拿到新 `experiment_id`),旧数据(迁移前就有的
   `demo-experiment`/`demo-classification` 等)完整保留,psycopg2 连
