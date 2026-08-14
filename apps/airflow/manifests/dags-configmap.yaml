@@ -257,7 +257,6 @@ data:
         volume_mounts=[FEATURE_REPO_MOUNT],
         env_vars=MINIO_ENV,
         container_resources=CONTAINER_RESOURCES,
-        working_dir="/feature_repo",
         get_logs=True,
         is_delete_operator_pod=True,
         startup_timeout_seconds=300,
@@ -274,11 +273,15 @@ data:
         catchup=False,
         tags=["demo", "phase3.5", "feast", "feature-store"],
     ) as dag:
+        # KubernetesPodOperator 这个版本没有 working_dir 参数(实测 TypeError
+        # 才发现,inspect.signature 确认这个 provider 版本压根不支持),feast
+        # apply/materialize 又必须在包含 feature_store.yaml 的目录下跑,改用
+        # sh -c 手动 cd 到挂载点。
         apply = KubernetesPodOperator(
             task_id="feast_apply",
             name="feast-apply",
-            cmds=["feast"],
-            arguments=["apply"],
+            cmds=["sh", "-c"],
+            arguments=["cd /feature_repo && feast apply"],
             **BASE_KWARGS,
         )
 
@@ -288,8 +291,8 @@ data:
         materialize = KubernetesPodOperator(
             task_id="feast_materialize_incremental",
             name="feast-materialize-incremental",
-            cmds=["feast"],
-            arguments=["materialize-incremental", "{{ ts }}"],
+            cmds=["sh", "-c"],
+            arguments=["cd /feature_repo && feast materialize-incremental '{{ ts }}'"],
             **BASE_KWARGS,
         )
 
