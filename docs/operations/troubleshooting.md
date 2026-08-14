@@ -575,3 +575,51 @@
   字段的值,别死等——但也别一遇到"卡住"就本能地强杀,Postgres 这类
   数据库能这么干是因为它有崩溃恢复机制托底,是这次先确认了这一点才
   敢这么做,不是所有卡在 `Terminating` 的组件都能安全地这样处理。
+
+### Airflow scheduler 反复长出两个并存 ReplicaSet、ArgoCD 子 Application spec 一度没跟上 git——根因是 ArgoCD 控制面自己被 OOMKilled,不是 Airflow chart 的 bug
+
+- **现象**(2026-08-14,Feast 集成那一轮资源紧张期间发现):`airflow-scheduler`
+  这个 Deployment 反复出现两个并存的 ReplicaSet(都 `DESIRED=1`,CPU
+  request 叠加顶到 99%,手动 `kubectl scale --replicas=0` 也会被立刻纠正
+  回来)。同一时期还发现子 Application 显式触发 sync、`status.sync.status`
+  显示 `Synced`,但 `.spec.source` 没有真的更新成最新 git 内容,要
+  `kubectl replace -f` 整个替换才生效——比这份文档"git push 之后 ArgoCD
+  迟迟不应用新配置"那条(见上面)更严重一层,这次连 ArgoCD **自己的**
+  Application 对象本身都没跟上。
+- **排查过程**:先怀疑是 Helm chart 渲染非确定性(`helm template` 同一份
+  chart+values 本地连续渲染 8 次,逐字节 diff,**完全没有发现任何差异**
+  ——排除了这个假设,不是 chart 的锅)。转向检查 ArgoCD 控制面本身状态:
+  `kubectl get pod argocd-application-controller-0 -o jsonpath=
+  '{.status.containerStatuses[0].lastState}'` 显示 `reason: OOMKilled,
+  exitCode: 137`——**真实发生过**,不是猜测。更关键的是,即使在"相对安静"
+  (Airflow/Trino 都已经 park 掉)的状态下,`kubectl top pod` 实测
+  controller 常驻内存高达 **1814Mi**,已经是当时 2048Mi 限制的 88.6%
+  ——这个组件本身常驻基线就已经很接近上限,`argocd-repo-server` 同样
+  查到过 OOMKilled 记录(`lastState.reason` 是 `OOMKilled`,即使
+  `exitCode` 显示 0——k8s 对这类情况的上报本身不总是一致,不能只信
+  `exitCode` 字段),但它的 limits 一直只有 512Mi,且从未有实测数据支撑
+  过这个数字(纯粹是"先给个安全下限")。
+- **结论**:两个现象(Airflow ReplicaSet churn、子 Application spec
+  drift)大概率是**同一个根因的两种表现**——ArgoCD 控制面(controller +
+  repo-server)在这台机器 25+ 个 Application 的真实规模下持续吃紧,批量
+  sync/渲染大 chart(Airflow 官方 chart 不小)时的内存峰值远超之前配的
+  上限,被自己的资源限制误杀,导致 in-flight 的状态更新/渲染被中断,
+  表现出各种"不一致"的症状,不是某个具体组件的 bug。
+- **处理**:`platform/bootstrap/argocd-values.yaml` 里 controller 的
+  limits 从 2048Mi 调到 3072Mi、repoServer 从 512Mi 调到 1024Mi(只调
+  limits,不调 requests——这台机器整体内存基线已经在 86% 上下,大幅调高
+  requests 会挤占其他组件的可调度余量,风险更大)。改完用
+  `NEEDS_LOCAL_PROXY=1 ./scripts/01-bootstrap-argocd.sh` 重新
+  `helm upgrade`(**不要手动裸跑 `helm upgrade` 命令,容易漏带这台机器
+  必需的代理 overlay 参数——这次排查过程中就真的漏带过一次,虽然后来
+  验证发现即使没有代理这台机器当时也能连上 GitHub,但那只是巧合,不能
+  当成可以跳过这个参数的依据,一切以脚本记录的标准流程为准**)。升级后
+  验证过:所有 Application 仍是 `Synced/Healthy`,repo-server 新 pod 强制
+  hard-refresh 后能正确同步到最新 git commit,代理 env 也确认还在。
+- **没有解决的部分**:这只是把 ArgoCD 自己"被自己的资源上限误杀"这个
+  问题缓解了,**不是把这台机器物理内存不够的结构性问题解决了**——colima
+  总共 11GB,当前空载基线就已经 86%+,以后如果同时启用的重量级组件更多
+  (比如 Feast+Airflow+Trino 三个一起验证的场景就真实撞过一次控制面
+  OOM),这两个数字大概率还要继续往上调。`feast_materialize` 这个 DAG
+  最终是否已经能在稳定的 Airflow 环境下跑出成功记录,这次没有为了控制
+  排查范围而重新验证,是遗留待办(见 ADR-042)。

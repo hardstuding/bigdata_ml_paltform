@@ -22,13 +22,35 @@
 # 只是瞬时静态值,没考虑到它要跟踪这个平台全部 25+ 个 Application 及其名下
 # 资源的实时状态,遇到批量 sync/patch 操作时的内存峰值远不止这个数。调高到
 # 2048Mi,留够真实操作时的峰值余量,不要只信一次性的 top 快照。
+#
+# 2026-08-14 再次更正:2048Mi 还是不够——排查 Feast 集成那轮资源紧张期间
+# (Airflow scheduler 反复长出两个并存 ReplicaSet、子 Application 的
+# .spec.source 一度没跟上最新 git 内容)时发现,即使当时机器相对"安静"
+# (Airflow/Trino 都已经 park 掉),controller 实测常驻内存也有 1814Mi,
+# 已经是 2048Mi 限制的 88.6%,`kubectl get pod ... lastState` 确认过去确实
+# 发生过真实的 OOMKilled(exitCode 137,不是猜测)。这台机器全平台 25+
+# 个 Application 的常态基线本身就已经很接近这个组件的旧上限,再叠加一次
+# 真实的批量 sync 就会触发。调到 3072Mi,留出比当前观测到的常驻值更明显
+# 的余量。同时 repoServer 之前完全没有实测数据支撑 512Mi 这个数字(只是
+# "先给个安全下限"),这次同一次排查里也确认了它同样有过 OOMKilled 记录
+# (`lastState` 里 reason 是 OOMKilled,即使 exitCode 显示 0——k8s 对这种
+# 情况的上报本身就不总是一致,不能只信 exitCode 字段),渲染 Airflow 这类
+# 大 chart 时的内存峰值明显超出 512Mi,调到 1024Mi。
+#
+# 这次调整**只动 limits,不动 requests**——这台机器(colima,11GB)整体
+# 内存基线已经在 86% 上下,如果连 requests 一起大幅调高,会挤占其他组件的
+# 可调度余量,风险比现在的问题更大。只放宽 limits 是为了不让 controller/
+# repo-server 在真正需要更多内存时被自己的人为上限误杀,不代表这台机器
+# 的物理内存瓶颈被解决了——如果以后同时启用的重量级组件更多,这两个数字
+# 大概率还要继续往上调,这是这台机器资源规模下的结构性限制,不是一次性
+# 调参就能"修好"的问题。
 controller:
   resources:
     requests:
       cpu: 200m
       memory: 512Mi
     limits:
-      memory: 2048Mi
+      memory: 3072Mi
 
 repoServer:
   resources:
@@ -36,7 +58,7 @@ repoServer:
       cpu: 100m
       memory: 128Mi
     limits:
-      memory: 512Mi
+      memory: 1024Mi
 
 dex:
   resources:
