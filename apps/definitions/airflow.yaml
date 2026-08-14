@@ -59,7 +59,19 @@ spec:
         # 任何 hook 注解,和 create-db-job.yaml 是同一个思路)。
         migrateDatabaseJob:
           enabled: false
-        webserver:
+        # 2026-08-14 实测发现:这个键名是错的,一直静默生效失败。1.22.0 这个
+        # chart 版本对应 Airflow 3.x,组件早就从 `webserver` 改名成
+        # `apiServer`(见官方 chart values.yaml),`webserver:` 这个键在
+        # schema 里根本不存在,Helm 不校验多余的键,所以既不报错也不生效
+        # ——实际部署出来的 `apiServer.resources` 一直是空的 `{}`,吃的是
+        # chart 内部的极小默认值(limit 128Mi/request 64Mi)。更隐蔽的是,
+        # `wait-for-airflow-migrations` 这个 init container 的资源配置在
+        # chart 模板里直接复用 `apiServer.resources`(不是它自己独立的字段,
+        # 见 api-server-deployment.yaml 的 `resources: {{ .Values.apiServer.
+        # resources }}`),128Mi 跑 `airflow db check-migrations`(要加载完整
+        # Airflow 应用)必然 OOMKilled(exitCode 137,实测确认),表现成
+        # api-server 这个 Deployment 卡在 Init:CrashLoopBackOff 起不来。
+        apiServer:
           replicas: 1
           resources:
             requests:
