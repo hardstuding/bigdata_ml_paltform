@@ -1,0 +1,93 @@
+# 【重要,见 docs/decisions/042-feast-feature-store.md"已知限制"】feast-dev/feast
+# 官方 Helm chart 曾经在 apps/definitions/feast.yaml 里尝试过,已经放弃——
+# 实测发现 https://feast-helm-charts.storage.googleapis.com 上真正发布的
+# 0.65.0 这个版本,和 GitHub `master` 分支当前的模板代码是两套完全不同的
+# 东西:发布的是旧的、纯 Java 实现(`command: java -jar
+# /opt/feast/feast-serving.jar ...`,读 `/etc/feast/application-*.yaml`),
+# 不是 README 里描述的、支持 `feature_store_yaml_base64` 的新版 Python
+# 实现——`helm pull feast/feast --version 0.65.0` 下来直接看
+# `charts/feature-server/templates/deployment.yaml` 才发现,GitHub 上看到的
+# 模板源码属于还没发布的开发分支,不能直接当已发布 chart 的行为来用(这是
+# 这次踩得最深的一个坑,记录下来提醒以后："helm pull 下来看实际内容"比
+# "读 GitHub 源码"更可信,两者可能不是同一个东西)。而且这个 Java server
+# 默认镜像 `feature-server-java` 在 0.65.0 这个 tag 下根本不存在(那个仓库
+# 停更在 0.49.0)。两条路都走不通,索性不用这个 chart,改裸 manifest——
+# 和 Redis(同目录 redis.yaml)是同一个先例。
+#
+# 用官方 Python 镜像 quay.io/feastdev/feature-server 直接跑 `feast serve`
+# ——这是 Feast CLI 自己文档化的标准命令,不是绕开官方支持的自建路径。
+# FEATURE_STORE_YAML_BASE64 这个环境变量注入方式也是 Feast 自己代码里
+# 认的(feast/cli/serve.py 会读这个变量落地成 feature_store.yaml),不是
+# 猜的,已经用 `docker run` 直接对官方镜像验证过。
+#
+# 但官方镜像没带 pyspark/JRE,配了 offline_store.type: spark 时
+# FeatureStore() 初始化会 `import pyspark` 直接崩(这是 Feast 自身"看配置
+# 里写了哪些 store,启动就全部 import"的架构限制,不是这次配置的问题,
+# 详见 ADR-042)。用 apps/feast/feature-server-image/Dockerfile 在官方镜像
+# 基础上加 pyspark + JRE 17,本地 `docker build` 出来,不推到任何
+# registry——colima 这台机器 k3s 和本机 docker 共用镜像存储,
+# imagePullPolicy: Never。换到真正的多节点集群时需要改成推到一个大家都能
+# 拉到的 registry(这个仓库目前还没有 Harbor,Phase 4 才会补),记在
+# ADR-042 里的已知限制,不是这次的疏漏。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feast-feature-server
+  labels:
+    app: feast-feature-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: feast-feature-server
+  template:
+    metadata:
+      labels:
+        app: feast-feature-server
+    spec:
+      containers:
+        - name: feature-server
+          image: local/feast-feature-server:0.65.0-spark
+          imagePullPolicy: Never
+          command: ["feast", "serve", "-h", "0.0.0.0"]
+          ports:
+            - containerPort: 6566
+          resources:
+            requests:
+              cpu: 200m
+              memory: 768Mi
+            limits:
+              memory: 1536Mi
+          env:
+            # feature_store.yaml 的内容(见 scripts/feast_feature_repo/
+            # feature_store.yaml,权威源)base64 编码后塞进这个变量——Feast
+            # 自己的 `feast/cli/serve.py` 认这个环境变量。和 dags-configmap.
+            # yaml/feature-repo-configmap.yaml 是同一类"手动同步的重复内容"
+            # 已知限制,改一处记得跟着改另一处(重新生成:`base64 -i
+            # scripts/feast_feature_repo/feature_store.yaml | tr -d '\n'`)。
+            - name: FEATURE_STORE_YAML_BASE64
+              value: "IyBGZWFzdCDnibnlvoHku5PlupPphY3nva4o6KeBIGRvY3MvZGVjaXNpb25zLzA0Mi1mZWFzdC1mZWF0dXJlLXN0b3JlLm1kKeOAggojCiMg44CQ5Y+v5o+S5ouU5Z+656GA6K6+5pa9LOingSBBRFItMDMw44CRcmVnaXN0cnkucGF0aCDlkowgb2ZmbGluZV9zdG9yZS5zcGFya19jb25mIOmHjOeahAojIFMzQSDphY3nva7pg73mjIflkJHmnKzku5PlupPoh6rluKbnmoQgTWluSU875o6l5aSW6YOoIFMzIOWPqumcgOimgeaUuQojIGZzLnMzYS5lbmRwb2ludC9hY2Nlc3Mua2V5L3NlY3JldC5rZXkg6L+Z5LiJ6KGMKGFjY2Vzcy9zZWNyZXQg6LWwCiMgJHtlbnYuTUlOSU9fQUNDRVNTX0tFWX0vJHtlbnYuTUlOSU9fU0VDUkVUX0tFWX0g5Y+Y6YeP5bGV5byALOS4jeaYr+WGmeatu+WcqOi/meS4qgojIOaWh+S7tumHjCzlkowgYXBwcy9oaXZlLW1ldGFzdG9yZS9tYW5pZmVzdHMvY29yZS1zaXRlLWNvbmZpZ21hcC55YW1sIOaYr+WQjOS4gOS4qgojIOaooeW8j+KAlOKAlOi/kOihjOWJjeeUqCBzY3JpcHRzLzEyLWZlYXN0LWZlYXR1cmUtcGlwZWxpbmUuc2gg5LuOIG1pbmlvLXJvb3Qg6L+Z5LiqCiMgazhzIFNlY3JldCDor7vlgLzlr7zlh7rmiJDnjq/looPlj5jph48s6L+Z5Liq5paH5Lu25pys6Lqr5LiN5ZCr5piO5paH5Yet5o2uKeOAgm9mZmxpbmVfc3RvcmUKIyDmjqXnmoTmmK8gYXBwcy9zcGFyay1pY2ViZXJnLWRlbW8g5bey6aqM6K+B6L+H55qE5ZCM5LiA5LiqIEljZWJlcmcgY2F0YWxvZwojIChjYXRhbG9nIOWQjeWbuuWumuWPqyAiaWNlYmVyZyIs6KeBIEFEUi0wMzYpLOS4jeaYr+WPpui1t+S4gOWll+OAggpwcm9qZWN0OiBkZW1vCnByb3ZpZGVyOiBsb2NhbAoKcmVnaXN0cnk6CiAgcmVnaXN0cnlfdHlwZTogZmlsZQogIHBhdGg6IHMzOi8vbGFrZWhvdXNlL2ZlYXN0L3JlZ2lzdHJ5LnBiCgpvZmZsaW5lX3N0b3JlOgogIHR5cGU6IHNwYXJrCiAgc3BhcmtfY29uZjoKICAgIHNwYXJrLm1hc3RlcjogImxvY2FsWzJdIgogICAgc3Bhcmsuc3FsLmNhdGFsb2cuaWNlYmVyZzogb3JnLmFwYWNoZS5pY2ViZXJnLnNwYXJrLlNwYXJrQ2F0YWxvZwogICAgc3Bhcmsuc3FsLmNhdGFsb2cuaWNlYmVyZy50eXBlOiBoaXZlCiAgICBzcGFyay5zcWwuY2F0YWxvZy5pY2ViZXJnLnVyaTogdGhyaWZ0Oi8vaGl2ZS1tZXRhc3RvcmUuZGF0YS5zdmMuY2x1c3Rlci5sb2NhbDo5MDgzCiAgICBzcGFyay5zcWwuZXh0ZW5zaW9uczogb3JnLmFwYWNoZS5pY2ViZXJnLnNwYXJrLmV4dGVuc2lvbnMuSWNlYmVyZ1NwYXJrU2Vzc2lvbkV4dGVuc2lvbnMKICAgIHNwYXJrLmhhZG9vcC5mcy5zM2EuZW5kcG9pbnQ6IGh0dHA6Ly9taW5pby5taW5pby5zdmMuY2x1c3Rlci5sb2NhbDo5MDAwCiAgICBzcGFyay5oYWRvb3AuZnMuczNhLmFjY2Vzcy5rZXk6ICR7ZW52Lk1JTklPX0FDQ0VTU19LRVl9CiAgICBzcGFyay5oYWRvb3AuZnMuczNhLnNlY3JldC5rZXk6ICR7ZW52Lk1JTklPX1NFQ1JFVF9LRVl9CiAgICBzcGFyay5oYWRvb3AuZnMuczNhLnBhdGguc3R5bGUuYWNjZXNzOiAidHJ1ZSIKICAgIHNwYXJrLmhhZG9vcC5mcy5zM2EuY29ubmVjdGlvbi5zc2wuZW5hYmxlZDogImZhbHNlIgogICAgc3BhcmsuaGFkb29wLmZzLnMzYS5pbXBsOiBvcmcuYXBhY2hlLmhhZG9vcC5mcy5zM2EuUzNBRmlsZVN5c3RlbQogICAgc3BhcmsuamFycy5wYWNrYWdlczogIm9yZy5hcGFjaGUuaWNlYmVyZzppY2ViZXJnLXNwYXJrLXJ1bnRpbWUtMy41XzIuMTI6MS4xMC4wLG9yZy5hcGFjaGUuaGFkb29wOmhhZG9vcC1hd3M6My4zLjQsY29tLmFtYXpvbmF3czphd3MtamF2YS1zZGstYnVuZGxlOjEuMTIuMjYyIgogICAgc3BhcmsuamFycy5pdnk6ICIvdG1wLy5pdnkyIgoKb25saW5lX3N0b3JlOgogIHR5cGU6IHJlZGlzCiAgY29ubmVjdGlvbl9zdHJpbmc6ICJmZWFzdC1yZWRpcy5mZWFzdC5zdmMuY2x1c3Rlci5sb2NhbDo2Mzc5IgoKZW50aXR5X2tleV9zZXJpYWxpemF0aW9uX3ZlcnNpb246IDMK"
+            # 【可插拔基础设施,见 ADR-030】接外部 S3 改这两行的
+            # secretKeyRef,不用碰上面的 base64 blob 本身(离线存储的
+            # spark_conf 里引用的是这两个变量名,不是明文)。
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootUser
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootPassword
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feast-feature-server
+spec:
+  selector:
+    app: feast-feature-server
+  ports:
+    - port: 6566
+      targetPort: 6566

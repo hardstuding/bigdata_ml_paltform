@@ -47,6 +47,31 @@ Broadcom 订阅版,公开可拉的只剩不再更新的 legacy 标签。两条�
 特征数据的权威来源是 Iceberg,Redis 只是物化后的在线缓存,重建或重启后重新
 跑一次 `feast materialize` 就能补回来。
 
+### 更根本的实测坑:已发布的 chart 版本和 GitHub 源码是两套不同的东西
+
+一开始按 GitHub `master` 分支能看到的 `feast-feature-server` 模板设计
+(支持 `feature_store_yaml_base64` 环境变量、Python 镜像、`feast_mode`
+灵活切换)配了 `apps/definitions/feast.yaml`,线上部署后一直
+`ImagePullBackOff`/`CrashLoopBackOff`。最后用 `helm pull feast/feast
+--version 0.65.0 --untar` 把真正发布的 chart 下下来对着看,才发现
+`charts/feature-server/templates/deployment.yaml` 是完全不同的旧版模板:
+硬编码 `command: java -jar /opt/feast/feast-serving.jar ...`,读
+`/etc/feast/application-*.yaml`,根本不认 `feature_store_yaml_base64`
+这个变量;默认镜像还是前面说的、0.65.0 这个 tag 下没发布过的
+`feature-server-java`。也就是说 GitHub 上的模板源码代表的是还没随
+0.65.0 一起发布的开发中改动,**读 GitHub 源码不等于读到了已发布 chart
+真正的行为**,这是这次踩得最深、最容易被忽略的一个坑。
+
+处理方式:`feature-server` 子 chart 也放弃,和 Redis 一样改裸 manifest
+(`apps/feast/manifests/feature-server.yaml`),直接用官方
+`quay.io/feastdev/feature-server`(Python 实现)镜像跑 `feast serve
+-h 0.0.0.0`——这是 Feast CLI 自己文档化的标准命令,`FEATURE_STORE_YAML_BASE64`
+这个环境变量注入方式也是 Feast 自己代码里认的(不依赖那个已经证明不可信的
+chart),已经用 `docker run` 直接对官方镜像验证过环境变量能生效。`apps/
+definitions/feast.yaml` 不再引用 `https://feast-helm-charts.storage.
+googleapis.com` 这个 Helm 仓库,只剩一个指向 `apps/feast/manifests/` 的
+Application。
+
 ### 特征服务:官方 chart 只开 `feature-server` 子 chart
 
 `transformation-service` 子 chart(on-demand transform)这次关掉——demo
