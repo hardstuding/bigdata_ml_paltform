@@ -83,6 +83,27 @@ spec:
                 secretKeyRef:
                   name: minio-root
                   key: rootPassword
+            # 实测坑:registry(type: file, s3:// path)走的是 Feast 自己的
+            # boto3/pyarrow S3 客户端,认标准 AWS_* 环境变量,不是上面给
+            # Spark 的 MINIO_ACCESS_KEY/MINIO_SECRET_KEY(那两个只在
+            # spark_conf 的 ${env.*} 替换里生效,是 Hadoop S3A 客户端的配置
+            # 面,和 boto3 是两条完全独立的路径)。缺了这组会在启动时后台
+            # refresh registry 报 NoCredentialsError 直接崩,不是配置漏写
+            # 而是两个客户端各认各的变量名。
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootUser
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootPassword
+            - name: AWS_ENDPOINT_URL_S3
+              value: "http://minio.minio.svc.cluster.local:9000"
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
 ---
 apiVersion: v1
 kind: Service
