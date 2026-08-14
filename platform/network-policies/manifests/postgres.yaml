@@ -124,6 +124,12 @@ spec:
 # airflow(seatunnel_device_events 这个 DAG 的 worker pod 建在 airflow
 # 命名空间里)。端口 9083(`kubectl get pod ... -o jsonpath=
 # '{.spec.containers[0].ports}'` 确认过是 thrift 协议)。
+#
+# 2026-08-14 补充(ADR-042):feast——feature-server 的 offline_store 是
+# Spark,读 iceberg.demo.orders 要连 Hive Metastore;feast_materialize.py
+# 这个 Airflow DAG 的 KubernetesPodOperator 也是建在 feast 命名空间(不是
+# airflow 命名空间),同样需要这条。和 minio.yaml 那条缺口是同一次实测
+# 发现的,一起补。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -146,6 +152,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: airflow
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: feast
       ports:
         - protocol: TCP
           port: 9083

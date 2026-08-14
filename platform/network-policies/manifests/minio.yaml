@@ -9,6 +9,11 @@
 #   - mlflow、trino、airflow(SeaTunnel 的 DAG 任务 pod)、seatunnel——
 #     这几个目前大多是 park 状态,和 postgres.yaml 一样按"迟早会被拉起来"
 #     覆盖,不是只覆盖此刻在跑的。
+#   - feast(2026-08-14 新增,ADR-042):feature-server 的 registry 走
+#     s3://,离线存储 Spark 也要连 MinIO 的 S3A——部署时漏加这条,实测
+#     `EndpointConnectionError` 才发现(这条 NetworkPolicy 是
+#     default-deny-ingress 之外唯一放行的口子,新命名空间不在这份列表里
+#     就是连不通,不是配置错)。
 #   - minio(同命名空间自己)——2026-08-13 推倒重建测试实测踩到的坑:
 #     minio 官方 chart 的 buckets(见 apps/definitions/minio.yaml 的
 #     `buckets:` 字段)是靠一个 Helm post-install hook Job(`minio-post-job`,
@@ -63,6 +68,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: seatunnel
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: feast
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: minio
