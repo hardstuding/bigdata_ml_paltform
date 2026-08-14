@@ -50,7 +50,16 @@
 
 ## 组件清单
 
-| 层 | 组件 | 作用 | 资源权重 | local-lite | cloud-full | prod | 阶段 |
+**local-lite 这一列是"这个 Phase 设计上归哪个环境"的静态标注,不是这台机器
+现在实际跑着什么**——按需 park/unpark 是这台机器的常态(资源有限,验证完
+一个组件经常发现还要接着测下一个,就没收回去),真实的"现在到底常驻哪些
+组件"以 `ls apps/definitions/`(常驻)和 `ls environments/cloud-full/
+pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其他文档
+里任何写死的组件名单——2026-08-14 文档审计就发现过 Spark Operator/Airflow
+在这张表标着"cloud-full 才有",但实际已经在 `apps/definitions/` 常驻好几天,
+文档没跟上。
+
+| 层 | 组件 | 作用 | 资源权重 | local-lite(设计归属) | cloud-full | prod | 阶段 |
 |---|---|---|---|---|---|---|---|
 | 底座 | Kubernetes(colima + k3s) | 统一调度层 | 中 | ✅ | ✅ | ✅ | Phase 0 |
 | 底座 | ArgoCD | GitOps 持续部署 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
@@ -138,8 +147,12 @@
   [ADR-041](decisions/041-queue-resource-management.md)**;"建表工具"
   (权限 OA 审批系统 Phase 1)也已实现,见
   [ADR-043](decisions/043-table-registration-tool.md)——只做登记(建表 +
-  回写负责人/安全等级进 OpenMetadata),分级审批链路本身还没做。其余几条
-  (权限 OA 分级审批/血缘/权限交接/资源回收/深度回溯)仍然是待规划状态。
+  回写负责人/安全等级进 OpenMetadata);**"权限 OA 分级审批"(Phase 2)
+  2026-08-14 已实现,见 [ADR-044](decisions/044-tiered-approval-workflow.md)
+  ——按安全等级路由的多级审批链已经跑通,职级数据是虚拟占位(标准 HR
+  导出表结构,等公司真实数据接入),真正的 Trino 访问拦截还没做,这次
+  只做决策与留痕**。其余几条(血缘/权限交接/资源回收/深度回溯)仍然是
+  待规划状态。
   另外"AI 角色化 + 知识沉淀"是同一轮会话里用户额外提出的第 8 条(不属于
   08-09 那 7 条),原话和现状见 ADR-040 补充章节,同样待规划。
 - ~~共享 Postgres 的 HA 迁移什么时候做~~ **已解决(2026-08-13,ADR-038/039)**:

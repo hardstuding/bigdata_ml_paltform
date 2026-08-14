@@ -1,7 +1,12 @@
 # 等 cloud-full 环境再启用
 
-这几个 Application 定义(Kafka/Spark Operator/Airflow)配置已经写好、语法验证过,
-但**不在 `apps/definitions/` 里,所以本地 `apps-root` 不会自动同步它们**。
+这个目录下的 Application 定义配置已经写好、语法验证过,但**不在
+`apps/definitions/` 里,所以本地 `apps-root` 不会自动同步它们**。**这个目录
+实际含哪些组件会随验证工作动态变化(按需 park/unpark 是这台机器的常态),
+不要相信下面历史记录里点名的组件列表,以 `ls environments/cloud-full/
+pending-definitions/*.yaml` 的当前真实输出为准**——2026-08-14 文档审计发现
+过 Spark Operator/Airflow 曾经被写死在这份文档里,但两者其实已经常驻
+`apps/definitions/` 好几天了,文档没跟上,这条提醒就是那次教训。
 
 ## 为什么挪出来
 
@@ -53,14 +58,16 @@ TLS 握手超时、整个集群一度失联,靠重启 colima 才恢复。
 
 ## 怎么重新启用
 
-有了 cloud-full 环境(云服务器或公司 IDC,内存建议 ≥32GB)之后:
+有了 cloud-full 环境(云服务器或公司 IDC,内存建议 ≥32GB)之后,先
+`ls environments/cloud-full/pending-definitions/*.yaml` 确认这个目录当前
+实际有哪些组件(见上面的提醒,不要凭这份文档的历史记录猜),再:
 
 ```bash
 git mv environments/cloud-full/pending-definitions/*.yaml apps/definitions/
-git commit -m "cloud-full: 启用 Kafka/Spark Operator/Airflow"
+git commit -m "cloud-full: 启用 $(ls environments/cloud-full/pending-definitions/*.yaml | xargs -n1 basename)"
 git push
 ```
 
-ArgoCD 会自动同步。如果是全新集群,记得 `scripts/00-generate-secrets.sh`
-里 airflow 相关的 Secret 生成逻辑要先跑一遍,再跑 `scripts/05-configure-airflow.sh`
-建管理员账号。
+ArgoCD 会自动同步。如果目录里含 Airflow 相关组件,记得
+`scripts/00-generate-secrets.sh` 里 airflow 相关的 Secret 生成逻辑要先跑
+一遍,再跑 `scripts/05-configure-airflow.sh` 建管理员账号。

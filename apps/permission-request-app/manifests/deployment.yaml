@@ -8,6 +8,15 @@
 #     --from-literal=token=<GitHub fine-grained PAT,scope 到这一个仓库,contents:write 权限>
 # 没建这个 Secret 之前,app 仍然能跑、能收申请、能批准,只是批准后不会自动
 # push,会在页面上提示需要哪一行手动加进 platform/iam/memberships.csv。
+#
+# OPENMETADATA_TOKEN(ADR-044,表访问分级审批要查表的安全等级/负责人):
+# 复用 table-registration-app 那个 table-registration-bot 的同一个 token
+# 值就行,不用在 OpenMetadata 里再建一个 bot——Secret 是按命名空间隔离的,
+# 这里要单独建一份(值一样,名字不一样):
+#   kubectl -n permission-request-app create secret generic permission-request-app-openmetadata \
+#     --from-literal=token=<和 table-registration-app-openmetadata 一样的 token>
+# 没建这个 Secret 之前,组权限申请(加入某个组)不受影响,只是表访问申请
+# 提交时会查不到安全等级,直接被拒绝并提示原因。
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -56,7 +65,7 @@ spec:
               # `timeout -k 10 90` 是同一个已验证过的修法。
               timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
               timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
-              pip install --quiet --timeout 30 flask
+              pip install --quiet --timeout 30 flask requests
               python3 /src/app.py
           env:
             - name: DB_PATH
@@ -67,6 +76,18 @@ spec:
                   name: permission-request-app-git
                   key: token
                   optional: true  # 没建这个 Secret 时,GIT_TOKEN 就是空字符串,走降级路径
+            # 【可插拔基础设施,见 ADR-030】换外部 OpenMetadata 实例改这个 URL,
+            # 和 table-registration-app 保持一致。
+            - name: OPENMETADATA_URL
+              value: http://openmetadata.openmetadata.svc.cluster.local:8585
+            - name: OPENMETADATA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-openmetadata
+                  key: token
+                  optional: true  # 没建这个 Secret 时,表访问申请会直接被拒绝并提示原因
+            - name: DESIGNATED_ADMIN
+              value: admin  # ADR-040 里"安全等级3再加指定负责人"这个人,不是从组织架构推导的
           ports:
             - containerPort: 8080
               name: http

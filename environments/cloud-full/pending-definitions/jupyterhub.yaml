@@ -69,6 +69,8 @@ spec:
               allowed_groups:
                 - platform-team
                 - algorithm-team
+                - data-analysts  # 2026-08-14 补:数分角色一直没在白名单里,原配置漏了,
+                                 # 之前从没在这个组件 un-park 时被真正测过登录
               admin_groups:
                 - platform-team
             GenericOAuthenticator:
