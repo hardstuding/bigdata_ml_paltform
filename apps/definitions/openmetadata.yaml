@@ -38,6 +38,18 @@ spec:
             elasticsearch:
               host: opensearch-cluster-master
               scheme: https
+              # OpenSearch 官方镜像自带自签名 demo 证书,Java 客户端默认不
+              # 信任,报 PKIX path building failed。用
+              # scripts/20-configure-openmetadata-search-truststore.sh
+              # 从运行中的 OpenSearch pod 提取证书生成的 truststore,通过
+              # extraVolumes 挂载(见下面 pod 级别的 extraVolumes/
+              # extraVolumeMounts)。
+              trustStore:
+                enabled: true
+                path: /opt/openmetadata-ssl/truststore.jks
+                password:
+                  secretRef: openmetadata-search-truststore-password
+                  secretKey: password
               auth:
                 enabled: true
                 username: admin
@@ -93,6 +105,14 @@ spec:
                 discoveryUri: "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration"
                 callbackUrl: "http://openmetadata.local-lite.test/callback"
                 serverUrl: "http://openmetadata.local-lite.test"
+        extraVolumes:
+          - name: search-truststore
+            secret:
+              secretName: openmetadata-search-truststore
+        extraVolumeMounts:
+          - name: search-truststore
+            mountPath: /opt/openmetadata-ssl
+            readOnly: true
         resources:
           requests:
             cpu: 300m
