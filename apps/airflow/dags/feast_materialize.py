@@ -54,6 +54,14 @@ FEATURE_REPO_MOUNT = [
     ),
 ]
 
+# 2026-08-14 实测发现:光有 MINIO_ACCESS_KEY/MINIO_SECRET_KEY 不够。
+# registry(type: file, s3:// path)走的是 Feast 自己的 boto3/pyarrow S3
+# 客户端,认标准 AWS_* 环境变量,不是这两个——那两个只在 feature_store.yaml
+# 的 offline_store.spark_conf 里 ${env.*} 替换生效,是 Hadoop S3A 客户端的
+# 配置面,和 boto3 是两条完全独立的路径。缺了 AWS_* 这组,`feast apply`
+# 建 Registry 时直接报 botocore.exceptions.NoCredentialsError。和
+# apps/feast/manifests/feature-server.yaml 里 Feast Serving 自己踩过、
+# 已经修过的同一个坑,这次是 DAG 这边独立配置的 env,没有共享,也要补一份。
 MINIO_ENV = [
     k8s.V1EnvVar(
         name="MINIO_ACCESS_KEY",
@@ -67,6 +75,20 @@ MINIO_ENV = [
             secret_key_ref=k8s.V1SecretKeySelector(name="minio-root", key="rootPassword")
         ),
     ),
+    k8s.V1EnvVar(
+        name="AWS_ACCESS_KEY_ID",
+        value_from=k8s.V1EnvVarSource(
+            secret_key_ref=k8s.V1SecretKeySelector(name="minio-root", key="rootUser")
+        ),
+    ),
+    k8s.V1EnvVar(
+        name="AWS_SECRET_ACCESS_KEY",
+        value_from=k8s.V1EnvVarSource(
+            secret_key_ref=k8s.V1SecretKeySelector(name="minio-root", key="rootPassword")
+        ),
+    ),
+    k8s.V1EnvVar(name="AWS_ENDPOINT_URL_S3", value="http://minio.minio.svc.cluster.local:9000"),
+    k8s.V1EnvVar(name="AWS_DEFAULT_REGION", value="us-east-1"),
 ]
 
 # KubernetesExecutor 这台机器上默认 BestEffort QoS 的 pod 是 OOM killer
