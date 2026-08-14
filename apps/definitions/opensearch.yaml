@@ -32,18 +32,6 @@ spec:
               secretKeyRef:
                 name: opensearch-admin
                 key: password
-        # 官方镜像默认给 REST 层(9200)套自签名 demo 证书,OpenMetadata
-        # 的 Java 客户端不信任这个证书链,会报 PKIX path building failed。
-        # 这个集群只在 NetworkPolicy 保护的内网访问,不对外暴露,关掉 REST
-        # 层 TLS 比给 OpenMetadata 建一套 Java truststore 更省事——两边都
-        # 改成 http 而不是死磕证书信任链。用户名密码鉴权(security 插件)
-        # 不受影响,继续生效。transport 层(节点间通信)不受影响,单节点
-        # 模式本来就不走这条路。
-        config:
-          opensearch.yml: |
-            cluster.name: opensearch-cluster
-            network.host: 0.0.0.0
-            plugins.security.ssl.http.enabled: false
         resources:
           requests:
             cpu: 300m
