@@ -27,14 +27,32 @@ FEAST_IMAGE = "local/feast-feature-server:0.65.0-spark"
 # 部署态的拷贝在 apps/feast/manifests/feature-repo-configmap.yaml——和
 # Feast Serving 的 feature_store_yaml_base64 是同一类"chart/Operator 只认
 # 静态内容,不能引用仓库里的文件"限制,不是这次偷懒复制的。
+# 2026-08-14 实测发现:整个 ConfigMap 目录挂进去,`feast apply` 会报
+# `TypeError: the 'package' argument is required to perform a relative
+# import for '..2026_08_14_10_28_51.1747361403.definitions'`——和
+# Airflow 自己挂 DAG 目录踩过的坑(见上面 DAGS 相关注释)是同一个原因:
+# ConfigMap 卷靠 `..data` 软链 + 带时间戳的隐藏目录做原子更新,Feast 解析
+# `definitions.py` 时(`importlib.import_module`)顺着软链解析到真实路径,
+# 把这个时间戳目录名当成了 Python 包路径的一部分,relative import 直接
+# 炸掉。用 subPath 分别挂每个文件,绕开这层目录结构,和 dags-configmap 的
+# 挂法一致。代价同样是 ConfigMap 改了以后这两个文件不会自动热更新,需要
+# 重启相关 pod(这里是每次任务起新 pod,天然没有这个问题)。
 FEATURE_REPO_VOLUME = k8s.V1Volume(
     name="feature-repo",
     config_map=k8s.V1ConfigMapVolumeSource(name="feast-feature-repo"),
 )
-FEATURE_REPO_MOUNT = k8s.V1VolumeMount(
-    name="feature-repo",
-    mount_path="/feature_repo",
-)
+FEATURE_REPO_MOUNT = [
+    k8s.V1VolumeMount(
+        name="feature-repo",
+        mount_path="/feature_repo/feature_store.yaml",
+        sub_path="feature_store.yaml",
+    ),
+    k8s.V1VolumeMount(
+        name="feature-repo",
+        mount_path="/feature_repo/definitions.py",
+        sub_path="definitions.py",
+    ),
+]
 
 MINIO_ENV = [
     k8s.V1EnvVar(
@@ -98,7 +116,7 @@ BASE_KWARGS = dict(
     image=FEAST_IMAGE,
     image_pull_policy="Never",
     volumes=[FEATURE_REPO_VOLUME],
-    volume_mounts=[FEATURE_REPO_MOUNT],
+    volume_mounts=FEATURE_REPO_MOUNT,
     env_vars=MINIO_ENV,
     container_resources=CONTAINER_RESOURCES,
     priority_class_name="batch",
