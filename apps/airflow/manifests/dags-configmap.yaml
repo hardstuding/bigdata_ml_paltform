@@ -279,6 +279,16 @@ data:
         ),
         k8s.V1EnvVar(name="AWS_ENDPOINT_URL_S3", value="http://minio.minio.svc.cluster.local:9000"),
         k8s.V1EnvVar(name="AWS_DEFAULT_REGION", value="us-east-1"),
+        # 2026-08-14 实测发现:容器用的是官方 quay.io/feastdev/feature-server
+        # 镜像原生的 USER 1001(数字 UID,/etc/passwd 里没有对应条目,常见的
+        # OpenShift 风格"任意 UID"镜像惯例)。Spark/Hadoop 启动时
+        # UserGroupInformation.getCurrentUser() 会走 JVM 的 UnixLoginModule,
+        # 靠 OS 层查用户名,查不到就抛
+        # `KerberosAuthException: ... NullPointerException: invalid null
+        # input: name`,把整个 spark-submit 直接搞崩(Java gateway 进程还没起
+        # 来就退出,PySpark 报 JAVA_GATEWAY_EXITED)。设 HADOOP_USER_NAME 能让
+        # Hadoop 优先信这个环境变量,绕开 OS 层查找,不用改镜像加 passwd 条目。
+        k8s.V1EnvVar(name="HADOOP_USER_NAME", value="feast"),
     ]
 
     # KubernetesExecutor 这台机器上默认 BestEffort QoS 的 pod 是 OOM killer
