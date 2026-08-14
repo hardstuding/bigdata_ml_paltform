@@ -259,9 +259,17 @@ data:
     # SIGKILL(exit_code=-9),不是我这次自定义的目标 pod 出问题。和
     # seatunnel_device_events.py 的 POD_OVERRIDE 是同一个坑,同一个修法,只是
     # 这里在这条 DAG 里第一次真正踩到。
+    #
+    # 2026-08-14 补充:光加够资源还不够。这台机器 CPU request 常态接近满载
+    # (ADR-041 记录过),这个 pod 之前没设 priorityClassName,默认优先级最低,
+    # 实测被另一个更高优先级的 pod 抢占杀掉(kubectl get events 里能看到明确
+    # 的 Preempted 记录,pod 起来还没 260ms 就被杀,不是业务逻辑报错)。补上
+    # ADR-041 已经定义好的 batch 优先级(见 platform/priority-classes/),
+    # 这层和下面 CONTAINER_RESOURCES 对应的目标 pod 都要加,不能只加一层。
     EXECUTOR_POD_OVERRIDE = {
         "pod_override": k8s.V1Pod(
             spec=k8s.V1PodSpec(
+                priority_class_name="batch",
                 containers=[
                     k8s.V1Container(
                         name="base",
@@ -283,6 +291,7 @@ data:
         volume_mounts=[FEATURE_REPO_MOUNT],
         env_vars=MINIO_ENV,
         container_resources=CONTAINER_RESOURCES,
+        priority_class_name="batch",
         get_logs=True,
         is_delete_operator_pod=True,
         startup_timeout_seconds=300,
