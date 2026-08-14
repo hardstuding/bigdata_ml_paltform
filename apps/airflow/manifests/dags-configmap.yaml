@@ -399,11 +399,20 @@ data:
         # materialize-incremental 的截止时间用当前 UTC 时间,把从上次物化以来
         # (或者第一次跑的话,从 FeatureView 的 ttl 往前推)新增的特征值刷进
         # Redis——不是重新物化全部历史,增量语义。
+        # 2026-08-14 实测发现:`{{ ts }}` 这个 Airflow 模板变量在这条 DAG 上
+        # 渲染报 `UndefinedError: 'ts' is undefined`——`schedule=None`、手动
+        # 触发的 DAG Run 没有 data_interval,`ts`/`ds` 这类基于调度时间的宏
+        # 都是未定义的,不是 Airflow 3.x 废弃了这个宏(带 schedule 的 DAG 上
+        # 这个宏还能正常用)。改成直接在 shell 里取当前 UTC 时间,不依赖
+        # Airflow 的模板渲染上下文,手动触发/定时触发都能一致工作。
         materialize = KubernetesPodOperator(
             task_id="feast_materialize_incremental",
             name="feast-materialize-incremental",
             cmds=["sh", "-c"],
-            arguments=["cd /feature_repo && feast materialize-incremental '{{ ts }}'"],
+            arguments=[
+                "cd /feature_repo && "
+                "feast materialize-incremental \"$(date -u +%Y-%m-%dT%H:%M:%S)\""
+            ],
             **BASE_KWARGS,
         )
 
