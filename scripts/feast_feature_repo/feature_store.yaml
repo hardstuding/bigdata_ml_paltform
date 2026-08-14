@@ -30,7 +30,10 @@ offline_store:
     spark.hadoop.fs.s3a.path.style.access: "true"
     spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
     spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
-    spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.6.1,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
+    # 版本对齐 apps/spark-iceberg-demo/manifests/sparkapplication.yaml 已经
+    # 验证过的组合(ADR-036),不是另挑一套。
+    spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
+    spark.jars.ivy: "/tmp/.ivy2"
 
 online_store:
   type: redis
