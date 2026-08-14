@@ -7,6 +7,13 @@
 # Redis 改用同目录下的裸 manifest,通过 apps/feast/manifests 这份独立的
 # Application(见下面 kustomize 那份定义)一起纳入同一个 feast 命名空间。
 #
+# 实测坑:官方 chart(0.65.0)vendor 进去的 feature-server 子 chart,
+# image.repository 默认值是 quay.io/feastdev/feature-server-java,但这个
+# 镜像仓库在 2025-04(0.49.0)之后就没再发布过,0.65.0 这个 tag 根本不存在
+# (ImagePullBackOff: manifest unknown)——是这份已发布 chart 本身的打包
+# 疏漏,不是这次配置错。改用 quay.io/feastdev/feature-server(Python 实现,
+# 持续在发,0.65.0 有 amd64/arm64 多架构镜像),显式覆盖。
+#
 # feature_store_yaml_base64 是 chart 唯一支持注入 feature_store.yaml 的方式
 # ——只能是一整个 base64 字符串,不能引用外部文件,所以和
 # scripts/feast_feature_repo/feature_store.yaml 是两份需要手动保持同步的
@@ -35,6 +42,9 @@ spec:
       valuesObject:
         feature-server:
           enabled: true
+          image:
+            repository: quay.io/feastdev/feature-server
+            tag: "0.65.0"
           resources:
             requests:
               cpu: 100m
