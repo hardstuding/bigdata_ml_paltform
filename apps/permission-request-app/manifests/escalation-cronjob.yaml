@@ -45,7 +45,12 @@ spec:
                 - sh
                 - -c
                 - |
-                  curl -fsS -m 30 -X POST \
+                  # --retry-connrefused:实测撞到过的真实坑,Job 的 pod 刚起来时
+                  # NetworkPolicy 规则还没在这台机器的 CNI 上生效完,第一次连接
+                  # 直接 Connection refused(不是网络不通,是这条新 pod 的
+                  # NetworkPolicy 规则有几秒生效延迟)。普通 --retry 默认不会
+                  # 重试"连接被拒",要显式加这个选项才会重试。
+                  curl -fsS -m 30 --retry 5 --retry-delay 2 --retry-connrefused -X POST \
                     -H "X-Internal-Token: ${INTERNAL_TOKEN}" \
                     http://permission-request-app.permission-request-app.svc.cluster.local:8080/internal/escalation-check
               resources:

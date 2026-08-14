@@ -693,3 +693,21 @@
   pod(比如 `curlimages/curl`)直接测目标地址通不通,能排除"网络整体故障"
   和"这个 Deployment 自己的网络配置缺失"这两种可能,不要一上来就怀疑
   DNS 或者代理软件本身出了新问题。
+
+### 新建的 Job/CronJob 的 pod 刚起来第一次连接直接 Connection refused,但同样标签的 pod 手动测试是通的
+
+- **现象**:`permission-request-app-escalation` 这个 CronJob 手动触发一次
+  Job,容器里的 `curl` 直接报 `Connection refused`(exit 7)。但用一个
+  手动 `kubectl apply` 建的、带同样标签的 pod 测试同一个地址,连接完全
+  正常。NetworkPolicy 规则本身核对过是对的(`kubectl get networkpolicy
+  -o yaml` 确认 podSelector/标签都匹配)。
+- **原因**:NetworkPolicy 是靠 CNI 在这台机器上写底层规则(iptables 之类)
+  实现的,一个全新 pod 刚被调度、拿到 IP 之后,CNI 把对应的规则写好需要
+  几秒钟——Job 的容器命令是"起来立刻执行",没有像手动测试那样天然多出
+  几秒钟的间隔(先等 pod Running,再单独 exec 进去跑命令),所以精确踩中
+  了这个规则生效前的窗口期,第一次连接必然失败。这不是 NetworkPolicy
+  配错,是一个真实的、跟这台机器 CNI 实现相关的时序竞态。
+- **处理**:Job 里但凡要连接受 NetworkPolicy 保护的目标,`curl` 要显式加
+  `--retry-connrefused`(普通 `--retry` 默认不重试"连接被拒"这种,只重试
+  超时/5xx 这类)。这是比"在命令前面加个 `sleep N`"更靠谱的写法——重试
+  次数和间隔是可预期的,不用去猜"到底要等几秒才够"。
