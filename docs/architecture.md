@@ -17,6 +17,7 @@
    - **可交接**:项目文档要让新接手的人(不管是人类还是另一个 AI)能不靠对话记忆、只靠仓库本身快速读懂现状。约定是:决策记 ADR、现状记 `docs/architecture.md`/README,不允许只存在于某次对话或者只存在于某个 AI 私有的 memory 系统里——这本身也是 [ADR-040](decisions/040-enterprise-governance-roadmap.md) 那次"记下来但丢了"事故的教训延伸。
    - **可一键拉起**:目标是新集群能一条命令跑通,不是一串手动步骤。**现状离这个目标还有差距**——"从零拉起整套服务"这一节目前是 7 个手动步骤(见 README),没有收敛成单一脚本,是已知欠账,不是已经做到。
    - **可原样上生产**:即"环境画像"这条原则(见上面第 2 条)的验收标准——真正做到"改 values 文件就能从 local-lite 切到 cloud-full/prod",而不是三套要分别维护的配置。**现状同样没有完全做到**:`environments/cloud-full/`、`environments/prod/` 目前只是资源规划参考清单(README 模板),ADR-004 最初设想的"改 values.yaml 自动切环境"这个机制还没有真正建成,是已知欠账。
+7. **可插拔基础设施**(用户多次提过,长期原则,不是某个组件的局部优化)—— 这个项目定位是开源项目,不是一次性内部工具,真实企业场景大概率已经有自己的 Postgres/Kafka/对象存储/统一身份系统,不该强制"必须用我们打包的那一份"。做法是在每个组件自己的 Application yaml 里用统一的 `【可插拔基础设施】` 注释标出"这里可以换成外部实例"和对应要跳过的初始化步骤,不引入中心化的生成器/抽象层(为什么不做生成器见 ADR-030 里的取舍)。见 [ADR-030](decisions/030-pluggable-external-infrastructure.md)。**当前进度**:Postgres 这条已经推广到 Keycloak/Hive Metastore/MLflow/Superset/OpenMetadata/Airflow;对象存储(MinIO→外部 S3)推广到 Hive Metastore/Trino/Spark History Server/Postgres 备份;Kafka 是不同的覆盖方式(整个组件不部署,不是改连接串);**SSO(Keycloak→公司已有 IdP)还没推广**,架构改动更大,是明确的后续课题。
 
 ## 分层架构
 
