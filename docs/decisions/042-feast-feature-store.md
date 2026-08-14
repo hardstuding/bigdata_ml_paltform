@@ -124,6 +124,66 @@ SeaTunnel→Iceberg→Airflow 模式,和现有数据工程任务用同一套调�
 - 新增命名空间 `feast`,包含 `feature-server`(官方 chart)+ 裸 manifest
   的 Redis。
 - 只做了离线特征(Spark 读 Iceberg)→ 物化 → 在线查询(Redis)这条链路的
-  验证,"训练出来的模型 + KServe 推理请求读取在线特征"这一步是否也一起
-  验证了,见这次改动的 commit message 和 `scripts/12-feast-feature-pipeline.sh`
-  说明——如果没做,后续单独立项时优先做这条,才算真正闭环到 KServe。
+  验证,"训练出来的模型 + KServe 推理请求读取在线特征"这一步没有一起做,
+  留作后续单独立项时优先做,才算真正闭环到 KServe。
+
+## 2026-08-14:端到端验证真正跑通,完整记录踩过的坑
+
+`feast_materialize` 这条 DAG(`feast_apply` + `feast_materialize_incremental`
+两个任务)从第一次触发到最终成功,一共踩了 9 个真实的、各自独立的坑,
+每一个都在活集群上实测确认、修复、重新验证过,不是猜的。按遇到的顺序
+记录,方便以后排查同类问题时对照:
+
+1. **Airflow DAG Run 内部状态冲突**(`409 Unique constraint violation`)——
+   之前 scheduler/ArgoCD 控制面反复崩溃留下的脏数据,清掉历史记录重新
+   触发就好,不是这次改动引入的。
+2. **KubernetesPodOperator 目标 pod 被抢占杀掉**——没设
+   `priorityClassName`,这台机器 CPU 常年紧张,补上 ADR-041 已经建好的
+   `batch` 优先级(executor pod 和目标 pod 两层都要加)。
+3. **feast 命名空间 RBAC 缺失**(`403 Forbidden: cannot list pods`)——
+   Airflow chart 默认的 `airflow-pod-launcher-role` 只在自己命名空间生效,
+   没开 `multiNamespaceMode`;按最小权限原则单独在 `feast` 命名空间建同
+   权限的 Role,不是开集群级权限。
+4. **ConfigMap 整目录挂载导致 Python relative import 报错**——和 Airflow
+   自己挂 DAG 目录踩过的坑同一个原因(`..data` 软链 + 带时间戳的隐藏
+   目录),改用 subPath 分别挂 `feature_store.yaml`/`definitions.py`。
+5. **Registry 的 S3 客户端缺凭据**(`NoCredentialsError`)——registry 走
+   boto3/pyarrow,认标准 `AWS_*` 环境变量,不是给 Spark 用的
+   `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`(Hadoop S3A 客户端专用),和
+   Feast Serving 已经踩过、修过的同一个坑,DAG 这边的 env 是独立配置的,
+   没有共享,单独补一份。
+6. **本机代理拦截 kubelet 日志流,把还在正常跑的任务判定失败**——
+   `get_logs=True` 内部走 kubelet containerLogs,被本机代理软件拦截
+   (`docs/operations/troubleshooting.md` 已经记过的 "Internal Privoxy
+   Error"),反复重试两分半后放弃、直接删 pod。关掉 `get_logs`,靠 Loki/
+   Alloy 兜底日志。
+7. **容器 UID 在 `/etc/passwd` 里没有条目,JVM 启动崩溃**——继承官方
+   `quay.io/feastdev/feature-server` 镜像的 `USER 1001`(OpenShift 风格
+   "任意 UID" 镜像惯例),Spark/Hadoop 的 `UserGroupInformation` 走
+   `UnixLoginModule` 查用户名查不到直接崩(`KerberosAuthException`,
+   `JAVA_GATEWAY_EXITED`)。`HADOOP_USER_NAME` 环境变量不够用(崩溃点在
+   它生效之前),改用 `security_context: run_as_user: 0`(root)——local-lite
+   阶段的务实选择,不是长期方案,见"已知限制"那条。
+8. **demo 表在某次重置里丢了**——`iceberg.demo.orders` 不在了(大概率是
+   CNPG 迁移或推倒重建测试其中一次清空的,没细查是哪一次),用
+   `scripts/08-create-demo-data.sh` 里原样的 DDL/数据重建。这条提醒:
+   跨多个真实事故(ADR-038/039)之后,demo 数据本身也可能悄悄丢失,不能
+   假设它一直都在。
+9. **`{{ ts }}` 这个 Airflow 模板变量在手动触发、`schedule=None` 的 DAG
+   上是未定义的**(`UndefinedError`)——没有 data_interval,基于调度时间
+   的宏都取不到值,不是 Airflow 3.x 废弃了这个宏。改成 shell 里直接取
+   当前 UTC 时间,不依赖 Airflow 模板渲染上下文。
+
+**最终验证结果**(2026-08-14,`scripts/19-feast-feature-pipeline.sh`):
+`feast_apply` 和 `feast_materialize_incremental` 都 `success`,直接查
+Redis(`DBSIZE` = 10,对应 demo 数据的 10 个客户)、直接调 Feature Server
+的 `/get-online-features` 接口,Alice 查出 `region=East, product=Widget,
+amount=120.5`,和插入的原始数据完全一致——不是只看 Airflow 状态,是真的
+查了活数据。
+
+**Why:** 这条 DAG 暴露的问题横跨好几个层面(Airflow 平台本身的资源/RBAC/
+模板机制、K8s 的 ConfigMap 挂载语义、容器镜像的 UID 惯例、Feast/Spark/
+Hadoop 各自的凭据体系),没有一个是 Feast 独有的坑,以后任何"在这个平台
+上新增一个用 KubernetesPodOperator 跑 Spark 作业的 DAG"大概率会重新撞上
+第 2/3/6/7/9 条(资源优先级、跨命名空间 RBAC、日志流、容器 UID、模板
+宏),值得当成这个平台的通用经验,不只是 Feast 这一个组件的收尾细节。

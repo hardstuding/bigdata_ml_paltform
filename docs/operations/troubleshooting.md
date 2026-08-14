@@ -618,8 +618,51 @@
   hard-refresh 后能正确同步到最新 git commit,代理 env 也确认还在。
 - **没有解决的部分**:这只是把 ArgoCD 自己"被自己的资源上限误杀"这个
   问题缓解了,**不是把这台机器物理内存不够的结构性问题解决了**——colima
-  总共 11GB,当前空载基线就已经 86%+,以后如果同时启用的重量级组件更多
+  当时 11GB 的空载基线就已经 86%+,以后如果同时启用的重量级组件更多
   (比如 Feast+Airflow+Trino 三个一起验证的场景就真实撞过一次控制面
-  OOM),这两个数字大概率还要继续往上调。`feast_materialize` 这个 DAG
-  最终是否已经能在稳定的 Airflow 环境下跑出成功记录,这次没有为了控制
-  排查范围而重新验证,是遗留待办(见 ADR-042)。
+  OOM),这两个数字大概率还要继续往上调。**后续更新**:2026-08-14 当天
+  colima 从 11G/4vCPU 扩到 13G/6vCPU,`feast_materialize` 这个 DAG 最终
+  在稳定资源下跑出了成功记录,完整的排查链路(一共 9 个独立的坑,资源
+  抢占只是其中一个)见 [ADR-042](../decisions/042-feast-feature-store.md)
+  "2026-08-14:端到端验证真正跑通"那一节。
+
+### `KubernetesPodOperator` 拉起跨命名空间/自定义镜像的 Spark 任务,一路要闯好几关(RBAC、日志流、容器 UID、模板变量)
+
+- **背景**(2026-08-14,`feast_materialize` DAG 排查过程完整记录,见
+  [ADR-042](../decisions/042-feast-feature-store.md)):这是这个平台第一次
+  用 `KubernetesPodOperator` 在 Airflow 自己的命名空间之外(`namespace=
+  "feast"`)拉起一个跑 Spark 的自定义镜像任务,一路暴露了好几个**通用的、
+  以后任何同类 DAG 都可能重新撞上**的坑,不是 Feast 独有:
+  1. **跨命名空间要单独建 RBAC**:Airflow chart 默认的
+     `airflow-pod-launcher-role` 是 `Role`(命名空间级),不是
+     `ClusterRole`,没开 `multiNamespaceMode` 的话,目标 pod 建在别的
+     命名空间会报 `403 Forbidden: cannot list pods`。按最小权限原则,在
+     目标命名空间单独建一份同权限的 `Role`+`RoleBinding`,不要图省事开
+     `multiNamespaceMode`(会变成集群级 `ClusterRole`)。
+  2. **`get_logs=True` 在这台机器上会把任务拖垮**:内部读日志流走 kubelet
+     `containerLogs`,被本机代理软件拦截(见上面"Internal Privoxy Error"
+     那条),反复 `ApiException(500)` 重试两分半后放弃、直接把还在正常跑
+     的 pod 删掉判定失败。关掉 `get_logs`,靠 Loki/Alloy 兜底日志,
+     operator 只轮询 pod phase(走 K8s API,不受影响)。
+  3. **容器用"任意 UID"镜像(如 `USER 1001`,`/etc/passwd` 没有对应
+     条目)时,Spark/Hadoop 启动会崩**:`UserGroupInformation` 走 JVM 的
+     `UnixLoginModule` 查用户名查不到,直接抛
+     `KerberosAuthException: ... invalid null input: name`,表现成
+     `JAVA_GATEWAY_EXITED`。`HADOOP_USER_NAME` 环境变量不够用(它在
+     `UnixLoginModule` 崩溃点之后才生效),要么用
+     `security_context: run_as_user: 0` 跑 root(local-lite 阶段的务实
+     选择),要么重新 build 镜像在 entrypoint 里给这个 UID 补一条
+     `/etc/passwd`(更干净但要改镜像)。
+  4. **`{{ ts }}`/`{{ ds }}` 这类基于调度时间的 Jinja 宏,在
+     `schedule=None`、手动触发的 DAG Run 上是未定义的**
+     (`UndefinedError: 'ts' is undefined`)——没有 `data_interval`,不是
+     Airflow 3.x 废弃了这些宏(带 schedule 的 DAG 上还能正常用)。需要
+     "当前时间"的场景,改成在 shell 命令里直接取(比如
+     `$(date -u +%Y-%m-%dT%H:%M:%S)`),不要依赖这类宏。
+- 同一次排查里还有两条不算通用、但值得记一笔的坑:K8s ConfigMap 卷整目录
+  挂载会把 `..data` 软链背后带时间戳的隐藏目录名泄漏进 Python 的
+  relative import 路径(和 Airflow 自己挂 DAG 目录踩过的坑同一个原因,
+  解法一样——用 `subPath` 分别挂单个文件);Feast 的 S3 registry 走
+  boto3,认标准 `AWS_*` 环境变量,不是给 Spark 用的
+  `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`(Hadoop S3A 客户端专用),两套
+  凭据变量名要分别配。
