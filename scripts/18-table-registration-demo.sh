@@ -9,7 +9,7 @@
 # 预期状态,不是脚本的 bug(见 ADR-043"还没验证的部分")。
 #
 # 用法:
-#   ./scripts/13-table-registration-demo.sh
+#   ./scripts/18-table-registration-demo.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs

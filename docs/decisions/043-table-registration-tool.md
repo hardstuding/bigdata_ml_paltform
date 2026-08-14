@@ -110,7 +110,7 @@ OpenMetadata 回写这一步会跳过,页面上明确提示"需要管理员配�
   API 契约写的,但"提交请求后 OpenMetadata 里真的能查到这张表、Owner、
   安全等级标签"这个最终结果还没有肉眼确认过。
 - Trino 真实建表这条路径的端到端验证见
-  `scripts/13-table-registration-demo.sh` 的运行记录(如果这次跑成功了会在
+  `scripts/18-table-registration-demo.sh` 的运行记录(如果这次跑成功了会在
   这里更新;如果卡在别的地方,以最终验证脚本的实际输出为准)。
 - 负责人解析成 OpenMetadata `owners` 这条路径依赖"这个用户之前登录过
   OpenMetadata UI",没有专门验证"一个全新用户"和"一个已登录过的用户"两种
