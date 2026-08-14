@@ -52,9 +52,12 @@ spec:
           command: ["feast", "serve", "-h", "0.0.0.0"]
           ports:
             - containerPort: 6566
+          # cpu request 压到 50m——这台机器 4 vCPU 常态就已经把 96% 都
+          # request 满了(见 ADR-041 的背景),200m 直接导致
+          # FailedScheduling(Insufficient cpu),实测调整。
           resources:
             requests:
-              cpu: 200m
+              cpu: 50m
               memory: 768Mi
             limits:
               memory: 1536Mi
