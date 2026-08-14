@@ -219,6 +219,28 @@ else
   echo "跳过 permission-request-app client(permission-request-app/oauth2-proxy-secret 还不存在,等这个 Application 先同步一次)"
 fi
 
+echo "==> table-registration-app client(给挡在前面的 oauth2-proxy 用,见 ADR-043)"
+if kubectl -n table-registration-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  TRA_REDIRECT_URIS='["http://table-registration.local-lite.test/oauth2/callback"]'
+  tra_client_id=$(kcadm get clients -r platform -q clientId=table-registration-app --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+  if [ -n "$tra_client_id" ]; then
+    echo "client table-registration-app 已存在,只同步 redirectUris,不轮换密钥"
+    kcadm update "clients/${tra_client_id}" -r platform -s "redirectUris=${TRA_REDIRECT_URIS}"
+  else
+    TRA_OAUTH_SECRET="$(gen_password)"
+    kcadm create clients -r platform \
+      -s clientId=table-registration-app -s enabled=true -s protocol=openid-connect -s publicClient=false \
+      -s secret="$TRA_OAUTH_SECRET" \
+      -s "redirectUris=${TRA_REDIRECT_URIS}" \
+      -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
+    kubectl -n table-registration-app patch secret oauth2-proxy-secret --type merge \
+      -p "{\"stringData\":{\"client-secret\":\"${TRA_OAUTH_SECRET}\"}}"
+    echo "已创建 client table-registration-app,密钥写入 table-registration-app/oauth2-proxy-secret 的 client-secret"
+  fi
+else
+  echo "跳过 table-registration-app client(table-registration-app/oauth2-proxy-secret 还不存在,等这个 Application 先同步一次)"
+fi
+
 echo "==> argo-workflows client"
 # 和 openmetadata 同一个原因不能用 create_client_if_absent——argo-workflows
 # chart 的 server.sso.clientId/clientSecret 都是 secretRef(key 名字是

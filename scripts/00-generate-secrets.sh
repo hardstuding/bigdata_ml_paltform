@@ -144,19 +144,62 @@ ensure_secret trino     trino-internal-secret secret=RANDOM
 # 走 Keycloak OAuth2。密码文件要 bcrypt 哈希,cost 至少 8(Trino 文档写的
 # 最低要求),依赖系统自带的 htpasswd(macOS/大多数 Linux 发行版都有,来自
 # apache2-utils 或系统自带的 httpd 工具)。
-if kubectl -n trino get secret trino-service-account >/dev/null 2>&1; then
-  echo "已存在,跳过: trino/trino-service-account"
-else
-  SVC_PW="$(gen_password)"
-  SVC_HASH="$(htpasswd -nbBC 10 superset_service "$SVC_PW")"
-  kubectl -n trino create secret generic trino-service-account \
-    --from-literal=username=superset_service \
-    --from-literal=password="$SVC_PW" \
-    --from-literal=password.db="$SVC_HASH" \
-    --from-literal=password-authenticator.properties="password-authenticator.name=file
+## trino-service-account 这个 Secret 的 password.db 是一个共享的 htpasswd
+## 风格文件(一行一个 `username:bcryptHash`),Trino 的 file authenticator
+## 一次只能指到一个文件,所以每新增一个服务账号(2026-08-14 新增
+## table_registration_service,见 docs/decisions/043-table-registration-tool.md)
+## 都要往同一个文件里追加一行,不能各建各的 Secret——用
+## ensure_trino_service_account 这个函数统一处理"没有这个用户就追加、密码是
+## 独立生成、已有的用户不动"这几件事,保证幂等,不会因为新增账号而破坏已有
+## 账号的密码。
+ensure_trino_service_account() {
+  local username="$1"
+  local pw hash
+  if kubectl -n trino get secret trino-service-account >/dev/null 2>&1; then
+    local existing_db
+    existing_db="$(kubectl -n trino get secret trino-service-account -o jsonpath='{.data.password\.db}' | base64 -d)"
+    if echo "$existing_db" | grep -q "^${username}:"; then
+      echo "已存在,跳过: trino/trino-service-account 里的 ${username}"
+      return
+    fi
+    pw="$(gen_password)"
+    hash="$(htpasswd -nbBC 10 "$username" "$pw")"
+    local new_db
+    new_db="$(printf '%s\n%s' "$existing_db" "$hash")"
+    # 用 merge patch 只追加/更新 password.db 和这个用户专属的
+    # password-<username> 这两个 key,不碰 Secret 里已有的其它 key——尤其是
+    # 顶层的 username/password,那两个字段是最早创建这个 Secret 时那个账号
+    # (superset_service)专用、被复制进 superset 命名空间直接消费的,后来新增
+    # 的账号绝不能覆盖掉它们,否则会打断 Superset 的 Trino 连接。
+    kubectl -n trino patch secret trino-service-account --type merge -p "$(python3 -c "
+import json, base64, sys
+db, pw = sys.argv[1].encode(), sys.argv[2].encode()
+print(json.dumps({'data': {
+    'password.db': base64.b64encode(db).decode(),
+    'password-${username}': base64.b64encode(pw).decode(),
+}}))
+" "$new_db" "$pw")" >/dev/null
+    echo "已追加: trino/trino-service-account 里的 ${username}(密码见 ${OUT_FILE})"
+  else
+    pw="$(gen_password)"
+    hash="$(htpasswd -nbBC 10 "$username" "$pw")"
+    kubectl -n trino create secret generic trino-service-account \
+      --from-literal=username="$username" \
+      --from-literal=password="$pw" \
+      --from-literal="password-${username}=${pw}" \
+      --from-literal=password.db="$hash" \
+      --from-literal=password-authenticator.properties="password-authenticator.name=file
 file.password-file=/secrets/trino-service-account/password.db"
-  echo "已创建: trino/trino-service-account"
-fi
+    echo "已创建: trino/trino-service-account(首个账号 ${username})"
+  fi
+  echo "trino/${username}: $pw" >> "$OUT_FILE"
+}
+
+ensure_trino_service_account superset_service
+# table-registration-app(ADR-043)专用的 Trino 服务账号,不复用
+# superset_service——各组件各自独立账号是这个项目的一贯做法(见 ADR-021),
+# 方便以后单独追溯/吊销。
+ensure_trino_service_account table_registration_service
 
 ensure_secret data superset-db username=superset password=RANDOM
 
@@ -283,6 +326,20 @@ else
     --from-literal=cookie-secret="$COOKIE_SECRET" \
     --from-literal=client-secret=PLACEHOLDER
   echo "已创建: permission-request-app/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
+fi
+
+# 建表注册工具,同一个 oauth2-proxy 模式(见 ADR-043)。
+if kubectl -n table-registration-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  echo "已存在,跳过: table-registration-app/oauth2-proxy-secret"
+elif ! kubectl get namespace table-registration-app >/dev/null 2>&1; then
+  echo "跳过: table-registration-app/oauth2-proxy-secret(namespace 还不存在,等这个 Application 先同步一次)"
+else
+  COOKIE_SECRET="$(openssl rand -base64 24)"
+  kubectl -n table-registration-app create secret generic oauth2-proxy-secret \
+    --from-literal=client-id=table-registration-app \
+    --from-literal=cookie-secret="$COOKIE_SECRET" \
+    --from-literal=client-secret=PLACEHOLDER
+  echo "已创建: table-registration-app/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
 fi
 
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"

@@ -119,8 +119,11 @@
   结论仍然是"权限 OA 审批系统是最重的一块,建议等平台核心稳定后单独
   立项",这里只是确保这个待办不会再丢一次,不代表已经开始实现——
   其中"资源隔离"相对独立,**已经单独做完并验证过,见
-  [ADR-041](decisions/041-queue-resource-management.md)**,其余几条
-  (建表工具/权限 OA/血缘/权限交接/资源回收/深度回溯/AI 角色化/知识
+  [ADR-041](decisions/041-queue-resource-management.md)**;"建表工具"
+  (权限 OA 审批系统 Phase 1)也已实现,见
+  [ADR-043](decisions/043-table-registration-tool.md)——只做登记(建表 +
+  回写负责人/安全等级进 OpenMetadata),分级审批链路本身还没做。其余几条
+  (权限 OA 分级审批/血缘/权限交接/资源回收/深度回溯/AI 角色化/知识
   沉淀)仍然是待规划状态。
 - ~~共享 Postgres 的 HA 迁移什么时候做~~ **已解决(2026-08-13,ADR-038/039)**:
   用户在场安排了迁移窗口,真正切换了共享实例到 CloudNativePG operator

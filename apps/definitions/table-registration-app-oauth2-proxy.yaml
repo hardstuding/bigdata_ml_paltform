@@ -1,0 +1,48 @@
+# 和 permission-request-app 同一个 oauth2-proxy 模式(ADR-032)。这个不需要
+# pass_access_token/解 groups——建表注册这次没有审批门槛,任何登录用户都能
+# 提交(见 ADR-043),不需要拿 groups claim 判断谁是审批人。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: table-registration-app-oauth2-proxy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://oauth2-proxy.github.io/manifests
+    chart: oauth2-proxy
+    targetRevision: 10.7.0
+    helm:
+      valuesObject:
+        config:
+          existingSecret: oauth2-proxy-secret
+          configFile: |
+            provider = "oidc"
+            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
+            redirect_url = "http://table-registration.local-lite.test/oauth2/callback"
+            upstreams = [ "http://table-registration-app.table-registration-app.svc.cluster.local:8080/" ]
+            email_domains = [ "*" ]
+            cookie_secure = false
+            skip_provider_button = true
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - table-registration.local-lite.test
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: table-registration-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
