@@ -384,38 +384,36 @@ data:
         """按 ADR-040 原文规则(L2 在 L1 基础上叠加,不是只要 +2)算出这次申请
         需要哪几级、每级谁来审。返回 [(step_order, role, username), ...]。
 
-        同一个人可能在一级里身兼多个角色(比如申请人的直属上级正好也是这张表
-        的负责人),这种情况只记一行,不用同一个人对同一级批两次。"""
+        "叠加"指的是**总共需要哪些人批准**,不是"L1 的人到 L2 要重新批一遍"
+        ——状态机本来就是按 step_order 顺序推进(前一级全部批完才解锁下一级),
+        L1 的人在 L1 就已经批完了,没有理由在 L2 再点一次。每一级只放"这一级
+        新增的人",用一个贯穿全程的 `already_required` 集合去重:同一个人不管
+        是在同一级身兼多角色、还是在更高级别里又被算到过一次,都只需要批准
+        一次(2026-08-14 实测过第一版实现漏了这个,L2/L3 会让 L1 的人重复批,
+        这是修过的真实 bug,不是从一开始就设计对的)。"""
         chain = get_manager_chain(applicant_username, levels=2)
         manager = chain[0] if len(chain) >= 1 else None
         manager_manager = chain[1] if len(chain) >= 2 else None
 
-        levels = []
-        l1 = []
+        levels = [[]]
         if manager:
-            l1.append(("manager", manager))
+            levels[0].append(("manager", manager))
         if table_owner:
-            l1.append(("table_owner", table_owner))
-        levels.append(l1)
+            levels[0].append(("table_owner", table_owner))
 
         if security_level >= 2:
-            l2 = list(l1)
-            if manager_manager:
-                l2.append(("manager_manager", manager_manager))
-            levels.append(l2)
+            levels.append([("manager_manager", manager_manager)] if manager_manager else [])
 
         if security_level >= 3:
-            l3 = list(levels[-1])
-            l3.append(("designated_admin", DESIGNATED_ADMIN))
-            levels.append(l3)
+            levels.append([("designated_admin", DESIGNATED_ADMIN)])
 
         result = []
+        already_required = set()
         for step_order, approvers in enumerate(levels, start=1):
-            seen = set()
             for role, uname in approvers:
-                if uname in seen:
+                if uname in already_required:
                     continue
-                seen.add(uname)
+                already_required.add(uname)
                 result.append((step_order, role, uname))
         return result
 
