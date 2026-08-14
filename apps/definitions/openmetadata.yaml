@@ -36,7 +36,7 @@ spec:
         openmetadata:
           config:
             elasticsearch:
-              host: opensearch
+              host: opensearch-cluster-master
               scheme: https
               auth:
                 enabled: true
