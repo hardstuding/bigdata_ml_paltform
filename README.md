@@ -1,6 +1,7 @@
 # bigdata_ml_paltform
 
 [![Validate](https://github.com/hardstuding/bigdata_ml_paltform/actions/workflows/validate.yml/badge.svg)](https://github.com/hardstuding/bigdata_ml_paltform/actions/workflows/validate.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 Kubernetes-native 的 Data + AI 平台骨架:统一身份认证、GitOps 驱动的部署方式、按规模分级的环境画像(本机验证 → 云端集成 → 生产)。目标不是照抄一套 CDH,而是给还在用 YARN 时代大数据平台的团队一条能力对等、但运维模型现代化的迁移路径,同时兼容接入现有的遗留 Hadoop 集群做渐进迁移。
 
