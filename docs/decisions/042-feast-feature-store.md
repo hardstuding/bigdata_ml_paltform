@@ -107,6 +107,16 @@ SeaTunnel→Iceberg→Airflow 模式,和现有数据工程任务用同一套调�
   真正上生产,需要重新评估——要么加 PVC + AUTH,要么这时候再重新看一遍
   Redis 官方 chart 生态是否有变化(比如 Bitnami 订阅版、或者出现新的
   官方维护选项)。
+- `feast_materialize` DAG 里的 `feast apply`/`materialize-incremental`
+  目标 pod 用 `security_context: run_as_user: 0`(root)跑——`apps/feast/
+  feature-server-image` 这个自建镜像继承官方镜像的 `USER 1001`(数字
+  UID,`/etc/passwd` 没有对应条目),Spark/Hadoop 启动时
+  `UserGroupInformation` 走 JVM 的 `UnixLoginModule` 查不到用户名会直接
+  崩(`KerberosAuthException`,`JAVA_GATEWAY_EXITED`),`HADOOP_USER_NAME`
+  这个环境变量不够用(崩溃点在它生效之前)。用 root 跑是本机 local-lite
+  阶段的务实选择,不是长期方案——更干净的修法是重新 build 这个镜像,在
+  entrypoint 里给 UID 1001 动态补一条 `/etc/passwd`(常见的"任意 UID"
+  镜像 nss_wrapper 套路),留作后续课题。
 
 ## 后果
 

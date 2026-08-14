@@ -96,8 +96,13 @@ MINIO_ENV = [
     # 靠 OS 层查用户名,查不到就抛
     # `KerberosAuthException: ... NullPointerException: invalid null
     # input: name`,把整个 spark-submit 直接搞崩(Java gateway 进程还没起
-    # 来就退出,PySpark 报 JAVA_GATEWAY_EXITED)。设 HADOOP_USER_NAME 能让
-    # Hadoop 优先信这个环境变量,绕开 OS 层查找,不用改镜像加 passwd 条目。
+    # 来就退出,PySpark 报 JAVA_GATEWAY_EXITED)。
+    # 补充(实测):单独设 HADOOP_USER_NAME 不够——UnixLoginModule 在
+    # doSubjectLogin 里是先建 Subject(这一步就是崩溃点),HADOOP_USER_NAME
+    # 是后一步才生效的"改名"机制,不能跳过前面这步。真正绕开的办法是让容器
+    # 以 UID 0(root)跑,见下面 BASE_KWARGS 里的 security_context——root 的
+    # /etc/passwd 查找天然不会失败。HADOOP_USER_NAME 留着不影响正确性,一起
+    # 保留。
     k8s.V1EnvVar(name="HADOOP_USER_NAME", value="feast"),
 ]
 
@@ -154,6 +159,14 @@ EXECUTOR_POD_OVERRIDE = {
 # get_logs,operator 改成只轮询 pod phase(走 K8s API,不经过 kubelet
 # containerLogs,不受影响)判断成功/失败,日志本来就有 Loki/Alloy 兜底
 # (见 troubleshooting.md 里同一条记录的"从设计上完全绕开这条路径")。
+# 让容器以 root(UID 0)跑,绕开上面 HADOOP_USER_NAME 那条注释说的
+# UnixLoginModule 崩溃——root 的 /etc/passwd 查找天然能成功。这是本机
+# local-lite 阶段的务实选择,不是长期方案:更干净的修法是重新 build
+# apps/feast/feature-server-image 时在 entrypoint 里给 UID 1001 动态补一条
+# /etc/passwd(常见的"任意 UID"镜像 nss_wrapper 套路),留作后续课题,记进
+# ADR-042。
+ROOT_SECURITY_CONTEXT = k8s.V1PodSecurityContext(run_as_user=0)
+
 BASE_KWARGS = dict(
     namespace="feast",
     image=FEAST_IMAGE,
@@ -163,6 +176,7 @@ BASE_KWARGS = dict(
     env_vars=MINIO_ENV,
     container_resources=CONTAINER_RESOURCES,
     priority_class_name="batch",
+    security_context=ROOT_SECURITY_CONTEXT,
     get_logs=False,
     is_delete_operator_pod=True,
     startup_timeout_seconds=300,
