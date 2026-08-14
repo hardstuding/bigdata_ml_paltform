@@ -1,0 +1,51 @@
+# 授权 airflow 命名空间的 airflow-worker ServiceAccount 能在 feast 命名空间
+# 管理 pod。
+#
+# 背景:apps/airflow/dags/feast_materialize.py 用 KubernetesPodOperator 把
+# feast apply/materialize 的目标 pod 建在 feast 命名空间(不是 airflow 自己
+# 的命名空间),但 Airflow 官方 chart 默认只在自己的命名空间建
+# airflow-pod-launcher-role(一个 Role,不是 ClusterRole,天然不跨命名空间)
+# ——没开 multiNamespaceMode 的话,KubernetesPodOperator 想管别的命名空间的
+# pod 时会被 RBAC 拒绝。实测确认:feast_apply 任务报
+# `403 Forbidden: pods is forbidden: User
+# "system:serviceaccount:airflow:airflow-worker" cannot list resource
+# "pods"...in the namespace "feast"`。
+#
+# 没有选择开 chart 的 multiNamespaceMode(会换成 ClusterRole,授权范围是
+# "所有命名空间"),而是照抄 airflow-pod-launcher-role 的规则、只在 feast
+# 这一个命名空间单独建同样权限的 Role——按最小权限原则来,和这个项目一贯
+# "每个命名空间的访问范围精确到刚好够用"的习惯一致(见 NetworkPolicy 的
+# 消费者名单模式)。规则内容照抄自
+# `kubectl get role airflow-pod-launcher-role -n airflow -o yaml`。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-worker-pod-launcher-role
+  namespace: feast
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "list", "get", "patch", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-worker-pod-launcher-rolebinding
+  namespace: feast
+subjects:
+  - kind: ServiceAccount
+    name: airflow-worker
+    namespace: airflow
+roleRef:
+  kind: Role
+  name: airflow-worker-pod-launcher-role
+  apiGroup: rbac.authorization.k8s.io
