@@ -666,3 +666,30 @@
   boto3,认标准 `AWS_*` 环境变量,不是给 Spark 用的
   `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`(Hadoop S3A 客户端专用),两套
   凭据变量名要分别配。
+
+### 自建的 `python:3.12-slim` 薄应用 pip install 反复 exit 124,但 `curl` 从其他 pod 测同一个网络明明是通的
+
+- **现象**:`table-registration-app` 这个自建薄应用(ConfigMap 挂源码 +
+  `pip install` 启动)反复 `CrashLoopBackoff`,`kubectl describe pod` 显示
+  `exitCode: 124`(`timeout` 命令自己触发的,不是应用代码报错)。从另一个
+  pod 直接 `curl` `pypi.org`/`deb.debian.org` 都能秒回 200,说明这台机器
+  当时的网络本身是通的,不是"完全连不上"这种直观的网络故障。
+- **原因**:这个 Deployment 的 `env` 里完全没有配 `HTTP_PROXY`/
+  `HTTPS_PROXY`——`apps/iam-sync/manifests/cronjob.yaml` 早就因为同一类
+  问题配了这两个变量(colima 虚拟网络直连外网不稳定,需要走宿主机代理),
+  但后来新建的 `table-registration-app`/`permission-request-app` 这两个
+  自建应用的 Deployment 漏配了,当时想当然地认为"这个组件只用 pip 不用
+  git/apt-get,应该不会踩到同一个坑"——这个假设是错的,pip 连 PyPI 一样
+  会受这台机器网络不稳定的影响,不是只有 apt-get/git 会。
+  `permission-request-app` 当时侥幸第一次就装成功了,只是运气好,不代表
+  它没有同样的隐患。
+- **处理**:两个 Deployment 都补上和 `iam-sync` 一致的
+  `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 三个环境变量(地址来自
+  `colima ssh -- env | grep -i proxy`)。以后新建任何"`python:3.12-slim`
+  镜像 + 启动时 `pip install`/`apt-get install`"这个模式的自建组件,直接
+  照抄这三个环境变量,不要假设"这次不用 apt-get/git 应该没事"——判断
+  错过一次,不要再错第二次。
+- **排查方法留档**:怀疑这类"网络间歇性故障"时,先用一个独立的、干净的
+  pod(比如 `curlimages/curl`)直接测目标地址通不通,能排除"网络整体故障"
+  和"这个 Deployment 自己的网络配置缺失"这两种可能,不要一上来就怀疑
+  DNS 或者代理软件本身出了新问题。
