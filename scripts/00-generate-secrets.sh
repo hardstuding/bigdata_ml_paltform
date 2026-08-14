@@ -363,6 +363,9 @@ done
 echo "==> 复制 Trino 服务账号凭据给 Superset(配 Trino 数据源连接要用)"
 copy_secret trino superset trino-service-account
 
+echo "==> 复制 Trino 服务账号凭据给建表注册工具(ADR-043,连 Trino 执行建表 DDL 要用)"
+copy_secret trino table-registration-app trino-service-account
+
 echo
 echo "完成。新生成的凭据(如果有)已追加到: ${OUT_FILE}"
 echo "这个文件不会被提交到 git(在 .gitignore 里),自己保管好。"
