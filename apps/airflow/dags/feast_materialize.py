@@ -53,11 +53,37 @@ MINIO_ENV = [
 
 # KubernetesExecutor 这台机器上默认 BestEffort QoS 的 pod 是 OOM killer
 # 第一目标(见 seatunnel_device_events.py 里同样的教训),pyspark 本地模式
-# 启动一个 JVM,内存要给够,不能沿用那个 DAG 的 256Mi/512Mi。
+# 启动一个 JVM,内存要给够,不能沿用那个 DAG 的 256Mi/512Mi。这是
+# KubernetesPodOperator 实际拉起来跑 feast 命令那个目标 pod(在 feast
+# 命名空间)的资源。
 CONTAINER_RESOURCES = k8s.V1ResourceRequirements(
     requests={"cpu": "300m", "memory": "1Gi"},
     limits={"memory": "2Gi"},
 )
+
+# 这条是另一层、容易漏掉的坑:KubernetesPodOperator 自己的调度/轮询逻辑
+# 跑在 KubernetesExecutor 起的"任务运行时" pod 里(在 airflow 命名空间,
+# 不是上面 CONTAINER_RESOURCES 覆盖的那个 feast 命名空间 pod)——这层用的
+# 是平台级默认值(apps/definitions/airflow.yaml 里 workers.kubernetes.
+# resources,256Mi/512Mi),第一次跑就被实测证实不够:任务进程直接
+# SIGKILL(exit_code=-9),不是我这次自定义的目标 pod 出问题。和
+# seatunnel_device_events.py 的 POD_OVERRIDE 是同一个坑,同一个修法,只是
+# 这里在这条 DAG 里第一次真正踩到。
+EXECUTOR_POD_OVERRIDE = {
+    "pod_override": k8s.V1Pod(
+        spec=k8s.V1PodSpec(
+            containers=[
+                k8s.V1Container(
+                    name="base",
+                    resources=k8s.V1ResourceRequirements(
+                        requests={"cpu": "100m", "memory": "512Mi"},
+                        limits={"memory": "1Gi"},
+                    ),
+                )
+            ]
+        )
+    )
+}
 
 BASE_KWARGS = dict(
     namespace="feast",
@@ -70,6 +96,7 @@ BASE_KWARGS = dict(
     get_logs=True,
     is_delete_operator_pod=True,
     startup_timeout_seconds=300,
+    executor_config=EXECUTOR_POD_OVERRIDE,
 )
 
 with DAG(
