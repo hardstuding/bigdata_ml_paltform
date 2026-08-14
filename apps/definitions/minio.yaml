@@ -5,6 +5,8 @@ kind: Application
 metadata:
   name: minio
   namespace: argocd
+  labels:
+    gitops-verify: "task15-drift-test"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
