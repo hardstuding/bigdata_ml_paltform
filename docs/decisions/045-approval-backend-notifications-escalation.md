@@ -114,9 +114,51 @@ EXTERNAL_OA_WEBHOOK_URL` 把这一步的信息发出去,状态改成
   类似"要不要加XX企业能力"的请求,先问一句"这个项目现在的真实用户规模
   是否撑得起这个投入",不要默认照单全收。
 
-## 验证
+## 验证(2026-08-14 深夜,真实端到端跑通,过程中发现并修复了 3 个真实 bug)
 
-见 `docs/operations/troubleshooting.md`(如果验证中发现真实坑会补进去)
-和这次会话的验证记录:webhook 后端契约用 curl 模拟外部回调验证状态流转
-正确;通知/升级没有真实企微群/外部系统可测,只验证了"未配置时静默降级"
-这一半,真实推送效果没有验证过,如实记录,不假装测过。
+真实注册了 L1/L2/L3 三张测试表(临时 un-park Trino,验证完重新
+park 回去),通过真实路由跑出申请→分级审批→写回 grants.csv 的完整链路,
+用直接查 SQLite + `git fetch` 核对远端仓库(不是只信页面显示)确认:
+
+- **L1(2 人 1 级)**:manager+table_owner 都批准后,`table_access_requests`
+  正确变成 `approved`,`table-access-grants.csv` 真的被 push 到了远端
+  仓库(`git fetch` 拉到了 app 自己 push 的那个 commit,内容字段核对正确)。
+- **L2(3 人 2 级)**:只批 L1 的一个人时,第 2 级的行确认还没有
+  `activated_at`,审批人在自己的"待我审批"列表里也确实看不到——两个 L1
+  的人都批完之后,第 2 级才真正激活(`activated_at` 被设置),对应审批人
+  这时候才能看到。全部批完后同样正确写回 grants.csv。
+- **拒绝路径**:L3 场景下拒绝 L1 的一个人,`table_access_requests` 立刻
+  变成 `rejected`,其余还没处理的行(包括还没激活的第 2 级)全部正确标成
+  `skipped`,没有遗留任何"看起来还在等谁审批"的僵尸状态。
+- **权限交接**:一次操作把某人名下待处理的 `approval_steps` 全部转移给
+  接手人,数据库层面核对过确实改了 `approver_username`。
+- **审计看板**:用构造的测试 JWT(带 `groups: [platform-team]`,这个 app
+  本来就不校验签名,和它自己的信任边界一致)访问 `/audit`,确认能看到
+  全部测试数据,状态徽章渲染正确。
+
+**过程中真实发现并修复的 3 个 bug(不是设计阶段就想到的,是跑出来才发现
+的)**:
+
+1. **`build_approval_steps` 会让 L1 的人在 L2/L3 重复批一次**——第一版
+   `l2 = list(l1)` 把 L1 的人复制进了 L2 的行,状态机要求他们对同一张表
+   点两次批准。改成用一个贯穿全程的 `already_required` 集合去重,每一级
+   只放新增的人。
+2. **escalation CronJob 被 NetworkPolicy 挡住**——`permission-request-app`
+   命名空间的 `default-deny-ingress` 只放行 oauth2-proxy 标签的流量,
+   CronJob 的 Job pod 没有这个标签,直接被拒绝。给 Job pod 加专属标签
+   + 补一条对应的 NetworkPolicy ingress 规则解决。
+3. **NetworkPolicy 规则本身生效有延迟**——修完第 2 条后手动触发 Job 还是
+   偶发失败,发现是全新 pod 的 NetworkPolicy 规则在 CNI 上生效需要几秒,
+   Job 容器命令起来立刻执行,精确踩中这个窗口期。给 `curl` 加
+   `--retry-connrefused`(普通 `--retry` 不重试"连接被拒")解决。
+
+**没有验证到的部分,如实记录**:OpenMetadata 回写(建表工具那条路径)
+这次卡在 `admin1` 这个 bot 的角色是空的(`roles: []`),只能读不能写,
+403 Forbidden——这不是这次改动引入的问题,是这个 bot 本来就没有被正确
+授权,需要人在 OpenMetadata UI 里给它配角色。为了不让这一个外部依赖
+卡住整轮验证,后续测试改成直接操作数据库 + 调用真实的
+`build_approval_steps`/`activate_next_step` 等函数,绕开 OpenMetadata
+查询这一步,单独验证审批链路本身的正确性——这意味着"提交申请时自动查
+OpenMetadata 拿到安全等级"这条路径,这次没有被真实走通过,只验证了
+"查不到时优雅拒绝"这一半。企微通知/webhook 可插拔后端同理,没有真实
+群/外部系统可测,只验证了"未配置时静默降级"这一半。
