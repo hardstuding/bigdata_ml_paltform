@@ -66,6 +66,29 @@ DESIGNATED_ADMIN = os.environ.get("DESIGNATED_ADMIN", "admin")
 OPENMETADATA_URL = os.environ.get("OPENMETADATA_URL", "http://openmetadata.openmetadata.svc.cluster.local:8585")
 OPENMETADATA_TOKEN = os.environ.get("OPENMETADATA_TOKEN", "")
 
+# ADR-045:企业微信群机器人 webhook,官方标准格式,未配置时 notify_wecom()
+# 静默跳过——和 GIT_TOKEN/OPENMETADATA_TOKEN 同一个"敏感凭据不自动生成"
+# 的降级模式,不是必须品。
+WECOM_WEBHOOK_URL = os.environ.get("WECOM_WEBHOOK_URL", "")
+
+# 一个审批步骤等这么多小时没人处理,先提醒;等到 2 倍时长还没处理,才真正
+# 升级换人审(不是自动通过,见 ADR-045)。
+ESCALATION_HOURS = float(os.environ.get("ESCALATION_HOURS", "48"))
+
+# /internal/escalation-check 这个内部端点给 CronJob 调,不走 oauth2-proxy/
+# 人类登录那一套,靠这个共享密钥防止集群内其他东西误触发。没配置时这个
+# 端点直接拒绝所有请求(拒绝比误开安全)。
+INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN", "")
+
+# ADR-045:可插拔审批后端。"local"(默认)就是现在这套自己收批准/拒绝
+# 点击;"webhook" 模式下,一个 step 轮到时改成 POST 到
+# EXTERNAL_OA_WEBHOOK_URL 出去,不在这个页面等人点,靠外部系统回调
+# /table-access/step/<id>/external-callback 报告结果。这次没有真实对接
+# 目标,只交付这个协议本身,见 ADR-045 的范围边界说明。
+APPROVAL_BACKEND = os.environ.get("APPROVAL_BACKEND", "local")
+EXTERNAL_OA_WEBHOOK_URL = os.environ.get("EXTERNAL_OA_WEBHOOK_URL", "")
+EXTERNAL_OA_CALLBACK_TOKEN = os.environ.get("EXTERNAL_OA_CALLBACK_TOKEN", "")
+
 APPROVAL_ROLE_LABELS = {
     "manager": "直属上级",
     "manager_manager": "上级的上级",
@@ -124,6 +147,17 @@ def init_db():
         )
         """
     )
+    # ADR-045 加的字段,用 ALTER TABLE 做轻量迁移(这个 app 一直是"单文件
+    # SQLite,没有专门的迁移工具"这个量级,CREATE TABLE IF NOT EXISTS 对
+    # 已存在的表不会补新列,所以要单独处理;已经加过就会报错,忽略即可,
+    # 是幂等的)。
+    for stmt in (
+        "ALTER TABLE approval_steps ADD COLUMN activated_at TEXT",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
@@ -146,6 +180,22 @@ def get_current_user():
 
 def is_approver(groups):
     return APPROVER_GROUP in groups
+
+
+def notify_wecom(text: str):
+    """企业微信群机器人标准 webhook 格式(官方文档就是这个 body 结构,
+    不是猜的)。WECOM_WEBHOOK_URL 没配就静默跳过;发送失败也不抛出去
+    影响主流程——通知是锦上添花,不能因为通知失败把审批操作本身搞挂。"""
+    if not WECOM_WEBHOOK_URL:
+        return
+    try:
+        requests.post(
+            WECOM_WEBHOOK_URL,
+            json={"msgtype": "text", "text": {"content": text}},
+            timeout=5,
+        )
+    except requests.RequestException:
+        pass
 
 
 def apply_to_git(username: str, group_name: str):
@@ -356,19 +406,76 @@ def build_approval_steps(applicant_username: str, table_owner: str, security_lev
 
 
 def current_step_order(conn, request_id: int):
-    """这个申请现在卡在第几级——第一个还有 pending 行的 step_order。全部
-    批完了返回 None。"""
+    """这个申请现在卡在第几级——第一个还有未解决行(本地待审或者已经
+    转出去等外部 OA 回调)的 step_order。全部批完了返回 None。"""
     row = conn.execute(
-        "SELECT MIN(step_order) AS s FROM approval_steps WHERE request_id=? AND status='pending'",
+        "SELECT MIN(step_order) AS s FROM approval_steps WHERE request_id=? AND status IN ('pending', 'pending_external')",
         (request_id,),
     ).fetchone()
     return row["s"]
 
 
+def dispatch_step(conn, step_row):
+    """一行 approval_steps 变成"轮到它"时调用(提交时的第一级,或者前一级
+    刚批完解锁下一级)。按 APPROVAL_BACKEND 决定接下来怎么办:
+    - local(默认):留在 status='pending',发一条企微通知给这个人。
+    - webhook:POST 到外部 OA,状态改成 pending_external(不再出现在
+      "待我审批"列表里,责任已经转移出去了,见 ADR-045)。POST 失败就
+      留在 pending,退化成本地审批,不能让外部系统抽风导致这一步卡死
+      没人能处理。"""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE approval_steps SET activated_at=? WHERE id=? AND activated_at IS NULL",
+        (now, step_row["id"]),
+    )
+    req = conn.execute(
+        "SELECT * FROM table_access_requests WHERE id=?", (step_row["request_id"],)
+    ).fetchone()
+    if APPROVAL_BACKEND == "webhook" and EXTERNAL_OA_WEBHOOK_URL:
+        try:
+            requests.post(
+                EXTERNAL_OA_WEBHOOK_URL,
+                json={
+                    "request_id": step_row["request_id"], "step_id": step_row["id"],
+                    "table_fqn": req["table_fqn"], "security_level": req["security_level"],
+                    "approver_username": step_row["approver_username"],
+                    "approver_role": step_row["approver_role"],
+                    "applicant": req["username"], "reason": req["reason"],
+                },
+                timeout=5,
+            )
+            conn.execute("UPDATE approval_steps SET status='pending_external' WHERE id=?", (step_row["id"],))
+            return
+        except requests.RequestException:
+            pass  # 退化成本地审批,不吞掉这一步
+    notify_wecom(
+        f"你有一条表访问申请待审批:{req['username']} 申请 {req['table_fqn']}"
+        f"(安全等级 {req['security_level']}),你的角色是"
+        f"{APPROVAL_ROLE_LABELS.get(step_row['approver_role'], step_row['approver_role'])}。"
+    )
+
+
+def activate_next_step(conn, request_id: int):
+    """把当前最早的 pending step_order 下所有 pending 行标成"已激活"并
+    分发出去(见 dispatch_step)。用在:①提交申请时激活第一级;②某一级
+    全部批完、状态机推进到下一级时。"""
+    step_order = current_step_order(conn, request_id)
+    if step_order is None:
+        return
+    rows = conn.execute(
+        "SELECT * FROM approval_steps WHERE request_id=? AND step_order=? AND status='pending' AND activated_at IS NULL",
+        (request_id, step_order),
+    ).fetchall()
+    for row in rows:
+        dispatch_step(conn, row)
+
+
 def finalize_table_request_if_done(conn, request_id: int):
     """一个 approval_steps 行状态变化后调用:检查这个申请是不是该终态了
-    (全部批准,或者有任何一步被拒)。是的话更新 table_access_requests 的
-    status,是"approved"的话顺便写 grants.csv。"""
+    (全部批准,或者有任何一步被拒),不是就推进到下一级。"escalated" 状态
+    的行是"已经换人审"的旧行,不计入"是否全部批准"的判断(见 ADR-045 的
+    升级机制),"skipped" 是申请已经因为别的原因被拒之后的收尾状态,同样
+    不计入。"""
     rows = conn.execute(
         "SELECT status FROM approval_steps WHERE request_id=?", (request_id,)
     ).fetchall()
@@ -381,17 +488,24 @@ def finalize_table_request_if_done(conn, request_id: int):
         # 已经被拒了,其余还没审的步骤没有意义了,标成 skipped 避免审批人
         # 列表里一直挂着一条其实已经作废的待办。
         conn.execute(
-            "UPDATE approval_steps SET status='skipped' WHERE request_id=? AND status='pending'",
+            "UPDATE approval_steps SET status='skipped' WHERE request_id=? AND status IN ('pending', 'pending_external')",
             (request_id,),
         )
+        req = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (request_id,)).fetchone()
+        notify_wecom(f"你的表访问申请被拒绝:{req['table_fqn']}(安全等级 {req['security_level']})")
         return
-    if all(s == "approved" for s in statuses):
+    blocking = [s for s in statuses if s not in ("escalated", "skipped")]
+    if blocking and all(s == "approved" for s in blocking):
         req = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (request_id,)).fetchone()
         ok, note = apply_grant_to_git(req["username"], req["table_fqn"], req["security_level"])
         conn.execute(
             "UPDATE table_access_requests SET status='approved', decided_at=?, note=? WHERE id=?",
             (datetime.now(timezone.utc).isoformat(), note, request_id),
         )
+        notify_wecom(f"你的表访问申请已全部批准:{req['table_fqn']}(安全等级 {req['security_level']})")
+        return
+    # 还没到终态,可能前一级刚批完,看看要不要激活下一级。
+    activate_next_step(conn, request_id)
 
 
 TEMPLATE = """
@@ -406,8 +520,14 @@ TEMPLATE = """
   table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.92em; }
   th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
   th { background: #fafafa; }
-  .status-pending { color: #b8860b; } .status-applied, .status-approved { color: #228b22; }
+  .status-pending, .status-pending_external { color: #b8860b; } .status-applied, .status-approved { color: #228b22; }
   .status-rejected { color: #b22222; } .status-approved_pending_apply { color: #ff8c00; }
+  .status-escalated, .status-skipped { color: #888; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.82em; }
+  .badge-pending, .badge-pending_external { background: #fff3cd; color: #7a5c00; }
+  .badge-approved, .badge-applied { background: #d4edda; color: #1e6b2e; }
+  .badge-rejected { background: #f8d7da; color: #92242f; }
+  .badge-escalated, .badge-skipped { background: #eee; color: #666; }
   form.inline { display: inline; margin-right: 4px; }
   button { cursor: pointer; padding: 4px 10px; }
   .hint { color: #888; font-size: 0.85em; }
@@ -415,9 +535,17 @@ TEMPLATE = """
   .steps { margin: 0; padding-left: 18px; font-size: 0.9em; }
   .steps li.done { color: #228b22; } .steps li.rejected { color: #b22222; } .steps li.waiting { color: #b8860b; }
   .steps li.future { color: #aaa; }
+  nav { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #eee; }
+  nav a { margin-right: 16px; color: #555; text-decoration: none; font-size: 0.95em; }
+  nav a.current { color: #222; font-weight: bold; }
 </style>
 </head>
 <body>
+<nav>
+  <a class="current" href="{{ url_for('index') }}">申请 / 待审批</a>
+  {% if is_approver %}<a href="{{ url_for('audit') }}">审计</a><a href="{{ url_for('transfer') }}">权限交接</a>{% endif %}
+  <a href="{{ url_for('table_access_help') }}">怎么用</a>
+</nav>
 <h1>平台权限申请</h1>
 <p>当前登录:<b>{{ username }}</b>{% if is_approver %} <span class="hint">(你在 platform-team,可以审批组权限申请)</span>{% endif %}</p>
 
@@ -546,6 +674,84 @@ h1 { font-size: 1.3em; } code { background: #f5f5f5; padding: 1px 5px; border-ra
 <code>platform/iam/table-access-grants.csv</code>,但<b>不会真的去拦截 Trino 查询</b>,
 没批准也一样能连 Trino 查数据(细粒度权限执行是 Trino OPA 的独立工作,还没做)。
 这是当前阶段刻意的范围收窄,不是 bug。</p>
+</body></html>
+"""
+
+AUDIT_TEMPLATE = """
+<!doctype html>
+<html><head><meta charset="utf-8"><title>审计</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #222; }
+  h1 { font-size: 1.4em; } h2 { font-size: 1.1em; margin-top: 2em; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.88em; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #fafafa; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.82em; }
+  .badge-pending, .badge-pending_external { background: #fff3cd; color: #7a5c00; }
+  .badge-approved, .badge-applied { background: #d4edda; color: #1e6b2e; }
+  .badge-rejected { background: #f8d7da; color: #92242f; }
+  .badge-escalated, .badge-skipped { background: #eee; color: #666; }
+  nav { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #eee; }
+  nav a { margin-right: 16px; color: #555; text-decoration: none; }
+  .hint { color: #888; font-size: 0.85em; }
+</style></head><body>
+<nav><a href="{{ url_for('index') }}">申请 / 待审批</a><a class="current" href="{{ url_for('audit') }}">审计</a><a href="{{ url_for('transfer') }}">权限交接</a></nav>
+<h1>审计</h1>
+<p class="hint">只读,platform-team 可见。数据不会被删除,只会追加/改状态,这里能看到完整历史(见 ADR-045)。</p>
+
+<h2>表访问申请({{ table_requests|length }} 条,最近200条)</h2>
+<table>
+<tr><th>ID</th><th>申请人</th><th>表名</th><th>等级</th><th>状态</th><th>提交时间</th><th>审批链</th></tr>
+{% for r in table_requests %}
+<tr>
+<td>{{ r.id }}</td><td>{{ r.username }}</td><td>{{ r.table_fqn }}</td><td>L{{ r.security_level }}</td>
+<td><span class="badge badge-{{ r.status }}">{{ r.status }}</span>{% if r.note %}<br><span class="hint">{{ r.note }}</span>{% endif %}</td>
+<td>{{ r.requested_at }}</td>
+<td>{% for s in r.steps %}第{{ s.step_order }}级 {{ role_labels[s.approver_role] }}({{ s.approver_username }}):<span class="badge badge-{{ s.status }}">{{ s.status }}</span>{% if s.decided_at %} @{{ s.decided_at }}{% endif %}<br>{% endfor %}</td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="hint">没有记录</td></tr>
+{% endfor %}
+</table>
+
+<h2>组权限申请({{ group_requests|length }} 条,最近200条)</h2>
+<table>
+<tr><th>ID</th><th>申请人</th><th>组</th><th>状态</th><th>审批人</th><th>提交时间</th></tr>
+{% for r in group_requests %}
+<tr>
+<td>{{ r.id }}</td><td>{{ r.username }}</td><td>{{ r.group_name }}</td>
+<td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+<td>{{ r.decided_by or '' }}</td><td>{{ r.requested_at }}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="hint">没有记录</td></tr>
+{% endfor %}
+</table>
+</body></html>
+"""
+
+TRANSFER_TEMPLATE = """
+<!doctype html>
+<html><head><meta charset="utf-8"><title>权限交接</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #222; }
+  nav { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #eee; }
+  nav a { margin-right: 16px; color: #555; text-decoration: none; }
+  input[type=text] { padding: 6px; margin: 4px 0; width: 200px; }
+  .field { margin-bottom: 12px; }
+  label { display: block; font-weight: bold; margin-bottom: 2px; }
+  .hint { color: #888; font-size: 0.85em; }
+  .result { background: #f5f5f5; padding: 12px; border-radius: 4px; margin-top: 16px; }
+</style></head><body>
+<nav><a href="{{ url_for('index') }}">申请 / 待审批</a><a href="{{ url_for('audit') }}">审计</a><a class="current" href="{{ url_for('transfer') }}">权限交接</a></nav>
+<h1>权限交接</h1>
+<p class="hint">离职/转岗时用。参考公司现有 OA 的交接模式:一次操作把待处理的审批事项和组成员关系都转给接手人,并通知对方(见 ADR-045)。</p>
+<form method="post">
+  <div class="field"><label>移交人(username)</label><input type="text" name="from_user" required></div>
+  <div class="field"><label>接手人(username)</label><input type="text" name="to_user" required></div>
+  <button type="submit">执行交接</button>
+</form>
+{% if result %}<div class="result">{{ result }}</div>{% endif %}
 </body></html>
 """
 
@@ -706,6 +912,8 @@ def submit_table_access():
             "UPDATE table_access_requests SET status='rejected', note=? WHERE id=?",
             ("算不出任何审批人(申请人不在组织架构里,表也没有负责人),请联系平台管理员手动处理", request_id),
         )
+    else:
+        activate_next_step(conn, request_id)
     conn.commit()
     conn.close()
     return redirect(url_for("index"))
@@ -752,6 +960,165 @@ def reject_table_step(step_id):
     conn.commit()
     conn.close()
     return redirect(url_for("index"))
+
+
+@app.route("/table-access/step/<int:step_id>/external-callback", methods=["POST"])
+def external_callback(step_id):
+    """外部 OA 系统审批完,回调这里报告结果(ADR-045 的可插拔审批后端)。
+    没有真实对接目标,这次只交付协议本身——token 对不上直接拒绝,不接受
+    任何声称自己是外部系统的请求。"""
+    if not EXTERNAL_OA_CALLBACK_TOKEN or request.json is None or request.json.get("token") != EXTERNAL_OA_CALLBACK_TOKEN:
+        abort(403)
+    new_status = request.json.get("status")
+    if new_status not in ("approved", "rejected"):
+        abort(400)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    step = conn.execute("SELECT * FROM approval_steps WHERE id=?", (step_id,)).fetchone()
+    if not step or step["status"] != "pending_external":
+        conn.close()
+        abort(404)
+    conn.execute(
+        "UPDATE approval_steps SET status=?, decided_at=? WHERE id=?",
+        (new_status, datetime.now(timezone.utc).isoformat(), step_id),
+    )
+    finalize_table_request_if_done(conn, step["request_id"])
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.route("/internal/escalation-check", methods=["POST"])
+def escalation_check():
+    """给 CronJob 调的内部端点(ADR-045),不走 oauth2-proxy/人类登录。查
+    所有等了太久没人处理的 step:先提醒,等到 2 倍时长才真正升级换人审
+    (不是自动通过,见 dispatch_step/ADR-045 的说明)。"""
+    if not INTERNAL_TOKEN or request.headers.get("X-Internal-Token") != INTERNAL_TOKEN:
+        abort(403)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    now = datetime.now(timezone.utc)
+    reminded, escalated = 0, 0
+    rows = conn.execute(
+        "SELECT * FROM approval_steps WHERE status IN ('pending', 'pending_external') AND activated_at IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        activated = datetime.fromisoformat(row["activated_at"])
+        waited_hours = (now - activated).total_seconds() / 3600
+        req = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (row["request_id"],)).fetchone()
+        if waited_hours >= ESCALATION_HOURS * 2:
+            chain = get_manager_chain(row["approver_username"], levels=1)
+            escalate_to = chain[0] if chain else DESIGNATED_ADMIN
+            conn.execute("UPDATE approval_steps SET status='escalated' WHERE id=?", (row["id"],))
+            exists = conn.execute(
+                "SELECT 1 FROM approval_steps WHERE request_id=? AND step_order=? AND approver_username=?",
+                (row["request_id"], row["step_order"], escalate_to),
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO approval_steps (request_id, step_order, approver_role, approver_username, activated_at) "
+                    "VALUES (?,?,?,?,?)",
+                    (row["request_id"], row["step_order"], "escalated", escalate_to, now.isoformat()),
+                )
+                notify_wecom(
+                    f"审批升级:{row['approver_username']} 超过 {ESCALATION_HOURS * 2:.0f} 小时未处理"
+                    f"{req['table_fqn']} 的访问申请,已转给你(原审批人的上级)处理。"
+                )
+            escalated += 1
+        elif waited_hours >= ESCALATION_HOURS:
+            notify_wecom(
+                f"提醒:你有一条表访问申请等待审批已超过 {ESCALATION_HOURS:.0f} 小时:"
+                f"{req['username']} 申请 {req['table_fqn']}。"
+            )
+            reminded += 1
+    conn.commit()
+    conn.close()
+    return {"reminded": reminded, "escalated": escalated}
+
+
+@app.route("/audit")
+def audit():
+    username, groups = get_current_user()
+    if not is_approver(groups):
+        abort(403)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    group_requests = conn.execute("SELECT * FROM requests ORDER BY id DESC LIMIT 200").fetchall()
+    table_requests_raw = conn.execute(
+        "SELECT * FROM table_access_requests ORDER BY id DESC LIMIT 200"
+    ).fetchall()
+    table_requests = []
+    for r in table_requests_raw:
+        steps = conn.execute(
+            "SELECT * FROM approval_steps WHERE request_id=? ORDER BY step_order, id", (r["id"],)
+        ).fetchall()
+        row = dict(r)
+        row["steps"] = steps
+        table_requests.append(row)
+    conn.close()
+    return render_template_string(
+        AUDIT_TEMPLATE, username=username, group_requests=group_requests,
+        table_requests=table_requests, role_labels=APPROVAL_ROLE_LABELS,
+    )
+
+
+@app.route("/admin/transfer", methods=["GET", "POST"])
+def transfer():
+    username, groups = get_current_user()
+    if not is_approver(groups):
+        abort(403)
+    if request.method == "GET":
+        return render_template_string(TRANSFER_TEMPLATE, username=username, result=None)
+
+    from_user = request.form.get("from_user", "").strip()
+    to_user = request.form.get("to_user", "").strip()
+    if not from_user or not to_user or from_user == to_user:
+        abort(400)
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    pending_steps = conn.execute(
+        "SELECT id, request_id FROM approval_steps WHERE approver_username=? AND status IN ('pending','pending_external')",
+        (from_user,),
+    ).fetchall()
+    conn.execute(
+        "UPDATE approval_steps SET approver_username=? WHERE approver_username=? AND status IN ('pending','pending_external')",
+        (to_user, from_user),
+    )
+    conn.commit()
+
+    memberships_note = "没有配置 GIT_TOKEN,组成员关系没有自动转移,需要人工把 platform/iam/memberships.csv 里的相关行手动处理"
+    if GIT_TOKEN:
+        tmpdir = tempfile.mkdtemp()
+        try:
+            auth_url = REPO_URL.replace("https://", f"https://{GIT_TOKEN}@")
+            subprocess.run(["git", "clone", "--depth", "1", auth_url, tmpdir], check=True, capture_output=True, text=True, timeout=60)
+            csv_path = Path(tmpdir) / "platform" / "iam" / "memberships.csv"
+            lines = [l for l in csv_path.read_text().splitlines() if l.strip()]
+            header, rows_csv = lines[0], lines[1:]
+            from_groups = {l.split(",")[1] for l in rows_csv if l.split(",")[0] == from_user}
+            to_groups = {l.split(",")[1] for l in rows_csv if l.split(",")[0] == to_user}
+            new_rows = [f"{to_user},{g}" for g in (from_groups - to_groups)]
+            if new_rows:
+                lines = [header] + rows_csv + new_rows
+                csv_path.write_text("\n".join(lines) + "\n")
+                subprocess.run(["git", "-C", tmpdir, "config", "user.email", "permission-request-app@platform.local"], check=True)
+                subprocess.run(["git", "-C", tmpdir, "config", "user.name", "Permission Request App"], check=True)
+                subprocess.run(["git", "-C", tmpdir, "add", "platform/iam/memberships.csv"], check=True)
+                subprocess.run(["git", "-C", tmpdir, "commit", "-m", f"iam: {from_user} 权限交接给 {to_user}"], check=True, capture_output=True, text=True)
+                subprocess.run(["git", "-C", tmpdir, "push"], check=True, capture_output=True, text=True, timeout=60)
+                memberships_note = f"已把 {from_user} 的组成员关系({', '.join(sorted(from_groups - to_groups)) or '无新增'})转移给 {to_user},提交进 git"
+            else:
+                memberships_note = f"{to_user} 已经拥有 {from_user} 的全部组成员关系,不用改 memberships.csv"
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            memberships_note = f"组成员关系转移失败,请人工处理:{e}"
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    conn.close()
+    result = f"已把 {len(pending_steps)} 条待审批表访问申请从 {from_user} 转给 {to_user}。{memberships_note}"
+    notify_wecom(f"权限交接:{from_user} 的待处理事项已转交给你(操作人:{username})。{result}")
+    return render_template_string(TRANSFER_TEMPLATE, username=username, result=result)
 
 
 @app.route("/healthz")

@@ -1,0 +1,50 @@
+# 表访问审批的超时提醒/升级(ADR-045)。每小时调一次
+# permission-request-app 自己的 /internal/escalation-check 端点,真正的
+# 判断逻辑(等了多久、要不要升级、通知谁)都在 app 自己的代码里——这个
+# CronJob 只是个定时触发器,不直接碰数据库(那个 PVC 是 ReadWriteOnce,
+# 两个进程同时开着写有并发风险,让唯一在跑的那个 app 进程自己处理更安全,
+# 不是这个 CronJob 图省事)。
+#
+# 用 curlimages/curl 而不是 python:3.12-slim + apt-get,这个任务只需要发
+# 一个 HTTP POST,没必要背上 apt-get 卡死那整套坑(见
+# apps/iam-sync/manifests/cronjob.yaml 的详细教训)——能不装包就不装包。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: permission-request-app-escalation
+  namespace: permission-request-app
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 60
+      template:
+        spec:
+          # 见 ADR-041(队列资源管理):定时批处理任务,归 batch 档。
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: escalation-check
+              image: curlimages/curl:8.11.0
+              env:
+                - name: INTERNAL_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: permission-request-app-internal
+                      key: token
+              command:
+                - sh
+                - -c
+                - |
+                  curl -fsS -m 30 -X POST \
+                    -H "X-Internal-Token: ${INTERNAL_TOKEN}" \
+                    http://permission-request-app.permission-request-app.svc.cluster.local:8080/internal/escalation-check
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi

@@ -328,6 +328,11 @@ else
   echo "已创建: permission-request-app/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
 fi
 
+# ADR-045:表访问审批的超时升级 CronJob 调 /internal/escalation-check 用的
+# 共享密钥,纯内部凭据(不需要人工判断),和上面那些需要人工创建的
+# GIT_TOKEN/OPENMETADATA_TOKEN 不是一类。
+ensure_secret permission-request-app permission-request-app-internal token=RANDOM
+
 # 建表注册工具,同一个 oauth2-proxy 模式(见 ADR-043)。
 if kubectl -n table-registration-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
   echo "已存在,跳过: table-registration-app/oauth2-proxy-secret"

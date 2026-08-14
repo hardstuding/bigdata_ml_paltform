@@ -17,6 +17,18 @@
 #     --from-literal=token=<和 table-registration-app-openmetadata 一样的 token>
 # 没建这个 Secret 之前,组权限申请(加入某个组)不受影响,只是表访问申请
 # 提交时会查不到安全等级,直接被拒绝并提示原因。
+#
+# ADR-045(可插拔审批后端 + 通知/升级/交接/审计)新增的凭据:
+# - internal-token(permission-request-app-internal Secret):纯内部
+#   CronJob->app 调用用的共享密钥,不需要人工判断,scripts/00-generate-
+#   secrets.sh 已经自动生成,不用手动建。
+# - WECOM_WEBHOOK_URL / EXTERNAL_OA_WEBHOOK_URL / EXTERNAL_OA_CALLBACK_TOKEN:
+#   都是可选的,不配就走降级路径(通知静默跳过;可插拔审批后端保持
+#   APPROVAL_BACKEND=local 不受影响)。要配的话:
+#     kubectl -n permission-request-app create secret generic permission-request-app-notify \
+#       --from-literal=wecom-webhook-url=<企业微信群机器人 webhook> \
+#       --from-literal=external-oa-webhook-url=<外部 OA 系统接收地址,可插拔可留空> \
+#       --from-literal=external-oa-callback-token=<外部 OA 回调时要带的共享密钥,可插拔可留空>
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -68,6 +80,16 @@ spec:
               pip install --quiet --timeout 30 flask requests
               python3 /src/app.py
           env:
+            # 2026-08-14 补:table-registration-app 那边同一个 python:3.12-slim
+            # 起手式一直没配代理,连续 6 次 pip install 超时崩溃才发现漏了
+            # 这个(iam-sync CronJob 早就配了)。这里当时是运气好没踩到,
+            # 一起补上,不要等它也开始随机崩溃才修。
+            - name: HTTP_PROXY
+              value: "http://192.168.5.2:1087"
+            - name: HTTPS_PROXY
+              value: "http://192.168.5.2:1087"
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
             - name: DB_PATH
               value: /data/requests.db
             - name: GIT_TOKEN
@@ -88,6 +110,34 @@ spec:
                   optional: true  # 没建这个 Secret 时,表访问申请会直接被拒绝并提示原因
             - name: DESIGNATED_ADMIN
               value: admin  # ADR-040 里"安全等级3再加指定负责人"这个人,不是从组织架构推导的
+            - name: INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-internal
+                  key: token
+                  optional: true  # 没有就是空字符串,/internal/escalation-check 会直接拒绝所有请求(拒绝比误开安全)
+            - name: WECOM_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-notify
+                  key: wecom-webhook-url
+                  optional: true
+            - name: APPROVAL_BACKEND
+              value: local  # 改成 webhook 才会启用下面两个变量,见 ADR-045
+            - name: EXTERNAL_OA_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-notify
+                  key: external-oa-webhook-url
+                  optional: true
+            - name: EXTERNAL_OA_CALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-notify
+                  key: external-oa-callback-token
+                  optional: true
+            - name: ESCALATION_HOURS
+              value: "48"
           ports:
             - containerPort: 8080
               name: http

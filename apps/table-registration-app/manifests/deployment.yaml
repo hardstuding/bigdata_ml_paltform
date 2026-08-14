@@ -49,11 +49,23 @@ spec:
             - |
               set -e
               # apt-get 卡死的坑(见 apps/iam-sync/manifests/cronjob.yaml 的
-              # 注释)这个组件不需要 git/系统包,只用 pip,不会踩到,但保留
-              # 同样的超时习惯以防万一网络问题导致 pip 卡住。
+              # 注释)这个组件不需要 git/系统包,只用 pip,原以为不会踩到。
+              # 2026-08-14 实测推翻了这个假设:pip install 本身反复 exit
+              # 124(timeout 触发),连续 6 次。排查发现这个 Deployment 一直
+              # 没配 HTTP_PROXY/HTTPS_PROXY——iam-sync 的 CronJob 老早就配了
+              # 这两个(colima 虚拟网络里直连外网不稳定,需要走宿主机代理),
+              # 这个组件当初漏配了。地址来自 `colima ssh -- env | grep -i
+              # proxy`,换了网络或者重启 colima 后如果又卡住,先重新跑一遍
+              # 这条命令确认地址没变。
               timeout -k 10 120 pip install --quiet --timeout 30 flask requests trino
               python3 /src/app.py
           env:
+            - name: HTTP_PROXY
+              value: "http://192.168.5.2:1087"
+            - name: HTTPS_PROXY
+              value: "http://192.168.5.2:1087"
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
             - name: DB_PATH
               value: /data/registrations.db
             - name: TRINO_HOST
