@@ -90,6 +90,9 @@ spec:
             - name: dags
               mountPath: /opt/airflow/dags/seatunnel_device_events.py
               subPath: seatunnel_device_events.py
+            - name: dags
+              mountPath: /opt/airflow/dags/feast_materialize.py
+              subPath: feast_materialize.py
         # dagProcessor 是 Airflow 3.x 才拆出来的独立组件(DAG 解析不再是
         # scheduler 自己干),之前没配 resources,这次一起补上。DAG 文件同样
         # 要挂进这里——scheduler 和 dagProcessor 都要能看到 dags 目录,不是
@@ -117,6 +120,9 @@ spec:
             - name: dags
               mountPath: /opt/airflow/dags/seatunnel_device_events.py
               subPath: seatunnel_device_events.py
+            - name: dags
+              mountPath: /opt/airflow/dags/feast_materialize.py
+              subPath: feast_materialize.py
         triggerer:
           replicas: 1
           persistence:
@@ -161,6 +167,9 @@ spec:
               - name: dags
                 mountPath: /opt/airflow/dags/seatunnel_device_events.py
                 subPath: seatunnel_device_events.py
+              - name: dags
+                mountPath: /opt/airflow/dags/feast_materialize.py
+                subPath: feast_materialize.py
   destination:
     server: https://kubernetes.default.svc
     namespace: airflow
