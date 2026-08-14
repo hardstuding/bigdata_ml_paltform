@@ -65,6 +65,32 @@ spec:
         - protocol: TCP
           port: 8080
 ---
+# ADR-045:超时升级 CronJob 直接调 app 自己的 /internal/escalation-check
+# (走应用层的 INTERNAL_TOKEN 鉴权,不经过 oauth2-proxy)——这条 NetworkPolicy
+# 规则不是"重新开放全部访问",只放行带 escalation-cronjob 这个特定标签的
+# pod,到 8080 端口。这个坑是实测撞到的:第一版部署完 CronJob,手动触发
+# 一次验证时连接直接被拒,才发现 default-deny-ingress 挡住了它——CronJob
+# 的 Job pod 不带 oauth2-proxy 那个标签,不在原来任何一条放行规则里。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-escalation-cronjob-to-app
+  namespace: permission-request-app
+spec:
+  podSelector:
+    matchLabels:
+      app: permission-request-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: permission-request-app-escalation
+      ports:
+        - protocol: TCP
+          port: 8080
+---
 # monitoring(Prometheus/Alloy)需要能抓这个 namespace 里所有 pod 的
 # metrics 端口,不区分是 app 本体还是 oauth2-proxy。
 apiVersion: networking.k8s.io/v1

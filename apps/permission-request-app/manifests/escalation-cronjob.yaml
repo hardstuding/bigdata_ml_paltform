@@ -22,6 +22,12 @@ spec:
     spec:
       activeDeadlineSeconds: 60
       template:
+        metadata:
+          # 要和 platform/network-policies/manifests/permission-request-app.yaml
+          # 里 allow-escalation-cronjob-to-app 那条规则的 podSelector 对上,
+          # 不然会被 default-deny-ingress 挡住连不上 app(实测撞过这个坑)。
+          labels:
+            app: permission-request-app-escalation
         spec:
           # 见 ADR-041(队列资源管理):定时批处理任务,归 batch 档。
           priorityClassName: batch
