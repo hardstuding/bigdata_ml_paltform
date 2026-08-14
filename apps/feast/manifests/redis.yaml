@@ -1,0 +1,59 @@
+# Feast 在线存储用 Redis。官方 feast-dev/feast Helm chart(infra/charts/feast)
+# 自带一个可选的 redis 子 chart,但它的依赖源是 https://charts.helm.sh/stable
+# ——这个仓库 2020-11 就被 Helm 官方弃用了,index.yaml 虽然还能访问(冻结
+# 快照),但里面的 redis chart 停在 10.5.6(appVersion 5.0.7,2020-10 打包),
+# 五年多没有安全更新。Bitnami 的 Redis chart(生态里最常见的替代品)2025-09
+# 起大部分 OCI 包也收进 Broadcom 订阅版,公开可拉取的只剩不再更新的 legacy
+# 标签。两条路都不满足"用官方持续维护的部署方式"这个门槛(同样的理由
+# 2026-08-11 否决过 Ranger,见 ADR-028),所以这里不用任何 Helm chart,直接
+# 用 Redis 官方在 Docker Hub 维护的 `redis` 镜像写一份裸 manifest——和
+# Hive Metastore(见 apps/hive-metastore/manifests/)是同一类先例:没有值得
+# 信任的 chart 时,裸 manifest 比硬套一个过时/收费的 chart 更诚实。
+#
+# 本机 local-lite 场景,单副本、无密码、无持久化(emptyDir)——特征数据的
+# 权威来源是 Iceberg(离线存储),Redis 只是物化后的在线缓存,重建集群或
+# 重启 pod 后重新跑一次 feast materialize 就能补回来,不需要 PVC。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feast-redis
+  labels:
+    app: feast-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: feast-redis
+  template:
+    metadata:
+      labels:
+        app: feast-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feast-redis
+spec:
+  selector:
+    app: feast-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

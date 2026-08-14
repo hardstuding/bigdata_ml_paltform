@@ -1,0 +1,94 @@
+# 官方 feast-dev/feast Helm chart(infra/charts/feast,发布在
+# https://feast-helm-charts.storage.googleapis.com)。只开 feature-server
+# 子 chart(在线特征检索服务),transformation-service 关掉——demo 不需要
+# on-demand transform,local-lite 资源也紧张,不为用不到的组件占内存。
+# chart 自带的 redis 子 chart 依赖已失效的 charts.helm.sh/stable 仓库(见
+# apps/feast/manifests/redis.yaml 顶部注释),这里关掉(redis.enabled: false),
+# Redis 改用同目录下的裸 manifest,通过 apps/feast/manifests 这份独立的
+# Application(见下面 kustomize 那份定义)一起纳入同一个 feast 命名空间。
+#
+# feature_store_yaml_base64 是 chart 唯一支持注入 feature_store.yaml 的方式
+# ——只能是一整个 base64 字符串,不能引用外部文件,所以和
+# scripts/feast_feature_repo/feature_store.yaml 是两份需要手动保持同步的
+# 内容(改一处记得跟着改另一处;正文一致,重新生成用
+# `base64 -i scripts/feast_feature_repo/feature_store.yaml | tr -d '\n'`)。
+# 这是 chart 设计本身的限制,不是这次图省事的选择。
+#
+# 【可插拔基础设施,见 ADR-030】MinIO 凭据走 extraEnvs 从 minio-root 这个
+# Secret 读,和 apps/mlflow 是同一个模式——接外部 S3 改这两行的
+# secretKeyRef,不用碰 base64 blob 本身(offline_store.spark_conf 里引用的
+# 是 ${env.MINIO_ACCESS_KEY}/${env.MINIO_SECRET_KEY} 这两个变量名,不是明文)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feast
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://feast-helm-charts.storage.googleapis.com
+    chart: feast
+    targetRevision: 0.65.0
+    helm:
+      valuesObject:
+        feature-server:
+          enabled: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          extraEnvs:
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootUser
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: rootPassword
+          feature_store_yaml_base64: "IyBGZWFzdCDnibnlvoHku5PlupPphY3nva4o6KeBIGRvY3MvZGVjaXNpb25zLzA0Mi1mZWFzdC1mZWF0dXJlLXN0b3JlLm1kKeOAggojCiMg44CQ5Y+v5o+S5ouU5Z+656GA6K6+5pa9LOingSBBRFItMDMw44CRcmVnaXN0cnkucGF0aCDlkowgb2ZmbGluZV9zdG9yZS5zcGFya19jb25mIOmHjOeahAojIFMzQSDphY3nva7pg73mjIflkJHmnKzku5PlupPoh6rluKbnmoQgTWluSU875o6l5aSW6YOoIFMzIOWPqumcgOimgeaUuQojIGZzLnMzYS5lbmRwb2ludC9hY2Nlc3Mua2V5L3NlY3JldC5rZXkg6L+Z5LiJ6KGMKGFjY2Vzcy9zZWNyZXQg6LWwCiMgJHtlbnYuTUlOSU9fQUNDRVNTX0tFWX0vJHtlbnYuTUlOSU9fU0VDUkVUX0tFWX0g5Y+Y6YeP5bGV5byALOS4jeaYr+WGmeatu+WcqOi/meS4qgojIOaWh+S7tumHjCzlkowgYXBwcy9oaXZlLW1ldGFzdG9yZS9tYW5pZmVzdHMvY29yZS1zaXRlLWNvbmZpZ21hcC55YW1sIOaYr+WQjOS4gOS4qgojIOaooeW8j+KAlOKAlOi/kOihjOWJjeeUqCBzY3JpcHRzLzEyLWZlYXN0LWZlYXR1cmUtcGlwZWxpbmUuc2gg5LuOIG1pbmlvLXJvb3Qg6L+Z5LiqCiMgazhzIFNlY3JldCDor7vlgLzlr7zlh7rmiJDnjq/looPlj5jph48s6L+Z5Liq5paH5Lu25pys6Lqr5LiN5ZCr5piO5paH5Yet5o2uKeOAgm9mZmxpbmVfc3RvcmUKIyDmjqXnmoTmmK8gYXBwcy9zcGFyay1pY2ViZXJnLWRlbW8g5bey6aqM6K+B6L+H55qE5ZCM5LiA5LiqIEljZWJlcmcgY2F0YWxvZwojIChjYXRhbG9nIOWQjeWbuuWumuWPqyAiaWNlYmVyZyIs6KeBIEFEUi0wMzYpLOS4jeaYr+WPpui1t+S4gOWll+OAggpwcm9qZWN0OiBkZW1vCnByb3ZpZGVyOiBsb2NhbAoKcmVnaXN0cnk6CiAgcmVnaXN0cnlfdHlwZTogZmlsZQogIHBhdGg6IHMzOi8vbGFrZWhvdXNlL2ZlYXN0L3JlZ2lzdHJ5LnBiCgpvZmZsaW5lX3N0b3JlOgogIHR5cGU6IHNwYXJrCiAgc3BhcmtfY29uZjoKICAgIHNwYXJrLm1hc3RlcjogImxvY2FsWzJdIgogICAgc3Bhcmsuc3FsLmNhdGFsb2cuaWNlYmVyZzogb3JnLmFwYWNoZS5pY2ViZXJnLnNwYXJrLlNwYXJrQ2F0YWxvZwogICAgc3Bhcmsuc3FsLmNhdGFsb2cuaWNlYmVyZy50eXBlOiBoaXZlCiAgICBzcGFyay5zcWwuY2F0YWxvZy5pY2ViZXJnLnVyaTogdGhyaWZ0Oi8vaGl2ZS1tZXRhc3RvcmUuZGF0YS5zdmMuY2x1c3Rlci5sb2NhbDo5MDgzCiAgICBzcGFyay5zcWwuZXh0ZW5zaW9uczogb3JnLmFwYWNoZS5pY2ViZXJnLnNwYXJrLmV4dGVuc2lvbnMuSWNlYmVyZ1NwYXJrU2Vzc2lvbkV4dGVuc2lvbnMKICAgIHNwYXJrLmhhZG9vcC5mcy5zM2EuZW5kcG9pbnQ6IGh0dHA6Ly9taW5pby5taW5pby5zdmMuY2x1c3Rlci5sb2NhbDo5MDAwCiAgICBzcGFyay5oYWRvb3AuZnMuczNhLmFjY2Vzcy5rZXk6ICR7ZW52Lk1JTklPX0FDQ0VTU19LRVl9CiAgICBzcGFyay5oYWRvb3AuZnMuczNhLnNlY3JldC5rZXk6ICR7ZW52Lk1JTklPX1NFQ1JFVF9LRVl9CiAgICBzcGFyay5oYWRvb3AuZnMuczNhLnBhdGguc3R5bGUuYWNjZXNzOiAidHJ1ZSIKICAgIHNwYXJrLmhhZG9vcC5mcy5zM2EuY29ubmVjdGlvbi5zc2wuZW5hYmxlZDogImZhbHNlIgogICAgc3BhcmsuaGFkb29wLmZzLnMzYS5pbXBsOiBvcmcuYXBhY2hlLmhhZG9vcC5mcy5zM2EuUzNBRmlsZVN5c3RlbQogICAgc3BhcmsuamFycy5wYWNrYWdlczogIm9yZy5hcGFjaGUuaWNlYmVyZzppY2ViZXJnLXNwYXJrLXJ1bnRpbWUtMy41XzIuMTI6MS42LjEsb3JnLmFwYWNoZS5oYWRvb3A6aGFkb29wLWF3czozLjMuNCxjb20uYW1hem9uYXdzOmF3cy1qYXZhLXNkay1idW5kbGU6MS4xMi4yNjIiCgpvbmxpbmVfc3RvcmU6CiAgdHlwZTogcmVkaXMKICAjIOmbhue+pOWGhemDqOiuv+mXrueUqOi/meS4qiBTZXJ2aWNlIEROUzvmnKzmnLrohJrmnKzot5EgZmVhc3QgbWF0ZXJpYWxpemUg5pe26YCa6L+HCiAgIyBzY3JpcHRzLzEyLWZlYXN0LWZlYXR1cmUtcGlwZWxpbmUuc2gg6YeM55qEIHBvcnQtZm9yd2FyZCDmlLnlhpnmiJAgbG9jYWxob3N044CCCiAgY29ubmVjdGlvbl9zdHJpbmc6ICJmZWFzdC1yZWRpcy5mZWFzdC5zdmMuY2x1c3Rlci5sb2NhbDo2Mzc5IgoKZW50aXR5X2tleV9zZXJpYWxpemF0aW9uX3ZlcnNpb246IDMK"
+        transformation-service:
+          enabled: false
+        redis:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: feast
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+# Redis(裸 manifest,见 apps/feast/manifests/redis.yaml 顶部注释)单独一个
+# Application,和上面的 feast chart 是同一个命名空间,分开定义是因为一个是
+# Helm chart 源、一个是 git 目录源,ArgoCD Application 的 source 类型不能混。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feast-redis
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/feast/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: feast
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

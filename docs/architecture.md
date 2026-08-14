@@ -72,7 +72,7 @@
 | AI/ML | Argo Workflows | 训练流水线编排 | 中 | — | ✅ | ✅ | Phase 3 |
 | AI/ML | KServe | 模型在线服务 | 中 | — | ✅ | ✅ | Phase 3 |
 | AI/ML | TF Serving / vLLM | 具体推理 runtime | 重 | — | ✅ | ✅ | Phase 3 |
-| AI/ML | Feast | 特征存储(离线 Iceberg + 在线 Redis) | 中 | — | — | ✅ | Phase 3.5 |
+| AI/ML | Feast | 特征存储(离线 Spark+Iceberg + 在线 Redis) | 中 | ✅ | ✅ | ✅ | Phase 3.5 |
 
 ## 环境画像
 
@@ -88,7 +88,7 @@
 | 1 | 湖仓核心(local-lite) | ✅ 建一张 Iceberg 表、写入,Trino 读出、Superset 出图(2026-08-10,`scripts/08-create-demo-data.sh`);✅ Spark 通过 Spark Operator 真实读写同一张表(ADR-036);✅ 共享 Postgres 迁移到 CloudNativePG operator 管理,老实例已下线(ADR-038) |
 | 2 | 数据工程(转 cloud-full) | ✅ SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通(2026-08-12/13 验证,见 ADR-037)。✅ Kafka(Strimzi KRaft 单节点)已验证部署,真实生产/消费一条消息跑通(2026-08-13)。Spark 权限/可观测性配置已就绪(ADR-029:History Server + oauth2-proxy SSO,Grafana 指标暴露) |
 | 3 | AI/ML | ✅ 核心链路已验证(2026-08-11,见 ADR-025/026/027):JupyterHub/Argo Workflows/MLflow 接了 Keycloak SSO,模型训练 → MLflow 注册 → KServe(Standard 模式)部署成 InferenceService,V2 协议推理请求验证通过(`scripts/09-train-demo-model.sh` + `scripts/11-deploy-demo-inference-service.sh`)。算法/模型 A-B 实验用 KServe 原生的 canary 流量切分这条还没做(不是单独部署一套产品分析工具,见下面"还没定的事"里 2026-08-11 那条) |
-| 3.5 | AI 闭环验证 | Feast 打通离线/在线特征,接入模型服务 |
+| 3.5 | AI 闭环验证 | ✅ Feast 打通离线(Spark 读 Iceberg)/在线(Redis)特征,`feast materialize` 接入 Airflow DAG 定时物化(ADR-042)。"训练模型接入在线特征做推理"这一步是否也验证了见 ADR-042"后果"部分和对应 commit,如果没做仍是待办 |
 | 4 | 企业化增强(prod) | Harbor + 遗留集群正式联邦对接,可作为旧平台替代方案上生产。Trino 细粒度数据权限倾向于用 OPA 而不是 Ranger——Ranger 官方(Apache 项目本身)没有维护 Helm chart,不满足这个项目"只用官方支持的部署方式"的门槛,OPA 有官方 chart 且 Trino 原生支持行过滤/列脱敏,见 ADR-028"后续"部分 |
 
 ## 还没定的事
