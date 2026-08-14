@@ -133,6 +133,17 @@ EXECUTOR_POD_OVERRIDE = {
     )
 }
 
+# 2026-08-14 实测发现:get_logs=True 在这台机器上会把任务拖垮,不是
+# feast/Spark 本身的问题。本机代理软件拦截了走 kubelet containerLogs 的
+# 流量(docs/operations/troubleshooting.md 里"kubectl logs/exec 报
+# Internal Privoxy Error"那条已经记过,任何走这条路径的组件都会撞上,不只
+# 是本机 kubectl),KubernetesPodOperator 的 get_logs=True 内部走的是同一条
+# 路径,反复 ApiException(500)重试(1/2/4/8秒退避)大概两分半后放弃、直接
+# 把还在正常跑的 pod 删掉判定失败——实测确认业务逻辑(建 Registry、解析
+# Spark 依赖)当时都是成功的,纯粹是读日志流这条路把整个任务拖死。关掉
+# get_logs,operator 改成只轮询 pod phase(走 K8s API,不经过 kubelet
+# containerLogs,不受影响)判断成功/失败,日志本来就有 Loki/Alloy 兜底
+# (见 troubleshooting.md 里同一条记录的"从设计上完全绕开这条路径")。
 BASE_KWARGS = dict(
     namespace="feast",
     image=FEAST_IMAGE,
@@ -142,7 +153,7 @@ BASE_KWARGS = dict(
     env_vars=MINIO_ENV,
     container_resources=CONTAINER_RESOURCES,
     priority_class_name="batch",
-    get_logs=True,
+    get_logs=False,
     is_delete_operator_pod=True,
     startup_timeout_seconds=300,
     executor_config=EXECUTOR_POD_OVERRIDE,
