@@ -37,7 +37,10 @@ spec:
           config:
             elasticsearch:
               host: opensearch-cluster-master
-              scheme: https
+              # OpenSearch REST 层已经关掉 TLS(见 apps/definitions/
+              # opensearch.yaml 的说明,自签名证书 PKIX 校验过不去,内网
+              # 环境没必要为此单独建 Java truststore),两边配套改成 http。
+              scheme: http
               auth:
                 enabled: true
                 username: admin
