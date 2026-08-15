@@ -1,0 +1,73 @@
+# 平台门户,见 docs/decisions/047-platform-portal.md。和
+# permission-request-app/table-registration-app 同一个"薄自建工具"模式:
+# 官方 python:3.12-slim 镜像 + 启动时 pip install + ConfigMap 挂源码,
+# 不建专门的容器镜像仓库。这个组件没有状态(不写数据库,现场探测现场展示),
+# 不需要 PVC。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-portal
+  namespace: platform-portal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: platform-portal
+  template:
+    metadata:
+      labels:
+        app: platform-portal
+    spec:
+      # 见 ADR-041(队列资源管理):人在看这个页面找工具入口,归 interactive 档。
+      priorityClassName: interactive
+      containers:
+        - name: app
+          image: python:3.12-slim
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              pip install --quiet --timeout 30 flask requests
+              python3 /src/app.py
+          env:
+            - name: HTTP_PROXY
+              value: "http://192.168.5.2:1087"
+            - name: HTTPS_PROXY
+              value: "http://192.168.5.2:1087"
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: src
+              mountPath: /src
+          resources:
+            requests:
+              cpu: 30m
+              memory: 96Mi
+            limits:
+              memory: 192Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 8
+      volumes:
+        - name: src
+          configMap:
+            name: platform-portal-src
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-portal
+  namespace: platform-portal
+spec:
+  selector:
+    app: platform-portal
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

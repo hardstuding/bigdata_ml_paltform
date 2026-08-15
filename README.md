@@ -139,7 +139,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 `local-lite` 用的是自造域名(不是真实 DNS,见 [ADR-016](docs/decisions/016-ingress-domains-local-lite.md)),要在自己电脑的 `/etc/hosts` 里加一行才能用浏览器访问(集群内部的 pod 靠 `platform/coredns-custom/` 自动解析,不需要这一步)。当前用到的域名(启用一个组件才需要加对应那一行,不用一次性全加):
 
 ```
-127.0.0.1 argocd.local-lite.test grafana.local-lite.test keycloak.local-lite.test jupyterhub.local-lite.test argo-workflows.local-lite.test permission-request.local-lite.test trino.local-lite.test superset.local-lite.test openmetadata.local-lite.test mlflow.local-lite.test spark-history.local-lite.test
+127.0.0.1 argocd.local-lite.test grafana.local-lite.test keycloak.local-lite.test jupyterhub.local-lite.test argo-workflows.local-lite.test permission-request.local-lite.test table-registration.local-lite.test portal.local-lite.test trino.local-lite.test superset.local-lite.test openmetadata.local-lite.test mlflow.local-lite.test spark-history.local-lite.test
 ```
 
 **后续所有变更**(加组件、改配置、升级版本)都是:改 `platform/apps/*.yaml` 或 `apps/definitions/*.yaml` → commit → push,ArgoCD 自动同步,不需要再手动跑脚本或 `kubectl apply`。上面 7 步只在"一个全新的空集群"上需要做一次(第 7 步例外——见下面)。
@@ -172,6 +172,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 
 ## 文档地图
 
+- **实际使用这套平台,先打开 `http://portal.local-lite.test`**(ADR-047)—— 统一门户,现在有哪些工具、分别是干什么的、点哪里进去,一个页面看完;各工具共用同一个 Keycloak SSO,登录一次到处能用,不用重复输密码
 - [`docs/architecture.md`](docs/architecture.md) —— 架构总览、分层设计、组件清单、路线图(Phase 0-4)、还没定的设计决策
 - [`docs/decisions/`](docs/decisions/) —— ADR,每个非显而易见的技术选择,包含理由、踩过的坑、后续更正(是不是验证过、验证到什么程度都写在里面,不是"我们决定这么做"就完了)
 - [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md) —— 真实踩过的坑,排障时先查这里

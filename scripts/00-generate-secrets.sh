@@ -347,6 +347,20 @@ else
   echo "已创建: table-registration-app/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
 fi
 
+# 平台门户,同一个 oauth2-proxy 模式(见 ADR-047)。
+if kubectl -n platform-portal get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  echo "已存在,跳过: platform-portal/oauth2-proxy-secret"
+elif ! kubectl get namespace platform-portal >/dev/null 2>&1; then
+  echo "跳过: platform-portal/oauth2-proxy-secret(namespace 还不存在,等这个 Application 先同步一次)"
+else
+  COOKIE_SECRET="$(openssl rand -base64 24)"
+  kubectl -n platform-portal create secret generic oauth2-proxy-secret \
+    --from-literal=client-id=platform-portal \
+    --from-literal=cookie-secret="$COOKIE_SECRET" \
+    --from-literal=client-secret=PLACEHOLDER
+  echo "已创建: platform-portal/oauth2-proxy-secret(client-secret 是占位符,等 03-configure-keycloak.sh 填真值)"
+fi
+
 echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 # spark-operator: SparkApplication driver/executor 直连 MinIO(S3A)读写
 # Iceberg warehouse,和 Trino 当初踩的是同一个坑,同样要复制一份

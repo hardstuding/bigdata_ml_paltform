@@ -1,0 +1,48 @@
+# 和 permission-request-app/table-registration-app 同一个 oauth2-proxy
+# 模式(ADR-032)。这个组件不需要 pass_access_token/解 groups——门户页面
+# 不做任何权限判断,登录过就能看,只是显示"当前登录:XX"。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-portal-oauth2-proxy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://oauth2-proxy.github.io/manifests
+    chart: oauth2-proxy
+    targetRevision: 10.7.0
+    helm:
+      valuesObject:
+        config:
+          existingSecret: oauth2-proxy-secret
+          configFile: |
+            provider = "oidc"
+            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
+            redirect_url = "http://portal.local-lite.test/oauth2/callback"
+            upstreams = [ "http://platform-portal.platform-portal.svc.cluster.local:8080/" ]
+            email_domains = [ "*" ]
+            cookie_secure = false
+            skip_provider_button = true
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - portal.local-lite.test
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-portal
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

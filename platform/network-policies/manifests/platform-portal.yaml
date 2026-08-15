@@ -1,0 +1,97 @@
+# 和 permission-request-app 同一套 NetworkPolicy 模式(ADR-035),不是
+# table-registration-app 那种"漏配"的状态——这次直接照抄对的那份。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: platform-portal
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-nginx-to-oauth2-proxy
+  namespace: platform-portal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 4180
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-oauth2-proxy-to-app
+  namespace: platform-portal
+spec:
+  podSelector:
+    matchLabels:
+      app: platform-portal
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: oauth2-proxy
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: platform-portal
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+---
+# 这个门户要主动出站探测其他命名空间的组件(见 app.py 的 probe()),这些
+# 组件自己的 NetworkPolicy(如果有的话)要放行门户的探测请求进来才行——
+# 这条本身不是"门户所在命名空间"的策略,是给被探测方补的,写在这里
+# 是因为逻辑上属于门户这个功能,方便以后一起维护/删除(如果哪天下线
+# 探活这个功能,这条也一起删)。目前只给已经有 NetworkPolicy 保护的
+# permission-request-app/table-registration-app 补,其余组件(Trino/
+# OpenMetadata/ArgoCD/Grafana/Keycloak 等)现在没有 NetworkPolicy 限制,
+# 不需要额外放行。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-portal-probe
+  namespace: permission-request-app
+spec:
+  podSelector:
+    matchLabels:
+      app: permission-request-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-portal
+          podSelector:
+            matchLabels:
+              app: platform-portal
+      ports:
+        - protocol: TCP
+          port: 8080

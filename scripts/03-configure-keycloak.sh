@@ -241,6 +241,28 @@ else
   echo "跳过 table-registration-app client(table-registration-app/oauth2-proxy-secret 还不存在,等这个 Application 先同步一次)"
 fi
 
+echo "==> platform-portal client(给挡在前面的 oauth2-proxy 用,见 ADR-047)"
+if kubectl -n platform-portal get secret oauth2-proxy-secret >/dev/null 2>&1; then
+  PORTAL_REDIRECT_URIS='["http://portal.local-lite.test/oauth2/callback"]'
+  portal_client_id=$(kcadm get clients -r platform -q clientId=platform-portal --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+  if [ -n "$portal_client_id" ]; then
+    echo "client platform-portal 已存在,只同步 redirectUris,不轮换密钥"
+    kcadm update "clients/${portal_client_id}" -r platform -s "redirectUris=${PORTAL_REDIRECT_URIS}"
+  else
+    PORTAL_OAUTH_SECRET="$(gen_password)"
+    kcadm create clients -r platform \
+      -s clientId=platform-portal -s enabled=true -s protocol=openid-connect -s publicClient=false \
+      -s secret="$PORTAL_OAUTH_SECRET" \
+      -s "redirectUris=${PORTAL_REDIRECT_URIS}" \
+      -s standardFlowEnabled=true -s directAccessGrantsEnabled=false
+    kubectl -n platform-portal patch secret oauth2-proxy-secret --type merge \
+      -p "{\"stringData\":{\"client-secret\":\"${PORTAL_OAUTH_SECRET}\"}}"
+    echo "已创建 client platform-portal,密钥写入 platform-portal/oauth2-proxy-secret 的 client-secret"
+  fi
+else
+  echo "跳过 platform-portal client(platform-portal/oauth2-proxy-secret 还不存在,等这个 Application 先同步一次)"
+fi
+
 echo "==> argo-workflows client"
 # 和 openmetadata 同一个原因不能用 create_client_if_absent——argo-workflows
 # chart 的 server.sso.clientId/clientSecret 都是 secretRef(key 名字是
