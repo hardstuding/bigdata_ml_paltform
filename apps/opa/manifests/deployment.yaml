@@ -1,0 +1,80 @@
+# Open Policy Agent 服务器(ADR-051),给 Trino 做细粒度访问控制用。
+#
+# 镜像用官方 openpolicyagent/opa(不是 -static/distroless 版本,留个 shell
+# 方便 kubectl exec 进去排障,和这个项目其他组件的选择一致)。OPA 本身没有
+# 官方维护的 Helm chart(实测确认过,见 ADR-051"部署方式"一节),用原生
+# K8s manifest 部署,和 permission-request-app/table-registration-app/
+# platform-portal 这几个自建薄组件同一个模式——OPA 本身也是单容器、无状态
+# 的服务,不需要 chart 那套复杂度。
+#
+# 策略(trino.rego)通过 ConfigMap 挂载,启动时加载一次;grants 数据不走
+# ConfigMap,走 OPA 自己的 Data API 运行时 PUT(见 grants-sync-cronjob.yaml),
+# 更新立即生效,不需要重启 OPA 或重新挂载文件——这个机制本地用真实的
+# docker run + curl PUT 验证过(ADR-051"验证"一节)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa
+  namespace: opa
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opa
+  template:
+    metadata:
+      labels:
+        app: opa
+    spec:
+      # 见 ADR-041:Trino 每次鉴权检查都要连它,挂了会导致 Trino 所有查询
+      # 直接失败(fail-closed),归 platform-critical 档,和 Keycloak/
+      # Postgres 同一优先级,不能被 batch/interactive 抢占掉。
+      priorityClassName: platform-critical
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:1.19.0
+          args:
+            - run
+            - --server
+            - --addr=:8181
+            - --log-level=info
+            - /policies/trino.rego
+          ports:
+            - containerPort: 8181
+              name: http
+          volumeMounts:
+            - name: policy
+              mountPath: /policies
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 5
+      volumes:
+        - name: policy
+          configMap:
+            name: opa-policy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa
+  namespace: opa
+spec:
+  selector:
+    app: opa
+  ports:
+    - port: 8181
+      targetPort: 8181
+      name: http

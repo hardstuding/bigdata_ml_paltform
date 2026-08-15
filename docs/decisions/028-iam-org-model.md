@@ -116,9 +116,17 @@ password grant 没法处理这种情况,直接拒绝,而且不会体现在这个
 
 - Trino 细粒度权限(行级/列级):倾向于用 Trino 原生的 OPA 授权插件,不用
   Ranger——Ranger 官方(Apache 项目本身)没有维护官方 Helm chart,只有
-  社区/第三方仓库,不满足这个项目"只用官方支持的部署方式"的门槛;OPA 有
-  官方 chart,而且 Trino 自己的 file-based/OPA access control 原生支持行
-  过滤和列脱敏,不一定需要 Ranger 才能做到。设计留到真正要做的时候展开。
+  社区/第三方仓库,不满足这个项目"只用官方支持的部署方式"的门槛;Trino
+  自己的 OPA access control 插件是 Trino 官方原生支持的(文档:
+  trino.io/docs/current/security/opa-access-control.html),而且支持行
+  过滤和列脱敏,不一定需要 Ranger 才能做到。**更正(2026-08-15,ADR-051
+  落地时查证)**:这里原来写的"OPA 有官方 chart"是不准确的
+  ——OPA 项目本身**没有**官方维护的 Helm chart(`open-policy-agent/opa`
+  仓库里有一个长期开着、还没关的 issue #7109 就是在要这个东西)。这条不
+  影响这里的结论(选 OPA 不选 Ranger 的关键理由是"Trino 原生支持",不是
+  "有没有 chart"),但既然写错了就要更正,不能放着不管;OPA 的实际部署
+  方式见 ADR-051(原生 K8s manifest + OPA 官方 Docker 镜像,不需要
+  chart)。设计留到真正要做的时候展开。
 - JupyterHub/MLflow/Argo Workflows/KServe 目前还是 `allow_all`/无门禁,
   没有按 group 收紧——JupyterHub 的 `GenericOAuthenticator` 原生支持
   `allowed_groups`,以后可以直接接,这次没做是不想在刚修好 SSO 登录之后

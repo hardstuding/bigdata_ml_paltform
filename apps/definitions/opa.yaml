@@ -1,0 +1,26 @@
+# Open Policy Agent(ADR-051),Trino 细粒度访问控制用。原生 K8s manifest
+# 部署,不是 Helm chart——OPA 没有官方维护的 Helm chart(实测确认,见
+# ADR-051),用官方 Docker 镜像 + 这个项目自己写的 manifest,和
+# permission-request-app 等自建薄组件同一个模式。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opa
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/opa/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: opa
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

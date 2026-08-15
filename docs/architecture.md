@@ -71,6 +71,7 @@ pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其
 | 治理 | 权限申请门户(自建) | 组权限申请 + 表访问分级审批 + 权限交接 + 审计 + 到期自动回收 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
 | 治理 | 建表注册工具(自建) | 建表 + 回写负责人/安全等级进 OpenMetadata | 轻 | ✅ | ✅ | ✅ | Phase 0 |
 | 治理 | AI 运维角色(RBAC) | 给 AI 独立 ServiceAccount + 权限边界,开发阶段档已实测,运维阶段收紧档+危险操作审批链未实现(ADR-048) | 轻 | ⚠️ 部分 | — | — | Phase 0 |
+| 治理 | OPA(Trino 细粒度权限) | 策略引擎 + grants 数据实时同步,已实测(opa test + 真实 HTTP 场景验证);**故意没有**接进 Trino 的 access-control.properties 生效——上线是一次真实的行为收紧(Trino 现在零访问控制),需要先确认现有数据源(比如 Superset 用的表)都有对应 grant,不能无人看管时直接切换,见 ADR-051 | 轻 | ⚠️ 未接入 | — | — | Phase 0 |
 | 湖仓 | MinIO | S3 兼容对象存储 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
 | 湖仓 | Postgres(CloudNativePG operator 管理) | 元数据库共用 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
 | 湖仓 | Hive Metastore | 表元数据 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
@@ -107,7 +108,7 @@ pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其
 | 2 | 数据工程(转 cloud-full) | ✅ SeaTunnel → Iceberg → Airflow 调度 → Superset 看板端到端跑通(2026-08-12/13 验证,见 ADR-037)。✅ Kafka(Strimzi KRaft 单节点)已验证部署,真实生产/消费一条消息跑通(2026-08-13)。Spark 权限/可观测性配置已就绪(ADR-029:History Server + oauth2-proxy SSO,Grafana 指标暴露) |
 | 3 | AI/ML | ✅ 核心链路已验证(2026-08-11,见 ADR-025/026/027):JupyterHub/Argo Workflows/MLflow 接了 Keycloak SSO,模型训练 → MLflow 注册 → KServe(Standard 模式)部署成 InferenceService,V2 协议推理请求验证通过(`scripts/09-train-demo-model.sh` + `scripts/11-deploy-demo-inference-service.sh`)。算法/模型 A-B 实验用 KServe 原生的 canary 流量切分这条还没做(不是单独部署一套产品分析工具,见下面"还没定的事"里 2026-08-11 那条) |
 | 3.5 | AI 闭环验证 | ✅ Feast 打通离线(Spark 读 Iceberg)/在线(Redis)特征,`feast materialize` 接入 Airflow DAG 定时物化(ADR-042)。"训练模型接入在线特征做推理"这一步是否也验证了见 ADR-042"后果"部分和对应 commit,如果没做仍是待办 |
-| 4 | 企业化增强(prod) | Harbor + 遗留集群正式联邦对接,可作为旧平台替代方案上生产。Trino 细粒度数据权限倾向于用 OPA 而不是 Ranger——Ranger 官方(Apache 项目本身)没有维护 Helm chart,不满足这个项目"只用官方支持的部署方式"的门槛,OPA 有官方 chart 且 Trino 原生支持行过滤/列脱敏,见 ADR-028"后续"部分 |
+| 4 | 企业化增强(prod) | Harbor + 遗留集群正式联邦对接,可作为旧平台替代方案上生产。Trino 细粒度数据权限用 OPA 而不是 Ranger——Ranger 官方(Apache 项目本身)没有维护 Helm chart,不满足这个项目"只用官方支持的部署方式"的门槛;OPA 本身也没有官方 chart(ADR-028 曾经写错这条,已更正),但 Trino 原生支持 OPA 授权插件(官方文档),原生支持行过滤/列脱敏,OPA 用官方镜像+原生 manifest 部署,不需要 chart。策略+数据同步机制已实现(ADR-051),**故意没有**接进 Trino 生效,见 ADR-051 |
 
 ## 还没定的事
 

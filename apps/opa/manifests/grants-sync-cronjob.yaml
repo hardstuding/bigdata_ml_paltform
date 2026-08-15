@@ -1,0 +1,83 @@
+# 把 platform/iam/table-access-grants.csv 同步进 OPA 的运行时数据
+# (ADR-051)。每 5 分钟跑一次(和 iam-sync 同一个频率量级)。
+#
+# 故意不用 git clone——这个仓库是公开的,直接读 GitHub raw content 更简单,
+# 不需要装 git、不需要认证。也故意不用 kubectl/K8s API 去改 ConfigMap 再
+# 指望 OPA reload——OPA 官方的 Data API(`PUT /v1/data/<path>`)本来就是
+# 给"运行时推送数据"设计的,写进去立即生效,不用重启 OPA、不用等 kubelet
+# 同步 ConfigMap 的那个 ~1 分钟延迟(这个项目吃过 ConfigMap subPath 延迟的
+# 亏,见 docs/operations/troubleshooting.md,这次直接绕开,不是没想到)。
+#
+# 镜像用 python:3.12-slim,但只用标准库(urllib/csv/json),不装任何包——
+# 这个项目吃过多次 apt-get/pip 网络挂死的亏(见 apps/iam-sync/manifests/
+# cronjob.yaml 的详细教训),这次干脆不给它任何机会踩同样的坑。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opa-grants-sync
+  namespace: opa
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 60
+      template:
+        metadata:
+          # 要和 platform/network-policies/manifests/opa.yaml 里
+          # allow-grants-sync-to-opa 那条规则的 podSelector 对上。
+          labels:
+            app: opa-grants-sync
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: python:3.12-slim
+              env:
+                - name: HTTP_PROXY
+                  value: "http://192.168.5.2:1087"
+                - name: HTTPS_PROXY
+                  value: "http://192.168.5.2:1087"
+                - name: NO_PROXY
+                  value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+              command:
+                - python3
+                - -c
+                - |
+                  import csv, io, json, sys, urllib.request
+
+                  RAW_URL = "https://raw.githubusercontent.com/hardstuding/bigdata_ml_paltform/main/platform/iam/table-access-grants.csv"
+                  OPA_URL = "http://opa.opa.svc.cluster.local:8181/v1/data/trino/grants"
+
+                  req = urllib.request.Request(RAW_URL, headers={"User-Agent": "opa-grants-sync"})
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      csv_text = resp.read().decode("utf-8")
+
+                  rows = list(csv.DictReader(io.StringIO(csv_text)))
+                  grants = [
+                      {
+                          "username": r["username"],
+                          "table_fqn": r["table_fqn"],
+                          "security_level": int(r["security_level"]),
+                          "granted_at": r["granted_at"],
+                          "expires_at": r.get("expires_at") or "",
+                      }
+                      for r in rows
+                  ]
+
+                  body = json.dumps(grants).encode("utf-8")
+                  put_req = urllib.request.Request(OPA_URL, data=body, method="PUT", headers={"Content-Type": "application/json"})
+                  with urllib.request.urlopen(put_req, timeout=20) as resp:
+                      status = resp.status
+                  print(f"同步完成:{len(grants)} 条 grant 记录,OPA 返回 {status}")
+                  if status not in (200, 204):
+                      sys.exit(1)
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi

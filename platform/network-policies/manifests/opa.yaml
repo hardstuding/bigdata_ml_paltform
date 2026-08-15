@@ -1,0 +1,72 @@
+# OPA(ADR-051)的 NetworkPolicy,和 permission-request-app 那套模式一致
+# (ADR-035)。两类合法访问者:Trino(每次鉴权检查都要连它)、
+# opa-grants-sync CronJob(同一个 namespace 里,定期 PUT 数据进去)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: opa
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Trino 自己的 namespace 现在没有 NetworkPolicy 限制(和 ArgoCD/
+# OpenMetadata/Grafana/Keycloak 同一批"还没推广到"的组件,见
+# docs/decisions/047-platform-portal.md 的说明),这里按 namespace 整体放行,
+# 不锁定 Trino 具体哪个 pod 标签——Trino chart 升级时 pod 标签可能变,不想
+# 因为标签变了又出现一次"新版本连不上"的坑。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-trino-to-opa
+  namespace: opa
+spec:
+  podSelector:
+    matchLabels:
+      app: opa
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: trino
+      ports:
+        - protocol: TCP
+          port: 8181
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-grants-sync-to-opa
+  namespace: opa
+spec:
+  podSelector:
+    matchLabels:
+      app: opa
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: opa-grants-sync
+      ports:
+        - protocol: TCP
+          port: 8181
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: opa
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
