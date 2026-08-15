@@ -1,0 +1,21 @@
+# 分析师开发平台的 dbt 项目(ADR-012)。这是最小可跑的骨架,证明"dbt 模型
+# -> Trino/Iceberg -> Cosmos 拆成 Airflow 任务 -> manifest/catalog 经 MinIO
+# 中转 -> OpenMetadata 摄入血缘"这条链路走得通,不是完整的分析师自助建模
+# 规范(那个需要真实分析师的真实建模需求驱动,不该现在凭空编)。
+
+name: platform_demo
+version: "1.0.0"
+config-version: 2
+
+profile: platform_demo
+
+model-paths: ["models"]
+target-path: "target"
+clean-targets: ["target"]
+
+models:
+  platform_demo:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

@@ -1,0 +1,27 @@
+# dbt-trino 的连接配置。host 用集群内部 DNS——这份文件是给
+# KubernetesPodOperator 起的 pod 用的(pod 跑在集群里),不是给分析师本机
+# 用的(本机要连要么走 kubectl port-forward,要么等 cloud-full 阶段有对外
+# 地址)。凭据从环境变量读(env_var()),不写死在文件里——这个文件会进
+# git(公开仓库),密码只能来自环境变量,和这个项目其它组件同一个原则。
+platform_demo:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      # dbt-trino 的 sample_profiles.yml 写明:密码认证对应的 method 是
+      # "ldap"(即使 Trino 这边配的是 file 类型的 PASSWORD 认证器,不是真的
+      # LDAP——两者在协议层面都是发 HTTP Basic Auth,dbt-trino 只是沿用了
+      # LDAP 这个名字,查过它的 connections.py 源码确认,不是猜的)。
+      method: ldap
+      user: "{{ env_var('DBT_TRINO_USER') }}"
+      password: "{{ env_var('DBT_TRINO_PASSWORD') }}"
+      host: trino.trino.svc.cluster.local
+      port: 8443
+      http_scheme: https
+      # 集群内是自签证书(local-lite 阶段,见 apps/definitions/trino-tls.yaml),
+      # 这里跳过校验——和这个项目其它内部服务间调用(比如 platform-portal
+      # 探测 ArgoCD)同一个取舍,不是这次新引入的例外。
+      session_properties: {}
+      database: iceberg
+      schema: demo
+      threads: 2

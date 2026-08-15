@@ -200,6 +200,11 @@ ensure_trino_service_account superset_service
 # superset_service——各组件各自独立账号是这个项目的一贯做法(见 ADR-021),
 # 方便以后单独追溯/吊销。
 ensure_trino_service_account table_registration_service
+# dbt 分析师开发平台(ADR-012/ADR-053)专用的 Trino 服务账号,同样不复用
+# 其它账号——dbt 会真的 CREATE/DROP 模型表(materialized: table/view),
+# 权限边界和只读的 Superset、只建表的 table-registration-app 都不一样,
+# 需要能单独追溯这个身份具体做了哪些 DDL。
+ensure_trino_service_account dbt_demo_service
 
 ensure_secret data superset-db username=superset password=RANDOM
 
@@ -365,7 +370,7 @@ echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 # spark-operator: SparkApplication driver/executor 直连 MinIO(S3A)读写
 # Iceberg warehouse,和 Trino 当初踩的是同一个坑,同样要复制一份
 # (ADR-036 验证 Spark+Iceberg 链路时发现 driver pod 报 secret not found)。
-MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast"
+MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done
@@ -384,6 +389,14 @@ copy_secret trino superset trino-service-account
 
 echo "==> 复制 Trino 服务账号凭据给建表注册工具(ADR-043,连 Trino 执行建表 DDL 要用)"
 copy_secret trino table-registration-app trino-service-account
+
+echo "==> 复制 Trino 服务账号凭据给 dbt(ADR-012/ADR-053,KubernetesPodOperator 的目标 pod 起在 dbt 这个命名空间)"
+# dbt 命名空间不像其它组件那样有对应的 ArgoCD Application 会自动建它
+# (KubernetesPodOperator 是运行时才现起 pod,不是 GitOps 声明式管理这个
+# 命名空间本身)——和 feast 命名空间是同一个处境,这里显式 ensure_ns,
+# 不依赖"之前手动建过"这种没有记录的隐藏前置条件。
+ensure_ns dbt
+copy_secret trino dbt trino-service-account
 
 echo
 echo "完成。新生成的凭据(如果有)已追加到: ${OUT_FILE}"

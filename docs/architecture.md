@@ -167,7 +167,13 @@ pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其
   验证,故意没接进 Trino 生效);SeaTunnel 数据管道的表级血缘推送见
   [ADR-052](decisions/052-seatunnel-lineage.md)(核心 API 机制已用真实
   OpenMetadata 实例验证,完整 DAG 触发跑一遍受限于 SeaTunnel 当前 park
-  状态还没测);Spark(ADR-014)、dbt(ADR-012)的血缘仍是设计未实现。**
+  状态还没测);Spark(ADR-014)的血缘仍是设计未实现。**
+  **"分析师开发平台"(dbt,ADR-012)2026-08-15 也做了最小骨架,见
+  [ADR-053](decisions/053-dbt-analyst-platform-mvp.md)——dbt build 在
+  Trino/Iceberg 上跑的核心链路+MinIO 产物上传已本地充分验证,故意没接
+  Cosmos(需要改 Airflow scheduler/dagProcessor 的 Python 运行时,这次
+  没有贸然做)和 OpenMetadata dbt 摄入连接器,受限于 Trino 当前不稳定,
+  没有在集群里端到端跑过一次完整 DAG。**
   "深度回溯"仍然是待规划状态。
   另外"AI 角色化 + 知识沉淀"是同一轮会话里用户额外提出的第 8 条(不属于
   08-09 那 7 条),原话和现状见 ADR-040 补充章节——"AI 角色化"这部分

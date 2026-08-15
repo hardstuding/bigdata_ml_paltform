@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: demo
+    database: iceberg
+    schema: demo
+    tables:
+      - name: orders
+        description: >
+          Iceberg 里已经在用的 demo 订单表(见近期 commit 记录、
+          apps/spark-iceberg-demo 的验证脚本),不是这个 dbt 项目新建的表。

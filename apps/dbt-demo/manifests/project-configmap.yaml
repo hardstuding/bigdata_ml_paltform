@@ -1,0 +1,101 @@
+# apps/dbt-demo/project/ 底下的 dbt 项目文件打包成这个 ConfigMap,挂进
+# dbt_demo DAG(apps/airflow/dags/dbt_demo.py)的 KubernetesPodOperator 目标
+# pod——和 airflow-dags/feast-feature-repo 那两份 ConfigMap 同一个"没有
+# gitSync 就用 ConfigMap 挂载"的模式(见 apps/airflow/manifests/dags-
+# configmap.yaml 的说明)。整个目录挂载(不是像 feast 那样每个文件单独
+# subPath)——dbt 项目内部靠文件路径找 model/source,不是 Python 的
+# importlib 相对导入,不会撞上 feast 那个"ConfigMap 卷的时间戳目录名被
+# 误当成包路径"的坑,不需要绕开。ConfigMap key 里的下划线是编码过的原始
+# 相对路径分隔符(K8s ConfigMap key 不能带斜杠),挂载时用 subPath 各自
+# 映射回真实的子目录结构,见 apps/airflow/dags/dbt_demo.py 的
+# volume_mounts 部分。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-demo-project
+  namespace: dbt
+data:
+  dbt_project.yml: |
+    # 分析师开发平台的 dbt 项目(ADR-012)。这是最小可跑的骨架,证明"dbt 模型
+    # -> Trino/Iceberg -> Cosmos 拆成 Airflow 任务 -> manifest/catalog 经 MinIO
+    # 中转 -> OpenMetadata 摄入血缘"这条链路走得通,不是完整的分析师自助建模
+    # 规范(那个需要真实分析师的真实建模需求驱动,不该现在凭空编)。
+
+    name: platform_demo
+    version: "1.0.0"
+    config-version: 2
+
+    profile: platform_demo
+
+    model-paths: ["models"]
+    target-path: "target"
+    clean-targets: ["target"]
+
+    models:
+      platform_demo:
+        staging:
+          +materialized: view
+        marts:
+          +materialized: table
+  models_marts_daily_order_totals.sql: |
+    -- 演示 ref() 依赖链(stg_orders -> daily_order_totals),给 Cosmos 拆
+    -- Airflow 任务用——两个模型才能看出"逐模型可见/可重试"这个价值,一个
+    -- 模型看不出来。
+    select
+        order_date,
+        region,
+        count(*) as order_count,
+        sum(amount) as total_amount
+    from {{ ref('stg_orders') }}
+    group by order_date, region
+  models_staging_sources.yml: |
+    version: 2
+
+    sources:
+      - name: demo
+        database: iceberg
+        schema: demo
+        tables:
+          - name: orders
+            description: >
+              Iceberg 里已经在用的 demo 订单表(见近期 commit 记录、
+              apps/spark-iceberg-demo 的验证脚本),不是这个 dbt 项目新建的表。
+  models_staging_stg_orders.sql: |
+    -- 轻量清洗层,列名/表结构和 scripts/08-create-demo-data.sh 建的
+    -- iceberg.demo.orders 保持一致(真实存在的表,不是编的 schema)。
+    select
+        order_id,
+        customer_name,
+        region,
+        product,
+        amount,
+        order_date
+    from {{ source('demo', 'orders') }}
+  profiles.yml: |
+    # dbt-trino 的连接配置。host 用集群内部 DNS——这份文件是给
+    # KubernetesPodOperator 起的 pod 用的(pod 跑在集群里),不是给分析师本机
+    # 用的(本机要连要么走 kubectl port-forward,要么等 cloud-full 阶段有对外
+    # 地址)。凭据从环境变量读(env_var()),不写死在文件里——这个文件会进
+    # git(公开仓库),密码只能来自环境变量,和这个项目其它组件同一个原则。
+    platform_demo:
+      target: dev
+      outputs:
+        dev:
+          type: trino
+          # dbt-trino 的 sample_profiles.yml 写明:密码认证对应的 method 是
+          # "ldap"(即使 Trino 这边配的是 file 类型的 PASSWORD 认证器,不是真的
+          # LDAP——两者在协议层面都是发 HTTP Basic Auth,dbt-trino 只是沿用了
+          # LDAP 这个名字,查过它的 connections.py 源码确认,不是猜的)。
+          method: ldap
+          user: "{{ env_var('DBT_TRINO_USER') }}"
+          password: "{{ env_var('DBT_TRINO_PASSWORD') }}"
+          host: trino.trino.svc.cluster.local
+          port: 8443
+          http_scheme: https
+          # 集群内是自签证书(local-lite 阶段,见 apps/definitions/trino-tls.yaml),
+          # 这里跳过校验——和这个项目其它内部服务间调用(比如 platform-portal
+          # 探测 ArgoCD)同一个取舍,不是这次新引入的例外。
+          session_properties: {}
+          database: iceberg
+          schema: demo
+          threads: 2
