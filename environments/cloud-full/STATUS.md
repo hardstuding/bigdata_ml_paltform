@@ -46,10 +46,15 @@
       `--tls-san 8.130.69.252`)——节点 Ready,确认
       `CONTAINER-RUNTIME: docker://29.7.2`
 - [ ] 本机 x86_64 镜像缓存打包完成(`scripts/export-image-cache-amd64.sh`
-      后台跑着,68 个镜像,写这份文档时进度 11/68——确认了 ArgoCD 自己的
-      镜像 `quay.io/argoproj/argocd:v3.5.1` 也在这批清单里,不会漏)
-- [ ] 镜像缓存传输到云主机 + `docker load` 灌入(`scripts/22-load-image-
-      cache-remote.sh`,已写好,等本地缓存打包完成就能跑)
+      后台跑着,68 个镜像,写这份文档时进度 20/68——确认了 ArgoCD 自己的
+      镜像 `quay.io/argoproj/argocd:v3.5.1` 也在这批清单里,不会漏。
+      中途被一次 colima resize 打断过一次,有一个文件传输时发现损坏
+      (`mlserver:1.7.1`,已清理重新导出),之后没有再发生)
+- [x]/[ ] 镜像缓存传输到云主机 + `docker load` 灌入
+      (`scripts/22-load-image-cache-remote.sh`,**已经真实用过,不是
+      只写了没用**)——第一批 14 个镜像已经传完灌入(13 个成功,1 个
+      因为上面那次损坏失败,已经补做),**支持增量续传**,不用等全部
+      68 个导出完才开始传,已导出的可以先传一批。
 - [x] SSH 隧道建立(`ssh -f -N -L 16443:127.0.0.1:6443 ...` 常驻后台;
       本机单独一份 kubeconfig `~/.kube/cloud-full-config`,不动默认的
       `~/.kube/config`——那个还是指向本机 colima 集群,操作云端集群务必
@@ -85,15 +90,39 @@
   普通 Ubuntu 26.04,减少一个不确定因素。
 - **6443 端口不对公网开放**:管理这个集群走 SSH 隧道,不是把 K8s API
   server 直接暴露公网——见 ADR-054"安全考量"一节。
+- **本机(colima)从 13G/6vCPU 缩到 6G/4vCPU,同时 park 掉本地的重量级
+  组件**(Spark Operator/Airflow/Trino/OpenSearch/OpenMetadata):工作
+  重心已经转到 cloud-full,本机不需要继续常驻这些,腾出来的内存给用户
+  日常用电脑——这次操作过程中撞过 pod 卡在 Terminating(资源紧张导致
+  优雅终止走不完,强制 `--grace-period=0` 清理容器)的问题,记进了
+  [[feedback_destructive_ops]] 这条记忆,教训是"批量删除类操作要先明确
+  目标清单再执行",不是这个项目自己的文档要记的内容,不在这里重复。
+- **2026-08-15 收到 Codex 对这个项目的一轮 review**
+  (`docs/claude-improvement-recommendations-2026-08-15.md`),指出的
+  P0 级问题(按量资源开机门禁、破坏性操作缺防护、Trino 权限没有真正
+  执行、cloud-full 基础设施脚本的具体 bug)已经采纳,处理方式和落地
+  进度见 [ADR-055](../../docs/decisions/055-external-review-response-2026-08-15.md)
+  ——其中数据盘选择那个具体 bug(注释和代码不一致,多块空盘可能格错盘)
+  已经修复并在这台真实云主机上重新验证过,不影响已经做好的部分。
 
 ## 下一步(接手的人从这里继续)
 
-1. 检查 `logs/export-image-cache-amd64.log` 确认镜像缓存是否已经导出
-   完成(本地 Mac 上跑的,`image-cache-amd64/manifest.txt` 存在且条目数
-   等于镜像总数就算完成)。
-2. 传到云主机:`scp -i ~/.ssh/cloud-full-key.pem -r image-cache-amd64
-   root@8.130.69.252:/data/`(入方向免费,可以放心传)。
-3. 云主机上跑一个和 `scripts/17-load-image-cache.sh` 逻辑等价的加载
-   (目前没有专门给这台云主机用的版本,需要照抄逻辑或者改造成能传
-   `CACHE_DIR`+ 远程执行的版本——这个还没做,是接下来要做的事)。
+**2026-08-15 更正:这一节之前写着"远程加载脚本还没做,需要照抄逻辑"是
+过时的错误信息——`scripts/22-load-image-cache-remote.sh` 早就写好了
+并且已经真实用过(见上面"进度清单"),不要再重新写一遍或者怀疑它不
+存在。这处漂移是 Codex review 指出来的,教训记进了 ADR-055:同一份
+文档内部出现自相矛盾(进度清单说"已写好",这一节说"还没做")比单纯
+"信息过时"更容易误导接手的人,以后改完进度清单要顺手检查这里有没有
+跟上,不能只改一处。**
+
+1. 检查本地导出进度(`tail logs/export-image-cache-amd64.log` 或者直接
+   看 `wc -l image-cache-amd64/manifest.txt` 对比 68 这个总数)。
+2. 不需要等全部导出完:`CLOUD_VM_IP=8.130.69.252
+   CLOUD_VM_KEY=~/.ssh/cloud-full-key.pem
+   ./scripts/22-load-image-cache-remote.sh image-cache-amd64` 可以随时
+   针对当前已经导出好的部分跑一次(rsync 增量,已经传过的会跳过,不会
+   重复传)。
+3. 全部 68 个都灌完之后,再跑 `scripts/01-bootstrap-argocd.sh`(不加
+   `NEEDS_LOCAL_PROXY`,云主机不需要走本机代理)——这个顺序是故意的,
+   等镜像缓存备齐了再装 ArgoCD,避免它自己的镜像还要连 quay.io 现拉。
 4. 继续"进度清单"里没打勾的部分。
