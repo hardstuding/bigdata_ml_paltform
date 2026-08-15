@@ -532,7 +532,7 @@ TEMPLATE = """
   select, input[type=text] { padding: 5px; margin-right: 6px; }
   .steps { margin: 0; padding-left: 18px; font-size: 0.9em; }
   .steps li.done { color: #228b22; } .steps li.rejected { color: #b22222; } .steps li.waiting { color: #b8860b; }
-  .steps li.future { color: #aaa; }
+  .steps li.future { color: #aaa; } .steps li.escalated, .steps li.skipped { color: #888; }
   nav { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #eee; }
   nav a { margin-right: 16px; color: #555; text-decoration: none; font-size: 0.95em; }
   nav a.current { color: #222; font-weight: bold; }
@@ -607,7 +607,7 @@ TEMPLATE = """
 <td>
 <ol class="steps">
 {% for s in r.steps %}
-<li class="{{ 'done' if s.status == 'approved' else ('rejected' if s.status == 'rejected' else ('waiting' if s.step_order == r.current_step else 'future')) }}">
+<li class="{{ 'done' if s.status == 'approved' else ('rejected' if s.status == 'rejected' else (s.status if s.status in ('escalated', 'skipped') else ('waiting' if s.step_order == r.current_step else 'future'))) }}">
 第{{ s.step_order }}级 · {{ role_labels[s.approver_role] }}({{ s.approver_username }}):{{ s.status }}
 </li>
 {% endfor %}
