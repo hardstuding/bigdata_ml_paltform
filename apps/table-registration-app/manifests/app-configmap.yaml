@@ -241,7 +241,20 @@ data:
         except requests.HTTPError:
             pass  # owner 还没在 OpenMetadata 里出现过(比如从没登录过 OM UI),先不挂 owner
 
-        om_columns = [{"name": name, "dataType": OM_TYPE_MAP.get(dtype.split("(")[0], "VARCHAR")} for name, dtype in columns]
+        om_columns = []
+        for name, dtype in columns:
+            base = dtype.split("(")[0]
+            om_type = OM_TYPE_MAP.get(base, "VARCHAR")
+            col = {"name": name, "dataType": om_type}
+            if om_type in ("VARCHAR", "CHAR", "BINARY", "VARBINARY"):
+                # OpenMetadata 这几个类型强制要求 dataLength(2026-08-15 实测踩到的
+                # 真实坑,`400 dataLength must not be null`)。有括号里的长度就用
+                # 那个数字(Trino 侧真实建表用的也是这个值),没写就给个够用的默认值
+                # ——这个字段只是给 OpenMetadata 目录展示用,不影响 Trino 里真实的
+                # 列定义,不追求精确。
+                m = re.search(r"\((\d+)", dtype)
+                col["dataLength"] = int(m.group(1)) if m else 255
+            om_columns.append(col)
         body = {
             "name": table,
             "databaseSchema": f"trino.{catalog}.{schema}",
