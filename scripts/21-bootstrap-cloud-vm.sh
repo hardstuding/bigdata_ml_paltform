@@ -39,20 +39,48 @@ echo "=== bootstrap-cloud-vm $(date -u +%FT%TZ) target=${CLOUD_VM_IP} ===" >> "$
 echo "==> 1. 格式化+挂载数据盘到 /data(整块盘不分区,单一用途数据盘的常见做法)"
 ssh_run bash -s <<'REMOTE_SCRIPT' 2>&1 | tee -a "$LOG_FILE"
 set -euo pipefail
-# 找容量最大的那块没有挂载点、没有文件系统的 nvme 盘,不写死设备名——
-# 不同批次/规格的云主机,数据盘的设备名不一定固定是 nvme0n1。
-DISK=""
+# 2026-08-15 修复真实 bug(Codex review 指出的):这里的注释曾经写"找
+# 容量最大的那块",但代码实际逻辑是"遍历 nvme* 设备,取第一个没有挂载点
+# /没有文件系统的",根本没比较过容量——注释和代码不一致,如果一台机器
+# 同时有 2 块空盘,会格式化 `lsblk` 恰好列在前面的那一块,不一定是想要
+# 的那块。mkfs.ext4 -F 是不可逆操作,这条逻辑不能只靠注释"看起来对"。
+#
+# 修法:枚举所有候选(没有挂载点、没有文件系统的 nvme 设备),把候选列表
+# 连同容量打印出来;只有**恰好一个候选**时才自动继续(这是目前实际遇到
+# 的场景,单数据盘云主机);2 个及以上候选时直接拒绝执行,打印列表,要求
+# 显式设置 DATA_DISK_DEVICE 环境变量指定具体设备名,不自己猜——这样"两块
+# 空盘时自动选错一块"这种事故在设计上就不可能发生,不是靠人记得住去防。
+CANDIDATES=""
 for dev in $(lsblk -dno NAME | grep '^nvme'); do
   if [ -z "$(lsblk -no MOUNTPOINT "/dev/$dev" | tr -d '\n')" ] && [ -z "$(lsblk -no FSTYPE "/dev/$dev")" ]; then
-    DISK="/dev/$dev"
-    break
+    SIZE=$(lsblk -dno SIZE "/dev/$dev")
+    CANDIDATES="${CANDIDATES}/dev/$dev(${SIZE}) "
   fi
 done
-if [ -z "$DISK" ]; then
-  echo "!! 没找到未格式化的数据盘,可能已经格式化过了,检查 /data 是否已挂载" >&2
+
+DISK="${DATA_DISK_DEVICE:-}"
+if [ -n "$DISK" ]; then
+  echo "使用显式指定的数据盘: $DISK"
+elif [ -z "$CANDIDATES" ]; then
+  echo "!! 没找到未格式化的候选数据盘,可能已经格式化过了,检查 /data 是否已挂载" >&2
   mountpoint /data || exit 1
+elif [ "$(echo "$CANDIDATES" | wc -w)" -eq 1 ]; then
+  DISK="$(echo "$CANDIDATES" | sed 's/(.*//')"
+  echo "唯一候选,自动选用: $DISK ($CANDIDATES)"
 else
-  echo "数据盘: $DISK"
+  echo "!! 发现多个未格式化的候选盘,不自动选择,避免格式化错盘:" >&2
+  echo "   $CANDIDATES" >&2
+  echo "   请显式设置 DATA_DISK_DEVICE=/dev/xxx 重新运行这个脚本" >&2
+  exit 1
+fi
+
+if [ -n "$DISK" ] && [ -z "$(lsblk -no MOUNTPOINT "$DISK" | tr -d '\n')" ] && [ -z "$(lsblk -no FSTYPE "$DISK")" ]; then
+  ROOT_DEV="$(findmnt -no SOURCE / | sed 's/p\?[0-9]*$//')"
+  if [ "$DISK" = "$ROOT_DEV" ]; then
+    echo "!! 拒绝执行:检测到的目标盘 $DISK 和根分区所在设备 $ROOT_DEV 是同一块,格式化会破坏系统盘" >&2
+    exit 1
+  fi
+  echo "即将格式化: $DISK(容量 $(lsblk -dno SIZE "$DISK"),确认无挂载点、无文件系统、不是根盘)"
   mkfs.ext4 -F "$DISK"
   mkdir -p /data
   mount "$DISK" /data
