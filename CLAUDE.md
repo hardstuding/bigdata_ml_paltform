@@ -1,0 +1,59 @@
+# 本项目的 AI 协作规则
+
+这份文件是仓库里的、对任何 AI(Claude/Codex/其他)和人类维护者都可见的
+规则——和 Claude 自己的私有 memory(`~/.claude/projects/.../memory/`)
+不是一回事:私有 memory 别人看不到,换机器/换工具会丢,这份文件不会。
+私有 memory 应该只存个人偏好和"去哪找权威内容"的索引,不该是唯一事实
+来源。这条区分本身也是 2026-08-15 一轮外部(Codex)review 指出的问题,
+背景见 [ADR-055](docs/decisions/055-external-review-response-2026-08-15.md)。
+
+## 每次开始工作,先按顺序读
+
+1. 这份 `CLAUDE.md`
+2. [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) —— 现在唯一的主线
+   任务是什么、下一步做什么、有没有还在跑的后台任务
+3. 当前主线涉及的环境状态文档(比如
+   [`environments/cloud-full/STATUS.md`](environments/cloud-full/STATUS.md))
+4. 主线直接引用的 ADR
+
+不要只信聊天记录/会话摘要——`git status`、活的集群资源状态、这几份文档,
+比任何"上一轮说了什么"的回忆更权威。怀疑某段内容"是不是说过又丢了",
+翻 `~/.claude/projects/<项目>/*.jsonl` 原始记录,不要凭印象回答。
+
+## 核心要求(这三条是用户明确要求过的底线,不是建议)
+
+- 文档和验证证据要做到"新的 AI/人类不依赖这次对话记忆也能接手"。
+- 要有从空环境可恢复、可重复的一键部署路径(现状:还没有真正做到,见
+  下面"已知差距")。
+- local-lite/cloud-full/prod 未来要能通过改配置切换,不是维护三套手动
+  漂移的副本(现状:还没有做到,见下面"已知差距")。
+
+## 执行纪律
+
+- 任何时候只有一个 `CURRENT` 主线(见 `docs/CURRENT_WORK.md`)。做当前
+  主线时冒出来的新想法,默认记进 backlog,不自动切换过去做——除非它是
+  会阻断当前主线的真实 P0(数据风险、持续计费、安全问题)。
+- 顺手修一下如果会跨组件/改变架构/超过一小段时间,单独立项,不要塞进
+  当前任务里"顺便"做了。
+- 高风险/计费/不可逆操作,必须走对应的 guard/preflight
+  (`scripts/confirm-destructive-kubectl.sh`、
+  `scripts/cloud-full-preflight.sh`),不能图快跳过。
+- 不用删除 namespace、强杀容器作为日常的组件启停手段——本地要 park 组件,
+  用 `scripts/local-lite-toggle-heavy.sh` 这类 GitOps 开关,不是
+  `kubectl delete namespace`。
+
+## 不能没头没尾地停
+
+结束一段工作前,过一遍 `docs/CURRENT_WORK.md` 底部那份检查清单。达到
+下面任一条件才可以停:完成(验收标准满足,状态文档更新过)、需要用户
+才能做的决策(给出选项和推荐,不是把普通技术判断也推给用户)、卡在
+只有用户能解决的权限/凭据上、继续做下去会有不可接受的风险。"已经做了
+不少""发现了别的有意思的东西"不算合法的停止理由。
+
+## 已知差距(如实记录,不是没人管的隐藏债务)
+
+见 [ADR-055](docs/decisions/055-external-review-response-2026-08-15.md)
+和 [`docs/BACKLOG.md`](docs/BACKLOG.md) 的完整清单,这里只点名最重要
+的几条:一键部署目前仍是多个手动脚本按顺序跑;三个自建 Flask 工具没有
+自动化测试、源码和 ConfigMap 靠人工同步;环境切换靠手动 `git mv` 加手调
+资源,不是声明式的。
