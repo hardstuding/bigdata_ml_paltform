@@ -1,0 +1,49 @@
+# 表访问授权到期回收(ADR-050)。每天跑一次(不需要像升级检查那样按小时,
+# 到期这件事本身是天级粒度的),调 app 自己的 /internal/reclaim-expired。
+# 和 escalation-cronjob.yaml 同一个模式(curlimages/curl,不装 python;
+# --retry-connrefused 应对 NetworkPolicy 生效延迟),不重复解释一遍原因,
+# 见那份文件的注释。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: permission-request-app-reclaim
+  namespace: permission-request-app
+spec:
+  schedule: "30 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 90
+      template:
+        metadata:
+          # 要和 platform/network-policies/manifests/permission-request-app.yaml
+          # 里 allow-reclaim-cronjob-to-app 那条规则的 podSelector 对上。
+          labels:
+            app: permission-request-app-reclaim
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: reclaim-expired
+              image: curlimages/curl:8.11.0
+              env:
+                - name: INTERNAL_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: permission-request-app-internal
+                      key: token
+              command:
+                - sh
+                - -c
+                - |
+                  curl -fsS -m 60 --retry 5 --retry-delay 2 --retry-connrefused -X POST \
+                    -H "X-Internal-Token: ${INTERNAL_TOKEN}" \
+                    http://permission-request-app.permission-request-app.svc.cluster.local:8080/internal/reclaim-expired
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi

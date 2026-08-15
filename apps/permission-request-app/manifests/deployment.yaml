@@ -138,6 +138,8 @@ spec:
                   optional: true
             - name: ESCALATION_HOURS
               value: "48"
+            - name: GRANT_EXPIRY_DAYS
+              value: "180"
           ports:
             - containerPort: 8080
               name: http

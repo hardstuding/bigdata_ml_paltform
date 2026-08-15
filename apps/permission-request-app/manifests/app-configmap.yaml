@@ -1,11 +1,4 @@
-# app.py 的内容和 apps/permission-request-app/src/app.py 保持同步——改代码要
-# 同时改两个地方(这个 ConfigMap 是运行时真正吃的那份,src/app.py 是给人看
-# /方便本地测试的那份),这是把自定义 Python 应用跑起来又不用建容器镜像
-# 仓库的权宜之计,见 ADR-032。ConfigMap 有 1MB 大小限制,这个 app 目前
-# 一直在长,真长到需要拆分/建镜像仓库的地步再说。
-#
-# employees.csv 同理和 platform/iam/employees.csv 保持同步(ADR-044,表访问
-# 分级审批用到的虚拟组织架构占位数据)。
+# app.py 的内容和 apps/permission-request-app/src/app.py 保持同步,改动时两边一起改
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -49,7 +42,7 @@ data:
     import sqlite3
     import subprocess
     import tempfile
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
     from pathlib import Path
 
     import requests
@@ -103,6 +96,14 @@ data:
     APPROVAL_BACKEND = os.environ.get("APPROVAL_BACKEND", "local")
     EXTERNAL_OA_WEBHOOK_URL = os.environ.get("EXTERNAL_OA_WEBHOOK_URL", "")
     EXTERNAL_OA_CALLBACK_TOKEN = os.environ.get("EXTERNAL_OA_CALLBACK_TOKEN", "")
+
+    # ADR-050:表访问授权到期回收。table-access-grants.csv 之前 expires_at
+    # 这一列一直是空的(从来没被写过),等于权限永久有效、永远不回收——这是
+    # ADR-040 原本就要求、但一直没落地的一个真实缺口。默认 180 天
+    # (半年,常见的企业访问复审周期),可以整体调,不做"按安全等级不同过期
+    # 时长"这种更细的策略(现在还没有真实数据支撑该怎么分级定时长,做了也是
+    # 瞎猜)。
+    GRANT_EXPIRY_DAYS = int(os.environ.get("GRANT_EXPIRY_DAYS", "180"))
 
     APPROVAL_ROLE_LABELS = {
         "manager": "直属上级",
@@ -261,8 +262,10 @@ data:
         clone/改文件/commit/push 模式,复用同一套 GIT_TOKEN。这份文件现在
         只是决策留痕,不会被任何东西读去真正拦截 Trino 查询(见模块顶部的
         范围边界说明)。"""
-        now = datetime.now(timezone.utc).isoformat()
-        new_line = f"{username},{table_fqn},{security_level},{now},"
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        expires_at = (now_dt + timedelta(days=GRANT_EXPIRY_DAYS)).isoformat()
+        new_line = f"{username},{table_fqn},{security_level},{now},{expires_at}"
         if not GIT_TOKEN:
             return False, f"没有配置 git 写权限(GIT_TOKEN 未设置),请手动把这行加进 platform/iam/table-access-grants.csv 并 push:{new_line}"
 
@@ -1223,6 +1226,78 @@ data:
         conn.commit()
         conn.close()
         return {"reminded": reminded, "escalated": escalated}
+
+
+    @app.route("/internal/reclaim-expired", methods=["POST"])
+    def reclaim_expired():
+        """给 CronJob 调的内部端点(ADR-050),不走 oauth2-proxy/人类登录,同一个
+        X-Internal-Token 共享密钥模式(和 /internal/escalation-check 一样)。
+        扫 table-access-grants.csv,把 expires_at 已经过去的行摘掉、commit+push,
+        对每个被回收的人发一条企微通知。这个文件本身现在没有任何执行引擎在读
+        (见模块顶部范围边界说明),回收动作只影响这份"决策留痕"记录本身,不
+        产生"撤销 Trino 实际权限"这种效果——Trino OPA 真正接上这份数据之前,
+        回收的意义是"记录准确、下次接上执行引擎时不会带着一堆过期授权",不是
+        立刻生效的访问控制变更。"""
+        if not INTERNAL_TOKEN or request.headers.get("X-Internal-Token") != INTERNAL_TOKEN:
+            abort(403)
+        if not GIT_TOKEN:
+            return {"reclaimed": 0, "skipped": "GIT_TOKEN 未配置,无法读写 grants.csv"}
+
+        now = datetime.now(timezone.utc)
+        tmpdir = tempfile.mkdtemp()
+        try:
+            auth_url = REPO_URL.replace("https://", f"https://{GIT_TOKEN}@")
+            subprocess.run(
+                ["git", "clone", "--depth", "1", auth_url, tmpdir],
+                check=True, capture_output=True, text=True, timeout=60,
+            )
+            csv_path = Path(tmpdir) / "platform" / "iam" / "table-access-grants.csv"
+            if not csv_path.exists():
+                return {"reclaimed": 0}
+            with open(csv_path, newline="") as f:
+                rows = list(csv.DictReader(f))
+
+            kept, reclaimed = [], []
+            for row in rows:
+                expires_at = (row.get("expires_at") or "").strip()
+                if expires_at:
+                    try:
+                        if datetime.fromisoformat(expires_at) <= now:
+                            reclaimed.append(row)
+                            continue
+                    except ValueError:
+                        pass  # 解析不了的脏数据保守保留,不当成"已过期"误删
+                kept.append(row)
+
+            if not reclaimed:
+                return {"reclaimed": 0}
+
+            header = "username,table_fqn,security_level,granted_at,expires_at"
+            lines = [header] + [
+                f"{r['username']},{r['table_fqn']},{r['security_level']},{r['granted_at']},{r['expires_at']}"
+                for r in kept
+            ]
+            csv_path.write_text("\n".join(lines) + "\n")
+
+            subprocess.run(["git", "-C", tmpdir, "config", "user.email", "permission-request-app@platform.local"], check=True)
+            subprocess.run(["git", "-C", tmpdir, "config", "user.name", "Permission Request App"], check=True)
+            subprocess.run(["git", "-C", tmpdir, "add", "platform/iam/table-access-grants.csv"], check=True)
+            subprocess.run(
+                ["git", "-C", tmpdir, "commit", "-m", f"iam: 自动回收 {len(reclaimed)} 条已过期的表访问授权(ADR-050)"],
+                check=True, capture_output=True, text=True,
+            )
+            subprocess.run(["git", "-C", tmpdir, "push"], check=True, capture_output=True, text=True, timeout=60)
+
+            for r in reclaimed:
+                notify_wecom(f"访问权限到期回收:{r['username']} 对 {r['table_fqn']} 的访问授权已过期,记录已从 grants.csv 移除,如需继续使用请重新申请。")
+            return {"reclaimed": len(reclaimed), "tables": [r["table_fqn"] for r in reclaimed]}
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr if hasattr(e, "stderr") else str(e)
+            return {"reclaimed": 0, "error": stderr}, 500
+        except subprocess.TimeoutExpired:
+            return {"reclaimed": 0, "error": "git 操作超时"}, 500
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
     @app.route("/audit")
