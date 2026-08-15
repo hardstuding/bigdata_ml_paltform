@@ -14,7 +14,11 @@
 #   - webhookconfiguration/apiservice 这类改集群本身行为的资源
 #
 # 这份文件本身只是把身份和权限边界定义出来、可以被验证(`kubectl auth
-# can-i --as=system:serviceaccount:platform-portal:ai-operator ...`),
+# can-i --as=system:serviceaccount:platform-portal:ai-operator ...`)——
+# 第一版实际写错过:persistentvolumeclaims 被放进了带 delete 的那一组
+# resources 里,和上面说好的"PVC delete 要排除"矛盾,是靠跑
+# `kubectl auth can-i delete persistentvolumeclaims ... --as=...` 真测出
+# 来的,不是代码审查看出来的,修的时候把 PVC 拆成单独一组、去掉 delete。
 # 现阶段(本地 colima 开发)Claude Code 仍然继续用现有 kubeconfig 操作,
 # 没有切换过来用这个身份——切换意味着如果这份权限定义有遗漏,操作者会被
 # 卡在"权限不够、身边又没有人能马上放宽"的处境,这个决定留给 zhenghe 在场
@@ -41,8 +45,11 @@ rules:
       - secrets
       - events
       - serviceaccounts
-      - persistentvolumeclaims
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources:
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
   - apiGroups: [""]
     resources:
       - persistentvolumes
