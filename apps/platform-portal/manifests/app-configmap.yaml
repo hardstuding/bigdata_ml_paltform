@@ -81,8 +81,7 @@ data:
             "name": "Argo Workflows",
             "description": "训练流水线编排",
             "url": "http://argo-workflows.local-lite.test",
-            "probe": "https://argo-workflows-server.argo-workflows.svc.cluster.local:2746/",
-            "probe_verify": False,
+            "probe": "http://argo-workflows-server.argo-workflows.svc.cluster.local:2746/",
         },
         {
             "category": "AI/ML",
