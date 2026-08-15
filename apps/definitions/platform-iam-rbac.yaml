@@ -1,0 +1,26 @@
+# AI 运维角色的 K8s RBAC 身份(ADR-048)。和 network-policies 同一个模式:
+# 这个 Application 的 destination.namespace 只是个默认值,ServiceAccount
+# 显式写了 namespace,ClusterRole/ClusterRoleBinding 本身是集群范围资源,
+# 不受这个字段影响。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-iam-rbac
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/iam/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-portal
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

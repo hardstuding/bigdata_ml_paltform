@@ -1,0 +1,81 @@
+# AI 运维角色的 K8s 身份(ADR-048)。这份文件只落地"开发阶段"这一档权限
+# (ai-operator-dev)——"运维阶段"那档收紧权限(ai-operator-ops)和"危险操作
+# 走审批链"这部分还没实现,见 ADR-048 里明确写的未完成范围,不在这份文件里
+# 假装做了。
+#
+# 权限设计不是"从 cluster-admin 减东西"(K8s RBAC 本身没有显式 deny,减不
+# 干净,容易漏),是反过来"只列出要给的资源/动词",天然排除掉没列出来的东西。
+# 明确排除、不出现在下面规则里的:
+#   - rbac.authorization.k8s.io 整个 API group(不给 AI 改 RBAC 本身的权限,
+#     防止自己给自己加权限这种循环)
+#   - persistentvolumes/persistentvolumeclaims 的 delete 动词(误删等于
+#     数据丢失,不可逆)
+#   - namespaces 的 delete 动词(误删等于整个命名空间下的东西全没)
+#   - webhookconfiguration/apiservice 这类改集群本身行为的资源
+#
+# 这份文件本身只是把身份和权限边界定义出来、可以被验证(`kubectl auth
+# can-i --as=system:serviceaccount:platform-portal:ai-operator ...`),
+# 现阶段(本地 colima 开发)Claude Code 仍然继续用现有 kubeconfig 操作,
+# 没有切换过来用这个身份——切换意味着如果这份权限定义有遗漏,操作者会被
+# 卡在"权限不够、身边又没有人能马上放宽"的处境,这个决定留给 zhenghe 在场
+# 的时候再做,不在无人看管的时候自己切换。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-operator
+  namespace: platform-portal
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ai-operator-dev
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - pods/exec
+      - services
+      - endpoints
+      - configmaps
+      - secrets
+      - events
+      - serviceaccounts
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources:
+      - persistentvolumes
+      - namespaces
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies", "ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications", "appprojects"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ai-operator-dev-binding
+subjects:
+  - kind: ServiceAccount
+    name: ai-operator
+    namespace: platform-portal
+roleRef:
+  kind: ClusterRole
+  name: ai-operator-dev
+  apiGroup: rbac.authorization.k8s.io
