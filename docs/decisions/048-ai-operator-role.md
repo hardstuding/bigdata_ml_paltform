@@ -1,7 +1,10 @@
 # 048. AI 运维角色:给 AI 一个独立身份,阶段性收紧权限,危险操作走审批链
 
-- 状态: 已提议,设计稿,未实现(需要 zhenghe 确认"危险操作"边界和阶段
-  切换时机之后再落地)
+- 状态: 部分实现——开发阶段的 K8s RBAC 身份(`ai-operator`
+  ServiceAccount + `ai-operator-dev` ClusterRole)已落地并实测验证;
+  运维阶段收紧那档(`ai-operator-ops`)和"危险操作走审批链"
+  (`dangerous_operation_request`)还没做,需要 zhenghe 确认"危险操作"
+  边界之后再落地
 
 ## 背景
 
@@ -104,7 +107,32 @@ apply` 哪一个 Binding 决定当前生效哪一档——阶段切换是一次�
 
 ## 验证
 
-未实现,暂无验证记录。落地时需要覆盖:RBAC 边界确实生效(用
-`ai-operator-ops` 身份尝试一个越权操作,确认被拒绝而不是静默失败)、
-`dangerous_operation_request` 走完整审批链后 AI 能拿到批准结果并执行、
-`/audit` 能看到完整记录。
+### 已验证(2026-08-15,开发阶段 RBAC 身份)
+
+`kubectl auth can-i --as=system:serviceaccount:platform-portal:ai-operator`
+实测,不是只看 YAML 内容猜测:
+
+- 应该允许的:`get pods --all-namespaces`、`create deployments`、
+  `update networkpolicies`、`create applications.argoproj.io`、
+  `update persistentvolumeclaims` —— 全部 `yes`。
+- 应该拒绝的:`delete persistentvolumeclaims`、`delete persistentvolumes`、
+  `delete namespaces`、`create clusterrolebindings`、
+  `update clusterroles` —— 全部 `no`。
+- 过程中真的测出一个 bug:第一版把 `persistentvolumeclaims` 放进了带
+  `delete` 动词的那组 resources 里,和设计意图矛盾(ADR 里明确写了要排除
+  PVC delete)。是这次 `kubectl auth can-i delete persistentvolumeclaims`
+  测出来 `yes`(错的)才发现,不是代码审查看出来的——修复方式是把 PVC
+  拆成单独一组、去掉 delete 动词,再测一次确认变成 `no`。
+
+ArgoCD Application(`platform-iam-rbac`)本身也走了完整的 GitOps 流程:
+commit → push → apps-root 发现新 Application → 该 Application 自己
+sync 到指定 revision → Synced/Healthy,不是手动 `kubectl apply` 出来的
+临时状态。
+
+### 还没验证 / 还没做的
+
+- Claude Code 没有切换到实际用这个 ServiceAccount 身份操作(仍然用现有
+  kubeconfig)——"身份存在且权限边界正确"和"AI 真的挂着这个身份在跑"是
+  两件事,后者没做,见上面"决策"部分的说明。
+- `ai-operator-ops`(运维阶段收紧档)、`dangerous_operation_request`
+  审批链集成,都还没实现,没有验证记录。
