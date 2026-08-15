@@ -88,6 +88,85 @@ def _get_json(url: str) -> dict:
         return json.loads(resp.read())
 
 
+
+
+# KubernetesExecutor 起的任务 pod 默认不带任何 resources(BestEffort
+# QoS)——排查一次任务被 SIGKILL(exit_code=-9)的问题时,在节点的
+# kernel OOM 日志里发现这台机器当时确实在被反复 OOM(`journalctl -k`,
+# 连 argocd-application-controller 都被连带杀了几次),BestEffort 的 pod
+# 天然是 OOM killer 第一批目标。加个最小的 resources request,不求解决这台
+# 机器整体资源紧张的根因,至少让这两个任务 pod 不是最先被杀的那批。
+#
+# pod_override 必须是真正的 kubernetes.client.models.V1Pod 对象,不能是
+# 普通 dict——第一次直接传 dict 时 KubernetesExecutor 内部
+# `PodGenerator.from_obj` 会做 isinstance(k8s.V1Pod) 检查,不通过就整个
+# executor_config 判定为 invalid,任务连 pod 都起不来就直接 fail(实测
+# 确认,不是猜的)。
+from kubernetes.client import models as k8s
+
+POD_OVERRIDE = {
+    "pod_override": k8s.V1Pod(
+        spec=k8s.V1PodSpec(
+            containers=[
+                k8s.V1Container(
+                    name="base",
+                    resources=k8s.V1ResourceRequirements(
+                        # 256Mi 太紧——实测任务 pod 直接被 SIGKILL(exit_code=
+                        # -9,这次没有任何 Python 异常堆栈,是容器自己的
+                        # cgroup 内存上限被打到,不是节点级别 OOM)。Airflow
+                        # 3.x 的任务运行时(SDK supervisor 进程 + 解析整个
+                        # DAG 文件)本身占用就不小,调到 512Mi。
+                        requests={"cpu": "50m", "memory": "256Mi"},
+                        limits={"memory": "512Mi"},
+                    ),
+                )
+            ]
+        )
+    )
+}
+
+
+@task(executor_config=POD_OVERRIDE)
+def submit_seatunnel_job(**context) -> str:
+    # 一开始用 context['ts_nodash'] 拼作业名,这个 DAG 是 schedule=None 手动
+    # 触发,没有真正的 logical_date/data_interval——实测确认 Airflow 3.x
+    # 在这种情况下压根不会往 context 里塞 ts_nodash 这个键,直接 KeyError。
+    # 改用 run_id(手动触发的 dag_run 也一定有,格式是
+    # "manual__2026-...+00:00")清理成安全的作业名。
+    run_id = context["run_id"]
+    safe_run_id = run_id.replace(":", "").replace("+", "").replace(".", "")
+    minio_key = Variable.get("minio_access_key")
+    minio_secret = Variable.get("minio_secret_key")
+    job_config = _build_job_config(minio_key, minio_secret)
+    job_name = f"device-events-{safe_run_id}"
+    result = _post_json(
+        f"{SEATUNNEL_REST_URL}/hazelcast/rest/maps/submit-job?jobName={job_name}",
+        job_config,
+    )
+    if result.get("status") == "fail":
+        raise RuntimeError(f"SeaTunnel 拒绝提交作业: {result.get('message')}")
+    job_id = result["jobId"]
+    print(f"已提交 SeaTunnel 作业 {job_name},jobId={job_id}")
+    return job_id
+
+
+@task(executor_config=POD_OVERRIDE)
+def wait_for_completion(job_id: str) -> None:
+    # SeaTunnel REST API 没有"阻塞直到完成"的接口,只能轮询 job-info——这个
+    # demo 作业量很小,预期几秒到十几秒内跑完,轮询间隔不用做得太精细。
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        info = _get_json(f"{SEATUNNEL_REST_URL}/hazelcast/rest/maps/job-info/{job_id}")
+        status = info.get("jobStatus")
+        print(f"jobId={job_id} status={status}")
+        if status == "FINISHED":
+            return
+        if status in ("FAILED", "CANCELED", "UNKNOWABLE"):
+            raise RuntimeError(f"SeaTunnel 作业 {job_id} 失败: {info.get('errorMsg')}")
+        time.sleep(10)
+    raise TimeoutError(f"SeaTunnel 作业 {job_id} 5 分钟内没跑完")
+
+
 # ---- ADR-011/ADR-051 之后补的表级血缘推送 ----
 # 设计:表名直接从 SeaTunnel job 配置结构里读(ADR-011 原文的思路),不解析
 # SQL——这个 DAG 的 sink 是 Iceberg 类型插件,配置里 namespace/table 是
@@ -223,84 +302,6 @@ def push_lineage(**context) -> None:
             },
         )
         print(f"已推送血缘边:pipeline {context['dag'].dag_id} -> table {fqn}")
-
-
-# KubernetesExecutor 起的任务 pod 默认不带任何 resources(BestEffort
-# QoS)——排查一次任务被 SIGKILL(exit_code=-9)的问题时,在节点的
-# kernel OOM 日志里发现这台机器当时确实在被反复 OOM(`journalctl -k`,
-# 连 argocd-application-controller 都被连带杀了几次),BestEffort 的 pod
-# 天然是 OOM killer 第一批目标。加个最小的 resources request,不求解决这台
-# 机器整体资源紧张的根因,至少让这两个任务 pod 不是最先被杀的那批。
-#
-# pod_override 必须是真正的 kubernetes.client.models.V1Pod 对象,不能是
-# 普通 dict——第一次直接传 dict 时 KubernetesExecutor 内部
-# `PodGenerator.from_obj` 会做 isinstance(k8s.V1Pod) 检查,不通过就整个
-# executor_config 判定为 invalid,任务连 pod 都起不来就直接 fail(实测
-# 确认,不是猜的)。
-from kubernetes.client import models as k8s
-
-POD_OVERRIDE = {
-    "pod_override": k8s.V1Pod(
-        spec=k8s.V1PodSpec(
-            containers=[
-                k8s.V1Container(
-                    name="base",
-                    resources=k8s.V1ResourceRequirements(
-                        # 256Mi 太紧——实测任务 pod 直接被 SIGKILL(exit_code=
-                        # -9,这次没有任何 Python 异常堆栈,是容器自己的
-                        # cgroup 内存上限被打到,不是节点级别 OOM)。Airflow
-                        # 3.x 的任务运行时(SDK supervisor 进程 + 解析整个
-                        # DAG 文件)本身占用就不小,调到 512Mi。
-                        requests={"cpu": "50m", "memory": "256Mi"},
-                        limits={"memory": "512Mi"},
-                    ),
-                )
-            ]
-        )
-    )
-}
-
-
-@task(executor_config=POD_OVERRIDE)
-def submit_seatunnel_job(**context) -> str:
-    # 一开始用 context['ts_nodash'] 拼作业名,这个 DAG 是 schedule=None 手动
-    # 触发,没有真正的 logical_date/data_interval——实测确认 Airflow 3.x
-    # 在这种情况下压根不会往 context 里塞 ts_nodash 这个键,直接 KeyError。
-    # 改用 run_id(手动触发的 dag_run 也一定有,格式是
-    # "manual__2026-...+00:00")清理成安全的作业名。
-    run_id = context["run_id"]
-    safe_run_id = run_id.replace(":", "").replace("+", "").replace(".", "")
-    minio_key = Variable.get("minio_access_key")
-    minio_secret = Variable.get("minio_secret_key")
-    job_config = _build_job_config(minio_key, minio_secret)
-    job_name = f"device-events-{safe_run_id}"
-    result = _post_json(
-        f"{SEATUNNEL_REST_URL}/hazelcast/rest/maps/submit-job?jobName={job_name}",
-        job_config,
-    )
-    if result.get("status") == "fail":
-        raise RuntimeError(f"SeaTunnel 拒绝提交作业: {result.get('message')}")
-    job_id = result["jobId"]
-    print(f"已提交 SeaTunnel 作业 {job_name},jobId={job_id}")
-    return job_id
-
-
-@task(executor_config=POD_OVERRIDE)
-def wait_for_completion(job_id: str) -> None:
-    # SeaTunnel REST API 没有"阻塞直到完成"的接口,只能轮询 job-info——这个
-    # demo 作业量很小,预期几秒到十几秒内跑完,轮询间隔不用做得太精细。
-    deadline = time.time() + 300
-    while time.time() < deadline:
-        info = _get_json(f"{SEATUNNEL_REST_URL}/hazelcast/rest/maps/job-info/{job_id}")
-        status = info.get("jobStatus")
-        print(f"jobId={job_id} status={status}")
-        if status == "FINISHED":
-            return
-        if status in ("FAILED", "CANCELED", "UNKNOWABLE"):
-            raise RuntimeError(f"SeaTunnel 作业 {job_id} 失败: {info.get('errorMsg')}")
-        time.sleep(10)
-    raise TimeoutError(f"SeaTunnel 作业 {job_id} 5 分钟内没跑完")
-
 
 with DAG(
     dag_id="seatunnel_device_events",
