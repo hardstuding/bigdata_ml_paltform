@@ -71,18 +71,60 @@ while IFS= read -r img; do
     continue
   fi
 
+  # 2026-08-15 真实撞到两层坑,记录下来不要重新踩:
+  #
+  # 第一层:直接 `docker pull --platform linux/amd64 $img` 按 tag 拉,
+  # 如果这台机器本地已经缓存过这个 tag(这台 Mac 本身在跑这个项目的
+  # 本地集群,很多组件镜像本来就有 arm64 原生缓存),Docker 有时会认为
+  # 这个 tag 已经"满足",不会真的重新拉取换成 amd64,`docker image
+  # inspect` 之后还是原来的架构——不一定报错,不能只看 pull 命令有没有
+  # 报错就认为拿到了正确架构,必须显式校验 `.Architecture`。
+  #
+  # 第二层(试过、被否掉的方案,记录原因):一开始想用 `docker manifest
+  # inspect` 解析出 amd64 digest、按 digest 拉、临时打 tag 再 save——
+  # 实测这条路径在这次真实撞到的案例(quay.io/jetstack/
+  # cert-manager-cainjector)上导出的 tar 只有 10KB,`tar -tf` 确认只有
+  # manifest 元数据,真正的层内容没有被写进去,是**静默产出损坏文件**,
+  # 比直接失败更危险。原因没有深挖清楚(疑似这台机器本地 containerd
+  # content store 对这个具体 repo 有某种损坏/混淆的缓存状态),放弃这条
+  # 路径,改成更保守的"检测到问题就跳过,不试图强修"。
   echo "[$N/$TOTAL] 拉取(amd64): ${img}"
+  PREV_ID="$(docker image inspect "$img" --format '{{.Id}}' 2>/dev/null || true)"
   if ! docker pull --platform linux/amd64 "$img" >> "$LOG_FILE" 2>&1; then
     echo "  !! 拉取失败(可能没有发布 amd64 版本,或者这次网络问题),跳过: ${img}" | tee -a "$LOG_FILE"
     continue
   fi
 
+  ACTUAL_ARCH="$(docker image inspect "$img" --format '{{.Architecture}}' 2>/dev/null || true)"
+  if [ "$ACTUAL_ARCH" != "amd64" ]; then
+    echo "  !! 拉取后架构是 '${ACTUAL_ARCH}',不是 amd64(本地缓存冲突,见上面注释),跳过并恢复原状态: ${img}" | tee -a "$LOG_FILE"
+    if [ -n "$PREV_ID" ]; then
+      docker tag "$PREV_ID" "$img" >> "$LOG_FILE" 2>&1 || true
+    fi
+    continue
+  fi
+
   echo "  导出: ${img} -> ${fpath}"
-  docker save --platform linux/amd64 "$img" | gzip > "$fpath"
+  if ! docker save --platform linux/amd64 "$img" 2>>"$LOG_FILE" | gzip > "$fpath"; then
+    echo "  !! docker save 失败,跳过并清理残留文件: ${img}" | tee -a "$LOG_FILE"
+    rm -f "$fpath"
+    if [ -n "$PREV_ID" ]; then
+      docker tag "$PREV_ID" "$img" >> "$LOG_FILE" 2>&1 || true
+    else
+      docker rmi "$img" >> "$LOG_FILE" 2>&1 || true
+    fi
+    continue
+  fi
   echo "${img} ${fname}" >> "$MANIFEST"
 
-  # 立刻删掉原名引用,把"本地这个 tag 指向 amd64"这个风险窗口关掉。
-  docker rmi "$img" >> "$LOG_FILE" 2>&1 || true
+  # 立刻恢复这个 tag 到导出之前的状态(如果之前有指向别的内容,原样
+  # 恢复;之前没有就删掉)——不让这台机器本地正在用这个 tag 的东西
+  # (不管是别的架构还是别的版本)被这个导出脚本留下的 amd64 内容影响到。
+  if [ -n "$PREV_ID" ]; then
+    docker tag "$PREV_ID" "$img" >> "$LOG_FILE" 2>&1 || true
+  else
+    docker rmi "$img" >> "$LOG_FILE" 2>&1 || true
+  fi
 done < "$IMAGE_LIST_FILE"
 
 echo
