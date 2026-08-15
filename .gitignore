@@ -8,5 +8,6 @@ secrets/
 .vscode/
 logs/
 image-cache/
+image-cache-amd64/
 __pycache__/
 *.pyc
