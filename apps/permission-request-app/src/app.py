@@ -338,7 +338,7 @@ def lookup_table_governance(table_fqn: str):
     if not OPENMETADATA_TOKEN:
         return None, None
     try:
-        data = om_request("GET", f"/api/v1/tables/name/{table_fqn}?fields=owners,tags")
+        data = om_request("GET", f"/api/v1/tables/name/{table_fqn}?fields=owners,tags,extension")
     except requests.HTTPError:
         return None, None
     security_level = None
@@ -375,7 +375,10 @@ def list_catalog_tables(q: str = "", schema_filter: str = "", security_level_fil
     if not OPENMETADATA_TOKEN:
         return []
     try:
-        data = om_request("GET", "/api/v1/tables?fields=owners,tags&limit=200")
+        # extension 要显式声明才会返回(实测确认,不加这个字段负责人的
+        # extension 降级兜底值就读不到,列表页会显示"—"),和
+        # lookup_table_governance() 单表查询那边同一个坑。
+        data = om_request("GET", "/api/v1/tables?fields=owners,tags,extension&limit=200")
     except requests.RequestException:
         return []
     results = []
