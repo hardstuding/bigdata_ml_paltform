@@ -40,6 +40,8 @@ Bash 工具自带的后台任务追踪+完成通知已经够用,没有必要再�
   `wc -l image-cache-amd64/manifest.txt` 对比 68 这个总数。
 - SSH 隧道(`ssh -f -N -L 16443:127.0.0.1:6443 ...`):常驻后台进程,
   给 `KUBECONFIG=~/.kube/cloud-full-config` 用,断了要重新起。
+- 增量传输+加载(`scripts/22-load-image-cache-remote.sh`):每导出一批
+  本地镜像就传一批到云端,不用等 68 个全部导出完才开始传,云主机不空转。
 
 如果你是接手这个工作的人(人类或者别的 AI):先跑
 `./scripts/cloud-full-preflight.sh`(设置 `CLOUD_VM_IP`/`CLOUD_VM_KEY`)
