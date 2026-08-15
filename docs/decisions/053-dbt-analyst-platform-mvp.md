@@ -1,7 +1,8 @@
 # 053. 分析师开发平台 MVP:dbt build 在 Trino/Iceberg 上跑起来,先不接 Cosmos
 
-- 状态: 已实现最小骨架,大部分环节已用真实工具/真实服务本地验证过;完整
-  在集群里跑一遍受限于 Trino 当前不稳定,没有端到端测过。
+- 状态: 已实现最小骨架并部署到真实集群(DAG 确认能正常解析),大部分
+  环节已用真实工具/真实服务本地验证过;完整在集群里跑一遍受限于 Trino
+  当前不稳定,没有端到端测过。
 
 ## 背景
 
@@ -126,6 +127,25 @@ dbt connector 去真正读取并建立血缘,是下一步——ADR-014 记录过
   `dbt` 命名空间被创建、`trino-service-account`(含
   `password-dbt_demo_service` 这个 key)和 `minio-root` 都被正确复制
   进 `dbt` 命名空间。
+
+### 也已经部署到真实集群,DAG 确认能正常解析(2026-08-15,补充)
+
+commit → push → `apps-root` 发现 `dbt-demo` 这个新 Application(挂
+project ConfigMap)→ 同步 `airflow-db-init`(挂 DAG 文件的
+ConfigMap)→ 同步 `airflow`(新增 `dbt_demo.py` 的 subPath 挂载配置,
+scheduler/dagProcessor/workers.kubernetes 三处都要改,见"涉及的文件")。
+
+部署过程中撞到一个真实的、之前没记录过的坑,已经补进
+`docs/operations/troubleshooting.md`:第一次重启
+`dag-processor`/`scheduler` 之后,`dbt_demo.py` 在 pod 里变成了一个
+**空目录**,不是文件(`kubectl exec ... -- ls -la /opt/airflow/dags/`
+看到的),`airflow dags list-import-errors` 也不报错(压根没文件可解析)。
+根因是 `subPath` 挂载在 pod 创建那一刻去 ConfigMap 里找 key,如果重启
+Deployment 的时机比 ConfigMap 新版本传播到节点 kubelet 更早,就会找不到
+这个 key、默默建一个空目录占位,而且不会像整目录挂载那样后续自动修复。
+再等一会、重新 `rollout restart` 一次,`ls -la` 确认变回正常文件之后,
+`airflow dags list-import-errors` 确认 0 错误,`airflow dags list`
+确认 `dbt_demo` 正确注册。
 
 ### 还没验证的(诚实标注)
 

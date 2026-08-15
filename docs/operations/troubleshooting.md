@@ -711,3 +711,32 @@
   `--retry-connrefused`(普通 `--retry` 默认不重试"连接被拒"这种,只重试
   超时/5xx 这类)。这是比"在命令前面加个 `sleep N`"更靠谱的写法——重试
   次数和间隔是可预期的,不用去猜"到底要等几秒才够"。
+
+### 给 ConfigMap 新增一个 key 之后,subPath 挂载这个新 key 的文件在 pod 里变成了一个空目录
+
+- **现象**(2026-08-15,新增 `apps/airflow/dags/dbt_demo.py` 这个 DAG 时
+  撞到):ConfigMap 里确实有这个新 key(`kubectl get configmap ... -o
+  jsonpath='{.data}'` 能看到),`extraVolumeMounts` 里 `subPath:
+  dbt_demo.py` 这一条配置本身也没写错,但 pod 起来之后
+  `/opt/airflow/dags/dbt_demo.py` 是一个空目录(`drwxrwsrwx`),不是文件,
+  同一批挂载的另外两个已经存在很久的文件(`feast_materialize.py`/
+  `seatunnel_device_events.py`)都正常。`airflow dags list-import-errors`
+  不会报这个错(它没有文件可解析,不是"解析失败",是"根本没看到这个
+  文件")。
+- **原因**:`subPath` 挂载不走 K8s ConfigMap 卷常见的"`..data` 软链定期
+  刷新"机制(这个项目已经在别处吃过"改了 ConfigMap 要等 ~1 分钟才生效"的
+  亏,但那条讲的是整目录挂载),`subPath` 是 pod **创建那一刻**去 ConfigMap
+  里找对应 key、直接投影成一个文件——如果 pod 创建的那个时间点,底层
+  ConfigMap 的新版本还没有完全传播到这台节点的 kubelet(改 ConfigMap
+  和重启依赖它的 Deployment 这两个操作之间没有强制的先后等待,很容易
+  连续执行时刚好撞上这个窗口),kubelet 找不到这个 key,不会让 pod 起不来
+  报错,而是**默默地建一个空目录**占位。这个空目录建立之后,`subPath`
+  挂载本身也不会像整目录挂载那样后续自动修复/更新——即使 ConfigMap
+  之后确实同步好了,这个 pod 里那个位置永远是空目录,直到这个 pod 被
+  重新创建。
+- **处理**:改 ConfigMap 之后如果重启依赖它的 Deployment 碰到这种"文件
+  变目录"的情况,不要怀疑 ConfigMap 内容本身(先用 `kubectl get
+  configmap ... -o jsonpath='{.data}'` 确认 key 真的在),大概率是重启
+  时机踩早了——再等几十秒到一分钟,重新 `kubectl rollout restart` 一次
+  就好。用 `kubectl exec ... -- ls -la <挂载路径>` 检查是文件还是目录,
+  是最快的确认方式,不用去猜是不是代码/配置写错了。
