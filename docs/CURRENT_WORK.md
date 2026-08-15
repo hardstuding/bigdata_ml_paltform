@@ -42,6 +42,11 @@ Bash 工具自带的后台任务追踪+完成通知已经够用,没有必要再�
   给 `KUBECONFIG=~/.kube/cloud-full-config` 用,断了要重新起。
 - 增量传输+加载(`scripts/22-load-image-cache-remote.sh`):每导出一批
   本地镜像就传一批到云端,不用等 68 个全部导出完才开始传,云主机不空转。
+  2026-08-15 撞过一次真实故障:containerd 自己的存储没跟着 Docker
+  `data-root` 走,把云主机系统盘写满,导致这一批传输/加载失败——已经
+  在远程修好(containerd `root` 指到 `/data/containerd`)并回写进
+  `scripts/21-bootstrap-cloud-vm.sh`,详见 [ADR-054](decisions/054-cloud-full-bare-vm-bootstrap.md)
+  第 5 条,当前正在重新传这一批。
 
 如果你是接手这个工作的人(人类或者别的 AI):先跑
 `./scripts/cloud-full-preflight.sh`(设置 `CLOUD_VM_IP`/`CLOUD_VM_KEY`)
