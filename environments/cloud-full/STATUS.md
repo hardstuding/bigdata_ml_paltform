@@ -46,11 +46,24 @@
       `--tls-san 8.130.69.252`)——节点 Ready,确认
       `CONTAINER-RUNTIME: docker://29.7.2`
 - [ ] 本机 x86_64 镜像缓存打包完成(`scripts/export-image-cache-amd64.sh`
-      后台跑着,68 个镜像,写这份文档时进度 9/68)
-- [ ] 镜像缓存传输到云主机 + `docker load` 灌入
-- [ ] SSH 隧道建立(管理这个集群用,不把 6443 暴露公网)
-- [ ] `scripts/00-generate-secrets.sh`(生成各组件密码)
-- [ ] `scripts/01-bootstrap-argocd.sh`(装 ArgoCD)
+      后台跑着,68 个镜像,写这份文档时进度 11/68——确认了 ArgoCD 自己的
+      镜像 `quay.io/argoproj/argocd:v3.5.1` 也在这批清单里,不会漏)
+- [ ] 镜像缓存传输到云主机 + `docker load` 灌入(`scripts/22-load-image-
+      cache-remote.sh`,已写好,等本地缓存打包完成就能跑)
+- [x] SSH 隧道建立(`ssh -f -N -L 16443:127.0.0.1:6443 ...` 常驻后台;
+      本机单独一份 kubeconfig `~/.kube/cloud-full-config`,不动默认的
+      `~/.kube/config`——那个还是指向本机 colima 集群,操作云端集群务必
+      显式 `KUBECONFIG=~/.kube/cloud-full-config`,别搞混)
+- [x] `scripts/00-generate-secrets.sh`(针对全新集群跑,过程中发现并修
+      了一个真实 bug:`ensure_secret()` 缺了 `copy_secret()` 早就有的
+      "命名空间不存在就跳过"guard,直接报错中止整个脚本——本机 colima
+      从来没有真的从零测过这条路径,这次在真实全新集群上才暴露。修完之后
+      重跑成功,输出写进 `secrets/generated-credentials-cloud-full.txt`
+      (本地文件,不进 git)。还有一批 Secret 会在对应 Application 第一次
+      同步、命名空间建出来之后需要重跑这个脚本补齐,这是预期行为,不是
+      没做完)
+- [ ] `scripts/01-bootstrap-argocd.sh`(装 ArgoCD,准备先等镜像缓存灌完
+      再装,避免 ArgoCD 自己的镜像还要现拉 quay.io)
 - [ ] `scripts/02-bootstrap-root-apps.sh`(交给 GitOps 管理)
 - [ ] `pending-definitions/` 里的组件 `git mv` 到 `apps/definitions/`
       (cloud-full 要求全部组件常驻,不是 local-lite 那种按需 park)
