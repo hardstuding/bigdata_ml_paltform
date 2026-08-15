@@ -67,6 +67,9 @@ pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其
 | 底座 | Keycloak | 统一身份 / OIDC | 中 | ✅ | ✅ | ✅ | Phase 0 |
 | 底座 | Prometheus + Grafana + Loki | 指标 + 日志 | 中 | ✅ | ✅ | ✅ | Phase 0 |
 | 底座 | Harbor | 私有镜像仓库 | 轻 | — | ✅ | ✅ | Phase 4 |
+| 底座 | 平台门户(自建) | 统一入口页面,现场探测各工具状态 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
+| 治理 | 权限申请门户(自建) | 组权限申请 + 表访问分级审批 + 权限交接 + 审计 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
+| 治理 | 建表注册工具(自建) | 建表 + 回写负责人/安全等级进 OpenMetadata | 轻 | ✅ | ✅ | ✅ | Phase 0 |
 | 湖仓 | MinIO | S3 兼容对象存储 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
 | 湖仓 | Postgres(CloudNativePG operator 管理) | 元数据库共用 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
 | 湖仓 | Hive Metastore | 表元数据 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
