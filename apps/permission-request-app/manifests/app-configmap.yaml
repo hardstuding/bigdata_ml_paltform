@@ -380,6 +380,58 @@ data:
         return security_level, owner_username
 
 
+    def list_catalog_tables(q: str = "", schema_filter: str = "", security_level_filter: str = ""):
+        """给"浏览目录勾选要申请的表"这个界面用(见 ADR-046)——列出 OpenMetadata
+        里已经登记过的表(建表注册工具回写的那些),带上安全等级/负责人,支持
+        按关键字/schema/安全等级筛选。这不是分页浏览一整个大目录的通用实现
+        (`limit=200` 封顶,够这个项目当前的表规模用),表多到需要真分页时
+        再改。查不到/没配 token 时返回空列表,不报错——调用方(catalog 页面)
+        要能处理"目录暂时看不到"这种情况,不能整个页面挂掉。"""
+        if not OPENMETADATA_TOKEN:
+            return []
+        try:
+            data = om_request("GET", "/api/v1/tables?fields=owners,tags&limit=200")
+        except requests.RequestException:
+            return []
+        results = []
+        for entity in data.get("data", []) or []:
+            fqn = entity.get("fullyQualifiedName", "")
+            parts = fqn.split(".")
+            schema = parts[-2] if len(parts) >= 2 else ""
+            security_level = None
+            for tag in entity.get("tags", []) or []:
+                tag_fqn = tag.get("tagFQN", "")
+                if tag_fqn.startswith("SecurityLevel.Level"):
+                    try:
+                        security_level = int(tag_fqn.rsplit("Level", 1)[1])
+                    except ValueError:
+                        pass
+            ext = entity.get("extension") or {}
+            if security_level is None:
+                security_level = ext.get("securityLevel")
+            owner_username = None
+            for o in (entity.get("owners") or []):
+                if o.get("type") == "user":
+                    owner_username = o.get("name")
+                    break
+            if owner_username is None:
+                owner_username = ext.get("registeredOwner")
+            columns = [c.get("name") for c in (entity.get("columns") or [])]
+
+            if q and q.lower() not in fqn.lower():
+                continue
+            if schema_filter and schema != schema_filter:
+                continue
+            if security_level_filter and str(security_level) != security_level_filter:
+                continue
+            results.append({
+                "fqn": fqn, "schema": schema, "security_level": security_level,
+                "owner": owner_username, "columns": columns,
+            })
+        results.sort(key=lambda r: r["fqn"])
+        return results
+
+
     def build_approval_steps(applicant_username: str, table_owner: str, security_level: int):
         """按 ADR-040 原文规则(L2 在 L1 基础上叠加,不是只要 +2)算出这次申请
         需要哪几级、每级谁来审。返回 [(step_order, role, username), ...]。
@@ -556,6 +608,7 @@ data:
     <body>
     <nav>
       <a class="current" href="{{ url_for('index') }}">申请 / 待审批</a>
+      <a href="{{ url_for('table_access_catalog') }}">浏览目录申请</a>
       {% if is_approver %}<a href="{{ url_for('audit') }}">审计</a><a href="{{ url_for('transfer') }}">权限交接</a>{% endif %}
       <a href="{{ url_for('table_access_help') }}">怎么用</a>
     </nav>
@@ -605,6 +658,7 @@ data:
     {% endif %}
 
     <h2>提交新申请:表访问(分级审批)</h2>
+    <p class="hint">不知道确切表名?去<a href="{{ url_for('table_access_catalog') }}"><b>浏览目录申请</b></a>页,能搜索/按安全等级筛选、勾选多张表一起申请。这里是给已经知道确切表名的人用的快捷入口。</p>
     <form method="post" action="{{ url_for('submit_table_access') }}">
       <input type="text" name="table_fqn" placeholder="完整表名,比如 trino.iceberg.demo.orders" size="45" required>
       <input type="text" name="reason" placeholder="申请理由(可选)" size="30">
@@ -768,6 +822,80 @@ data:
     </body></html>
     """
 
+    CATALOG_TEMPLATE = """
+    <!doctype html>
+    <html><head><meta charset="utf-8"><title>浏览目录申请表访问</title>
+    <style>
+      body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #222; }
+      h1 { font-size: 1.4em; } h2 { font-size: 1.05em; }
+      table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.9em; }
+      th, td { border: 1px solid #ddd; padding: 7px 8px; text-align: left; vertical-align: top; }
+      th { background: #fafafa; }
+      nav { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #eee; }
+      nav a { margin-right: 16px; color: #555; text-decoration: none; }
+      nav a.current { color: #222; font-weight: bold; }
+      .filters { display: flex; gap: 10px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+      .filters input[type=text], .filters select { padding: 6px; }
+      .lvl-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.82em; }
+      .lvl-1 { background: #d4edda; color: #1e6b2e; }
+      .lvl-2 { background: #fff3cd; color: #7a5c00; }
+      .lvl-3 { background: #f8d7da; color: #92242f; }
+      .cols { color: #888; font-size: 0.82em; }
+      .hint { color: #888; font-size: 0.85em; }
+      .warn { background: #fff3cd; border: 1px solid #f0d585; padding: 10px 14px; border-radius: 6px; color: #7a5c00; font-size: 0.9em; }
+      button { cursor: pointer; padding: 6px 16px; }
+      input[type=text] { padding: 6px; }
+    </style></head><body>
+    <nav>
+      <a href="{{ url_for('index') }}">申请 / 待审批</a>
+      <a class="current" href="{{ url_for('table_access_catalog') }}">浏览目录申请</a>
+      <a href="{{ url_for('table_access_help') }}">怎么用</a>
+    </nav>
+    <h1>浏览目录,勾选要申请的表</h1>
+    <p>当前登录:<b>{{ username }}</b></p>
+
+    {% if not catalog_available %}
+    <div class="warn">目录暂时看不到(OPENMETADATA_TOKEN 没配置,或者 OpenMetadata 连不上)。可以回<a href="{{ url_for('index') }}">申请页</a>手打完整表名提交,安全等级/负责人还是会在提交时真实校验。</div>
+    {% else %}
+    <form method="get" class="filters">
+      <input type="text" name="q" value="{{ q }}" placeholder="搜表名(模糊匹配)">
+      <select name="schema">
+        <option value="">全部 schema</option>
+        {% for s in schemas %}<option value="{{ s }}" {{ 'selected' if s == schema_filter }}>{{ s }}</option>{% endfor %}
+      </select>
+      <select name="security_level">
+        <option value="">全部安全等级</option>
+        <option value="1" {{ 'selected' if security_level_filter == '1' }}>L1</option>
+        <option value="2" {{ 'selected' if security_level_filter == '2' }}>L2</option>
+        <option value="3" {{ 'selected' if security_level_filter == '3' }}>L3</option>
+      </select>
+      <button type="submit">筛选</button>
+    </form>
+
+    <form method="post" action="{{ url_for('submit_table_access_batch') }}">
+    <table>
+    <tr><th></th><th>表名</th><th>Schema</th><th>安全等级</th><th>负责人</th><th>列</th></tr>
+    {% for t in tables %}
+    <tr>
+    <td><input type="checkbox" name="table_fqn" value="{{ t.fqn }}"></td>
+    <td>{{ t.fqn }}</td>
+    <td>{{ t.schema }}</td>
+    <td>{% if t.security_level %}<span class="lvl-badge lvl-{{ t.security_level }}">L{{ t.security_level }}</span>{% else %}<span class="hint">未标注</span>{% endif %}</td>
+    <td>{{ t.owner or '—' }}</td>
+    <td class="cols">{{ t.columns[:6]|join(', ') }}{% if t.columns|length > 6 %} …{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="hint">目录里还没有登记过的表(先用建表注册工具登记),或者筛选条件太窄</td></tr>
+    {% endfor %}
+    </table>
+    <p><input type="text" name="reason" placeholder="申请理由(可选,比如只需要哪几列/哪个时间范围,写清楚方便审批人判断)" size="60"></p>
+    <button type="submit">申请勾选的表({{ tables|length }} 条候选)</button>
+    </form>
+    <p class="hint">安全等级/负责人以提交时 OpenMetadata 里的真实数据为准(这里显示的是查询时刻的快照,如果表刚被改过标注,提交时会重新校验)。行级/列级细粒度权限现在还只是记录申请理由,不是自动强制执行,见 <a href="{{ url_for('table_access_help') }}">怎么用这个流程</a>里的范围边界说明。</p>
+    {% endif %}
+    </body></html>
+    """
+
 
     @app.route("/")
     def index():
@@ -881,19 +1009,13 @@ data:
         return redirect(url_for("index"))
 
 
-    @app.route("/table-access/request", methods=["POST"])
-    def submit_table_access():
-        username, _ = get_current_user()
-        if not username:
-            abort(401)
-        table_fqn = request.form.get("table_fqn", "").strip()[:300]
-        reason = request.form.get("reason", "")[:500]
-        if not table_fqn:
-            abort(400)
-
+    def create_table_access_request(conn, username: str, table_fqn: str, reason: str):
+        """建一条表访问申请 + 算出并插入它的审批链,`submit_table_access`(单张,
+        手打表名)和 `submit_table_access_batch`(目录页勾选多张,见 ADR-046)
+        共用这一段逻辑,不重复写两遍。调用方负责 `conn.commit()`——这个函数
+        只管一条申请内部的原子性(申请行 + 它的 steps 行要么都插,不存在只
+        插了一半的情况),不管跨多条申请的提交时机。"""
         security_level, table_owner = lookup_table_governance(table_fqn)
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
         if security_level is None:
             conn.execute(
                 "INSERT INTO table_access_requests (username, table_fqn, security_level, table_owner, reason, status, requested_at, note) "
@@ -901,9 +1023,7 @@ data:
                 (username, table_fqn, 0, table_owner, reason, "rejected", datetime.now(timezone.utc).isoformat(),
                  "在 OpenMetadata 里查不到这张表的安全等级(没登记过,或者 OPENMETADATA_TOKEN 没配置),请先用建表注册工具登记这张表"),
             )
-            conn.commit()
-            conn.close()
-            return redirect(url_for("index"))
+            return
 
         cur = conn.execute(
             "INSERT INTO table_access_requests (username, table_fqn, security_level, table_owner, reason, requested_at) "
@@ -927,6 +1047,59 @@ data:
             )
         else:
             activate_next_step(conn, request_id)
+
+
+    @app.route("/table-access/request", methods=["POST"])
+    def submit_table_access():
+        username, _ = get_current_user()
+        if not username:
+            abort(401)
+        table_fqn = request.form.get("table_fqn", "").strip()[:300]
+        reason = request.form.get("reason", "")[:500]
+        if not table_fqn:
+            abort(400)
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        create_table_access_request(conn, username, table_fqn, reason)
+        conn.commit()
+        conn.close()
+        return redirect(url_for("index"))
+
+
+    @app.route("/table-access/catalog")
+    def table_access_catalog():
+        """浏览 OpenMetadata 里已登记的表,勾选要申请哪些(ADR-046)——原来的
+        "手打完整表名"那个输入框对不熟悉表名的人不友好,这个页面替代它成为
+        主要入口,手打输入还留着给知道确切表名的人用,不强制走这条路。"""
+        username, _ = get_current_user()
+        if not username:
+            abort(401)
+        q = request.args.get("q", "").strip()
+        schema_filter = request.args.get("schema", "").strip()
+        security_level_filter = request.args.get("security_level", "").strip()
+        tables = list_catalog_tables(q, schema_filter, security_level_filter)
+        all_tables_unfiltered = list_catalog_tables() if (q or schema_filter or security_level_filter) else tables
+        schemas = sorted({t["schema"] for t in all_tables_unfiltered if t["schema"]})
+        return render_template_string(
+            CATALOG_TEMPLATE, username=username, tables=tables, schemas=schemas,
+            q=q, schema_filter=schema_filter, security_level_filter=security_level_filter,
+            catalog_available=bool(OPENMETADATA_TOKEN),
+        )
+
+
+    @app.route("/table-access/request-batch", methods=["POST"])
+    def submit_table_access_batch():
+        username, _ = get_current_user()
+        if not username:
+            abort(401)
+        table_fqns = [f.strip()[:300] for f in request.form.getlist("table_fqn") if f.strip()]
+        reason = request.form.get("reason", "")[:500]
+        if not table_fqns:
+            return redirect(url_for("table_access_catalog"))
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        for fqn in table_fqns:
+            create_table_access_request(conn, username, fqn, reason)
         conn.commit()
         conn.close()
         return redirect(url_for("index"))
