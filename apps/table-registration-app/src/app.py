@@ -160,6 +160,42 @@ def om_request(method: str, path: str, json_body=None):
     return resp.json() if resp.content else None
 
 
+def ensure_table_custom_properties():
+    """幂等地在 OpenMetadata 的 Table 实体类型上注册 registeredOwner(字符串)
+    /securityLevel(整数)这两个自定义属性——`extension` 字段不是自由 JSON
+    (2026-08-15 实测踩到的真实坑:第一次真正打通写权限之后,PUT /api/v1/
+    tables 报 `400 Unknown custom field registeredOwner`,才发现 OpenMetadata
+    要求 extension 里用到的每个字段必须先在实体类型上登记过,不是随便塞
+    键值对就行)。
+
+    注册用的是 `PATCH .../metadata/types/{id}` + JSON Patch `add` 操作,不是
+    PUT——PUT 整个类型对象会报 `Invalid request format`。`propertyType`
+    这个引用必须同时带 `id`/`type`/`name` 三个字段,只给 `id`+`type` 会在
+    服务端抛 NPE(`Cannot invoke "Object.hashCode()" because "key" is null`,
+    实测确认,不是文档写的)。"""
+    table_type = om_request("GET", "/api/v1/metadata/types/name/table")
+    existing = {p.get("name") for p in (table_type.get("customProperties") or [])}
+    to_add = [
+        ("registeredOwner", "建表注册工具记录的负责人(OpenMetadata owner 关联查不到时的降级字段)",
+         "c09a54a2-583b-4662-a37a-a0146fd32568", "string"),
+        ("securityLevel", "建表注册工具记录的数据安全等级(1/2/3)",
+         "c68083c5-bc02-4422-ba94-bfe06d3d90ca", "integer"),
+    ]
+    for name, description, type_id, type_name in to_add:
+        if name in existing:
+            continue
+        resp = requests.request(
+            "PATCH", f"{OPENMETADATA_URL}/api/v1/metadata/types/{table_type['id']}",
+            headers={"Authorization": f"Bearer {OPENMETADATA_TOKEN}", "Content-Type": "application/json-patch+json"},
+            json=[{"op": "add", "path": "/customProperties/-", "value": {
+                "name": name, "description": description,
+                "propertyType": {"id": type_id, "type": "type", "name": type_name},
+            }}],
+            timeout=15,
+        )
+        resp.raise_for_status()
+
+
 def ensure_om_hierarchy_and_tags():
     """幂等:createOrUpdate(PUT)语义,已存在就是更新,不存在就创建。"""
     om_request("PUT", "/api/v1/services/databaseServices", {
@@ -179,6 +215,7 @@ def ensure_om_hierarchy_and_tags():
             "name": f"Level{level}", "classification": "SecurityLevel",
             "description": f"安全等级 {level}",
         })
+    ensure_table_custom_properties()
 
 
 def register_table_in_openmetadata(catalog: str, schema: str, table: str, columns, owner: str, security_level: int):
