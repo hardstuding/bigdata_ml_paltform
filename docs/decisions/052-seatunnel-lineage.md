@@ -1,7 +1,8 @@
 # 052. SeaTunnel 数据管道的表级血缘:从 job 配置结构提取,推 OpenMetadata
 
-- 状态: 已实现,核心机制已用真实 OpenMetadata 实例验证;完整 DAG 触发跑
-  一遍(受限于 SeaTunnel 当前是 park 状态)没有测。
+- 状态: 已实现,已部署到真实集群(DAG 确认能正常解析、无 import 错误);
+  核心血缘 API 机制已用真实 OpenMetadata 实例验证;完整 DAG 触发跑一遍
+  (受限于 SeaTunnel 当前是 park 状态)没有测。
 
 ## 背景
 
@@ -94,16 +95,40 @@ Variable,由 `scripts/14-configure-airflow-seatunnel-variable.sh` 从
 - ConfigMap 同步:`apps/airflow/manifests/dags-configmap.yaml` 和
   `apps/airflow/dags/*.py` 两个 DAG 文件的内容逐字节比对一致。
 
+### 也已经部署到真实集群并确认 DAG 能正常解析(2026-08-15,补充)
+
+commit → push → 发现这份 ConfigMap 实际被 `airflow-db-init` 这个
+Application 管理(不是看起来更顺理成章的 `airflow` 那个——这是这次一个
+真实的认知纠正,靠 `kubectl get configmap ... -o jsonpath=
+'{.metadata.annotations}'` 查 `tracking-id` 才确认的,不是猜的)→ sync →
+重启 `airflow-dag-processor`/`airflow-scheduler`(ConfigMap 走 subPath
+挂载,这个项目已知有更新延迟,重启是标准应对方式)。
+
+第一次部署后 `airflow dags list-import-errors` 真的抓到一个 bug(见上面
+"涉及的文件"之后新加的一次 commit):`push_lineage` 任务的
+`@task(executor_config=POD_OVERRIDE)` 装饰器引用了 `POD_OVERRIDE`,但我
+把这块代码插在了 `POD_OVERRIDE` 真正定义之前,`NameError`。修复方式是把
+整块血缘代码挪到 `POD_OVERRIDE` 定义之后、`with DAG(...)` 之前——这是
+`list-import-errors` 实测出来的,不是代码审查看出来的。修完之后:
+
+- `airflow dags list-import-errors` 输出 `No data found`,两个 DAG
+  (`seatunnel_device_events`/`feast_materialize`)都没有解析错误。
+- `airflow dags list` 确认 `seatunnel_device_events` 正确注册进了
+  Airflow 的元数据库。
+- `airflow tasks list seatunnel_device_events` 报"Dag 找不到"——一开始
+  怀疑是我的改动引入的新问题,交叉验证:对完全没改过的 `feast_materialize`
+  跑同一个命令,**同样报错**,说明这是 `airflow tasks list` 这个 CLI 子
+  命令本身在这套环境下的既有行为(它走的 DAG bagging 逻辑和 `dags list`/
+  `list-import-errors` 不是同一条代码路径),和这次改动无关,不是我引入
+  的回归。
+
 ### 还没验证的(诚实标注)
 
 - **没有真的触发这个 DAG 跑一遍完整流程**——SeaTunnel 现在是 park 状态
   (`kubectl get pods -n seatunnel` 没有任何 pod),没法提交真实 job,
-  `push_lineage` 任务本身也没有在真实 Airflow 任务运行环境里跑过(它依赖
-  `airflow.sdk`,这次是把逻辑单独摘出来测的,不是通过 Airflow 触发)。
-  等 SeaTunnel unpark、这个 DAG 真的跑一次之后,应该确认 `device_events`
-  表本身有没有被别的地方注册进 OpenMetadata(如果一直没有,这条血缘边
-  会一直被跳过,需要考虑要不要让 `push_lineage` 顺手把表也注册了,这次
-  没有做这个决定,留到真的跑起来再看)。
-- **ConfigMap 变更还没同步部署到集群**——这次改动写完之后走的是先补完
-  ADR、准备一起 commit,还没做 `git push` + ArgoCD sync + 确认 Airflow
-  dag-processor 没有 import 报错这几步,见对应 commit 之后的操作记录。
+  `push_lineage` 任务本身也没有真的在一次 DAG Run 里被执行过(确认了它
+  能被正确解析、注册,但没确认它被触发执行时的实际行为)。等 SeaTunnel
+  unpark、这个 DAG 真的跑一次之后,应该确认 `device_events` 表本身有没有
+  被别的地方注册进 OpenMetadata(如果一直没有,这条血缘边会一直被跳过,
+  需要考虑要不要让 `push_lineage` 顺手把表也注册了,这次没有做这个决定,
+  留到真的跑起来再看)。
