@@ -69,14 +69,31 @@ reclaim-expired-cronjob.yaml`),每天 02:30 跑一次,和
 
 ## 验证
 
-- `apply_grant_to_git()` 改动后确认 `expires_at` 真的被写成
-  `granted_at + GRANT_EXPIRY_DAYS 天`,不再是空字符串(读代码 + 语义确认,
-  没有触发一次真实的表访问审批走完整链路来生成一条新记录,这条是唯一没有
-  端到端跑过的部分)。
-- `/internal/reclaim-expired` 端点:部署后用测试数据实测(见下方commit
-  记录)——手动在 `table-access-grants.csv` 里放一条 `expires_at` 已过去
-  的记录,触发端点,确认这条被移除、其余记录保留、git commit/push 成功、
-  返回的 `reclaimed` 计数正确。
-- CronJob 本身:确认 NetworkPolicy 放行规则生效(`allow-reclaim-cronjob-
-  to-app`),手动触发一次 Job 确认能连通 `/internal/reclaim-expired` 不被
-  拒绝。
+### 已验证(2026-08-15,实测,不是只看代码)
+
+- 部署:commit → push → ArgoCD sync(`network-policies`/
+  `permission-request-app` 都到 Synced/Healthy,revision 对上)→
+  `permission-request-app` Deployment 重新 rollout 成功;
+  `permission-request-app-reclaim` CronJob、
+  `allow-reclaim-cronjob-to-app` NetworkPolicy 都确认已创建。
+- 端到端回收流程:在 `table-access-grants.csv` 手动加一条
+  `expires_at=2026-01-15`(已过期)的测试记录、commit/push;用带
+  `app: permission-request-app-reclaim` 标签的测试 pod(匹配
+  NetworkPolicy 放行条件)直接 POST `/internal/reclaim-expired`,返回
+  `{"reclaimed":1,"tables":["demo.access_test_expired"]}`;`git pull`
+  确认仓库里这一行真的被移除、另外两条未过期记录原样保留、app 自己产生了
+  一条 `iam: 自动回收 1 条已过期的表访问授权(ADR-050)` 的 commit。
+- 幂等性:紧接着再调一次同一个端点,返回 `{"reclaimed":0}`——没有已过期
+  记录时不会误删或重复处理。
+- 鉴权边界:用错误的 `X-Internal-Token` 调用,返回 `403`,确认没有
+  `INTERNAL_TOKEN` 正确匹配就拿不到这个端点的访问权限。
+
+### 还没验证的
+
+- `apply_grant_to_git()` 写入真实 `expires_at` 这部分,是读代码 + 语义
+  确认(改动很直接:`granted_at + GRANT_EXPIRY_DAYS 天`),没有触发一次
+  真实的表访问审批走完整链路来生成一条新记录并肉眼确认那条记录的
+  `expires_at` 字段——下次有真实审批流程跑过一遍时应该顺便确认一下。
+- CronJob 的 `schedule: "30 2 * * *"` 本身没有等到真实触发时间去看它
+  自动跑起来(用的是手动模拟 CronJob 会调用的同一个端点来验证逻辑,
+  不是等一整天看 CronJob 自己触发)。
