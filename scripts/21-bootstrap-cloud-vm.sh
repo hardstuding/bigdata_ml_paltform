@@ -92,21 +92,50 @@ fi
 df -h /data
 REMOTE_SCRIPT
 
-echo "==> 2. 安装 Docker(官方安装脚本,get.docker.com)"
+echo "==> 2. 安装 Docker(阿里云 apt 镜像源,不是 get.docker.com——实测这台
+      机器连不上 download.docker.com,见 ADR-054)"
 ssh_run bash -s <<'REMOTE_SCRIPT' 2>&1 | tee -a "$LOG_FILE"
 set -euo pipefail
 if command -v docker >/dev/null 2>&1; then
   echo "docker 已安装,跳过: $(docker --version)"
 else
-  curl -fsSL https://get.docker.com | sh
+  apt-get update -qq
+  apt-get install -y -qq ca-certificates curl gnupg
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL -m 20 https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  . /etc/os-release
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/ubuntu ${VERSION_CODENAME} stable" \
+    | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  apt-get update -qq
+  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
   mkdir -p /data/docker /etc/docker
   cat > /etc/docker/daemon.json <<'EOF'
 {"data-root": "/data/docker"}
 EOF
+
+  # 2026-08-15 真实踩到的坑,不是可以省略的细节:`daemon.json` 的
+  # `data-root` 只管 Docker 经典的 overlay2 graph driver 那部分,不管
+  # containerd 自己的内容存储(现代 Docker 默认启用 containerd 镜像
+  # 存储后端)——实测灌镜像灌到系统盘(40G)被写满
+  # (`/var/lib/containerd` 占了 35G,`/data/docker` 只有几百 KB),
+  # containerd 自己的 `root`/`state` 配置项要单独指到大盘,两个配置项
+  # 缺一个都不够。
+  mkdir -p /data/containerd
+  if grep -q '^root' /etc/containerd/config.toml 2>/dev/null; then
+    sed -i 's|^root.*|root = "/data/containerd"|' /etc/containerd/config.toml
+  else
+    sed -i 's|^#root = "/var/lib/containerd"|root = "/data/containerd"|' /etc/containerd/config.toml
+  fi
+
   systemctl enable docker
+  systemctl restart containerd
   systemctl restart docker
 fi
 docker info >/dev/null && echo "docker 正常运行"
+echo "data-root: $(docker info --format '{{.DockerRootDir}}')"
+grep -n '^root' /etc/containerd/config.toml || true
 REMOTE_SCRIPT
 
 echo "==> 3. 安装 k3s(--docker 运行时,数据目录指到 /data,和本机保持一致)"
@@ -116,7 +145,17 @@ if command -v k3s >/dev/null 2>&1; then
   echo "k3s 已安装,跳过: \$(k3s --version | head -1)"
 else
   mkdir -p /data/k3s
-  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--docker --data-dir /data/k3s --write-kubeconfig-mode 644 --tls-san ${CLOUD_VM_IP}" sh -
+  # 实测:get.k3s.io 这个入口脚本本身能连上(HTTP 200),但脚本内部真正
+  # 下载 k3s 二进制走的是 github.com/k3s-io/k3s/releases/download/...,
+  # 这条路径连不上(卡死不动,不是报错,ps aux 确认 curl 进程一直挂着)。
+  # "入口脚本能连"不代表"脚本内部所有下载路径都能连",这是这次真实
+  # 踩到的一类坑,见 ADR-054。换成 k3s/Rancher 官方文档记录的中国大陆
+  # 镜像方式(INSTALL_K3S_MIRROR=cn,脚本本身也换成
+  # rancher-mirror.rancher.cn 这个地址,同样是官方提供的选项,不是三方
+  # 野路子)。
+  curl -sfL -m 30 https://rancher-mirror.rancher.cn/k3s/k3s-install.sh -o /tmp/install-k3s.sh
+  INSTALL_K3S_MIRROR=cn INSTALL_K3S_EXEC="--docker --data-dir /data/k3s --write-kubeconfig-mode 644 --tls-san ${CLOUD_VM_IP}" sh /tmp/install-k3s.sh
+  rm -f /tmp/install-k3s.sh
 fi
 sleep 8
 k3s kubectl get nodes
