@@ -85,6 +85,40 @@ k3s 子系统(具体是哪个还没深挖)不完全遵守这个参数。**这次
 不构成真实风险,值得记录但不值得为了这个继续排查下去。以后如果这部分
 残留持续增长(不是稳定在几百 MB),需要重新评估。
 
+### 5. containerd 自己的存储不跟着 Docker 的 `data-root` 走——这个坑比第 4 条严重得多,真的把系统盘写满过
+
+第 4 条记的是"k3s 一小部分状态没跟着 `--data-dir` 走,几百 MB 级别,
+判断可以接受"——这条是**同一类问题的严重版本,不能同样"可以接受"**,
+如实记录更正。
+
+`/etc/docker/daemon.json` 里配的 `"data-root": "/data/docker"`,只管
+Docker 经典的 overlay2 graph driver 那部分。现代 Docker 默认启用
+**containerd 镜像存储后端**(这也是这个项目更早之前在本机 Mac 上,
+`docker save` 需要显式加 `--platform` 参数那次坑的同一个根因,见
+`scripts/export-image-cache-amd64.sh` 的注释),这部分内容走的是
+containerd 自己独立的 `root`/`state` 配置(`/etc/containerd/
+config.toml`),**默认值是 `/var/lib/containerd`,完全不受 `data-root`
+影响**。
+
+实测后果:批量 `docker load` 灌镜像时,系统盘(40GB)被写满
+(`/var/lib/containerd` 占了 35GB,`/data/docker` 只有几百 KB),后续
+所有 `docker load`/`docker pull` 直接报 `no space left on device` 失败。
+这不是"残留一点无关紧要的状态"那种量级,是能让整台机器的容器运行时
+彻底不可用的真实故障。
+
+修复:显式编辑 `/etc/containerd/config.toml`,把 `root` 指到
+`/data/containerd`,`systemctl restart containerd && systemctl restart
+docker` 生效。已经写回 `scripts/21-bootstrap-cloud-vm.sh`(Docker 安装
+那一步的一部分,不是单独的步骤,因为这两个配置本来就该一起做才完整)。
+
+**给以后接自建 IDC 的教训**:凡是"给 Docker 配置存储路径"这件事,不能
+只改 `daemon.json` 的 `data-root` 就假设完事了——现代 Docker 版本(带
+containerd 镜像存储)必须**同时**检查并配置 containerd 自己的
+`root`/`state`,两个配置项都要指向大盘,缺一个都会在数据量上来之后
+暴露问题。部署完之后应该主动跑一次 `docker pull` 一个真实镜像,确认
+体积增长确实反映在预期的大盘路径上,不能只看 `docker info` 里
+`Docker Root Dir` 那一行就认为配置完整生效了。
+
 ## 涉及的文件
 
 - 新增 `scripts/21-bootstrap-cloud-vm.sh`——幂等,从 Mac 通过 SSH 远程
