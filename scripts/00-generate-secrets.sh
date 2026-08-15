@@ -32,6 +32,18 @@ ensure_secret() {
     echo "已存在,跳过: ${ns}/${name}"
     return
   fi
+  # 和 copy_secret() 同一个坑(见那个函数的注释详细说明):在全新集群上,
+  # 这个脚本比 ArgoCD 装的还早,像 permission-request-app 这类命名空间
+  # 是对应 Application 的 CreateNamespace=true 建的,这时候还不存在——
+  # 2026-08-15 在真实的全新 cloud-full 集群上跑这个脚本时才实测触发
+  # (本机 colima 这台机器所有命名空间早就建好了,从来没有真的从零测过
+  # 这条路径),之前只有 copy_secret() 加了这个guard,ensure_secret()
+  # 漏了,直接 kubectl create 报 "namespaces ... not found" 让整个脚本
+  # 中止。这次一起补上。
+  if ! kubectl get namespace "$ns" >/dev/null 2>&1; then
+    echo "跳过: ${ns}/${name}(namespace 还不存在,等对应 Application 先同步一次)"
+    return
+  fi
   local args=()
   local record=("${ns}/${name}")
   for kv in "$@"; do
