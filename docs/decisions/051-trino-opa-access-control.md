@@ -1,7 +1,8 @@
 # 051. Trino 细粒度访问控制:OPA 策略引擎 + grants 数据同步机制
 
-- 状态: 已实现,已在本地充分验证——**但故意没有接进 Trino 生效**,这是
-  这份 ADR 里最重要的一条,不是遗漏,见"上线前必须先做的事"一节。
+- 状态: 已实现,已在本地 + 真实集群里充分验证——**但故意没有接进 Trino
+  生效**,这是这份 ADR 里最重要的一条,不是遗漏,见"上线前必须先做的事"
+  一节。
 
 ## 背景
 
@@ -170,14 +171,32 @@ Trino 里直接执行 DDL/DML。以后如果真有需要放开某类写操作给
   `curl GET /v1/data/trino/grants` 确认数据一致——整条链路(公网 GitHub
   → Python 标准库 → OPA Data API)在没有 K8s 集群参与的情况下就已经跑通。
 
+### 也已经在真实集群里部署并验证过(2026-08-15,补充)
+
+本地验证完之后评估过风险:部署 OPA 服务器本身对现有组件零风险
+(Trino 没有指向它,不影响任何正在跑的东西),footprint 也小
+(128Mi 内存上限),所以没有停在"只在本地验证",接着在这台机器的真实
+K8s 集群里也部署+验证了一遍:
+
+- commit → push → `apps-root` 自动发现新 Application → `opa`/
+  `network-policies` 都到 Synced/Healthy,revision 对上。
+- `opa` 命名空间:Deployment 起来、Pod Running、CronJob 创建成功。
+- **NetworkPolicy 边界实测**:从 `trino` 命名空间起一个测试 pod 探测
+  `opa:8181/health`,返回 `200`;从 `default` 命名空间起同样的测试 pod
+  探测,连接被拒(exit 7),确认"只有 trino 命名空间能连 OPA"这条边界
+  真的生效,不是只在 YAML 里写着。
+- **live 策略实测**:从 trino 命名空间内直接 `curl POST /v1/data/trino/
+  allow`,无 grant 的 SELECT 返回 `{"result":false}`,基础浏览操作
+  (`ExecuteQuery`)返回 `{"result":true}`,和本地 `opa test` 的结论
+  一致。
+- **grants-sync CronJob 真实跑通**:用 `kubectl create job --from=
+  cronjob/opa-grants-sync` 手动触发一次,Job 状态
+  `Complete`(`succeeded: 1`);紧接着查 OPA 里 `/v1/data/trino/grants`
+  的实际内容,确认就是 `table-access-grants.csv` 当前的两条真实记录——
+  不是只看 Job 没报错,是确认了它产生的实际效果。
+
 ### 还没验证的(诚实标注,不是回避)
 
-- **没有在真实 K8s 集群里部署过** `apps/opa/manifests/` 这几份文件——
-  没有跑 ArgoCD sync、没有确认 NetworkPolicy 规则、CronJob 在集群里的
-  真实调度都没有实测过。这些和之前几个 ADR(048/050)的差别在于:这次
-  在集群里部署 OPA 服务器本身是安全的(它不影响任何现有组件,Trino
-  没有指向它),风险可控,但受限于这台机器当前 88% 的内存占用和 Trino
-  本身已经不稳定,这次选择先把本地能验证的部分做扎实,集群内部署留到
-  资源状况更好、或者上云测试的时候再做,不是技术上做不到。
 - **没有接进 Trino 生效**——见上面"上线前必须先做的事",这是故意的,
-  不是没做完。
+  不是没做完。这也是这台机器上 OPA 现在唯一"部署了但没有真实作用"的
+  部分:它已经在跑、数据也在正常同步,但 Trino 现在完全不会去问它。
