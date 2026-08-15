@@ -160,9 +160,20 @@ pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其
   权限交接 + 审计看板)2026-08-14 也已实现,见
   [ADR-045](decisions/045-approval-backend-notifications-escalation.md)
   ——"权限交接"这条原本在待规划清单里,已经在这轮做完,不再是待办**。
-  其余几条(血缘/资源回收/深度回溯)仍然是待规划状态。
+  **"资源回收"(权限到期自动回收)2026-08-15 也已实现,见
+  [ADR-050](decisions/050-grant-expiry-reclamation.md)。"血缘"这条
+  2026-08-15 部分实现:Trino 细粒度访问控制(OPA 策略引擎)见
+  [ADR-051](decisions/051-trino-opa-access-control.md)(策略+数据同步已
+  验证,故意没接进 Trino 生效);SeaTunnel 数据管道的表级血缘推送见
+  [ADR-052](decisions/052-seatunnel-lineage.md)(核心 API 机制已用真实
+  OpenMetadata 实例验证,完整 DAG 触发跑一遍受限于 SeaTunnel 当前 park
+  状态还没测);Spark(ADR-014)、dbt(ADR-012)的血缘仍是设计未实现。**
+  "深度回溯"仍然是待规划状态。
   另外"AI 角色化 + 知识沉淀"是同一轮会话里用户额外提出的第 8 条(不属于
-  08-09 那 7 条),原话和现状见 ADR-040 补充章节,同样待规划。
+  08-09 那 7 条),原话和现状见 ADR-040 补充章节——"AI 角色化"这部分
+  2026-08-15 部分实现,见 [ADR-048](decisions/048-ai-operator-role.md)
+  (开发阶段 RBAC 身份已实测,运维阶段收紧+危险操作审批链未实现);
+  "知识沉淀"仍待规划。
 - ~~共享 Postgres 的 HA 迁移什么时候做~~ **已解决(2026-08-13,ADR-038/039)**:
   用户在场安排了迁移窗口,真正切换了共享实例到 CloudNativePG operator
   管理,含真实数据迁移、切流量、TLS 兼容问题修复;老实例确认稳定后已

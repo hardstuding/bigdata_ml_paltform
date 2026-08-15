@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# 给 DAG(apps/airflow/dags/seatunnel_device_events.py)提供连 MinIO 要用的
+# 给 DAG(apps/airflow/dags/seatunnel_device_events.py)提供它运行时要用的
 # 凭据。没有把凭据直接复制成 Secret 挂进 Airflow 的 pod(那是给"pod 启动时
 # 就要用"的场景用的,比如 apps/spark-iceberg-demo),这里凭据只在 DAG 任务
-# 执行时、拼 SeaTunnel job JSON 请求体那一刻才用得到,更适合用 Airflow
-# 自己的 Variable 机制(存在 Airflow 元数据库里,Fernet key 加密,和
-# scripts/05-configure-airflow.sh 建管理员账号是同一个"用 airflow CLI 走
-# kubectl exec"的思路)。
+# 执行时、拼请求体那一刻才用得到,更适合用 Airflow 自己的 Variable 机制
+# (存在 Airflow 元数据库里,Fernet key 加密,和 scripts/05-configure-
+# airflow.sh 建管理员账号是同一个"用 airflow CLI 走 kubectl exec"的思路)。
 #
 # 幂等:变量已存在就覆盖(凭据可能轮换),不报错。
 #
@@ -24,3 +23,14 @@ MINIO_SECRET=$(kubectl -n minio get secret minio-root -o jsonpath='{.data.rootPa
 kubectl -n "$NS" exec "$DEPLOY" -- airflow variables set minio_access_key "$MINIO_KEY" >/dev/null
 kubectl -n "$NS" exec "$DEPLOY" -- airflow variables set minio_secret_key "$MINIO_SECRET" >/dev/null
 echo "已设置 Airflow Variable: minio_access_key / minio_secret_key"
+
+# ADR-051 之后(2026-08-15)补的:push_lineage 这个任务要调 OpenMetadata
+# 的 lineage API,复用 table-registration-app 已经在用的那个 bot token
+# (同一个 admin 角色 bot,不新建一个),不新增凭据面。
+if kubectl -n table-registration-app get secret table-registration-app-openmetadata >/dev/null 2>&1; then
+  OM_TOKEN=$(kubectl -n table-registration-app get secret table-registration-app-openmetadata -o jsonpath='{.data.token}' | base64 -d)
+  kubectl -n "$NS" exec "$DEPLOY" -- airflow variables set openmetadata_token "$OM_TOKEN" >/dev/null
+  echo "已设置 Airflow Variable: openmetadata_token"
+else
+  echo "跳过 openmetadata_token:table-registration-app-openmetadata 这个 Secret 不存在(push_lineage 任务会静默跳过血缘推送,不阻塞主流程)"
+fi

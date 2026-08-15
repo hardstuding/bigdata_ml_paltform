@@ -88,6 +88,143 @@ def _get_json(url: str) -> dict:
         return json.loads(resp.read())
 
 
+# ---- ADR-011/ADR-051 之后补的表级血缘推送 ----
+# 设计:表名直接从 SeaTunnel job 配置结构里读(ADR-011 原文的思路),不解析
+# SQL——这个 DAG 的 sink 是 Iceberg 类型插件,配置里 namespace/table 是
+# 明写的字段。OpenMetadata 里这张表的 databaseService 固定是 "trino"、
+# database 固定是 "iceberg"(和 apps/table-registration-app/src/app.py 里
+# `databaseSchema: f"trino.{catalog}.{schema}"` 是同一个注册方式,这个平台
+# 目前所有 Iceberg 表都是经同一个 Trino service 注册进 OpenMetadata 的,
+# 不是每个数据管道各自另起一套)——SeaTunnel job 配置里自己的
+# `catalog_name`(这里是 "seatunnel")只是它自己连 Hive Metastore 用的
+# 内部命名,和 OpenMetadata 的服务名无关,这里不能直接拿来拼 FQN。
+OPENMETADATA_URL = "http://openmetadata.openmetadata.svc.cluster.local:8585"
+PIPELINE_SERVICE_NAME = "airflow-platform"
+
+
+def extract_sink_table_fqns(job_config: dict) -> list[str]:
+    """从 SeaTunnel job 配置里的 sink 块提取真正落地的表(OpenMetadata FQN
+    形式)。只认 Iceberg 类型的 sink——这个平台现在只有这一种表级 sink 在用,
+    以后接 Jdbc/Hive 类型的 sink 时,这里要照着各自插件的字段名补对应分支,
+    不能假设所有 sink 插件都用同一套 namespace/table 字段名。"""
+    fqns = []
+    for sink in job_config.get("sink", []):
+        if sink.get("plugin_name") == "Iceberg":
+            fqns.append(f"trino.iceberg.{sink['namespace']}.{sink['table']}")
+    return fqns
+
+
+def _om_request(method: str, path: str, token: str, body: dict | None = None) -> dict | None:
+    """OpenMetadata API 请求的通用封装。404 返回 None(调用方按"这个实体
+    还不存在"处理,不是异常),其他错误正常抛出——这个函数不吞掉真实的
+    权限/网络错误,只吞"实体不存在"这一种,呼应下面 idempotent 创建逻辑的
+    "先查再建"模式。"""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"{OPENMETADATA_URL}{path}",
+        data=data,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            body_text = resp.read()
+            return json.loads(body_text) if body_text else None
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def _ensure_pipeline_service(token: str) -> None:
+    if _om_request("GET", f"/api/v1/services/pipelineServices/name/{PIPELINE_SERVICE_NAME}", token):
+        return
+    _om_request(
+        "POST",
+        "/api/v1/services/pipelineServices",
+        token,
+        {
+            "name": PIPELINE_SERVICE_NAME,
+            "serviceType": "Airflow",
+            "description": "这个平台自己的 Airflow 实例(apps/airflow),给数据管道的 Pipeline 血缘节点用",
+            "connection": {
+                "config": {
+                    "type": "Airflow",
+                    "hostPort": "http://airflow-api-server.airflow.svc.cluster.local:8080",
+                    "connection": {"type": "Backend"},
+                }
+            },
+        },
+    )
+
+
+def _ensure_pipeline(token: str, dag_id: str) -> str:
+    """返回这个 DAG 对应的 Pipeline 实体 id,不存在就先建(幂等)。"""
+    existing = _om_request(
+        "GET", f"/api/v1/pipelines/name/{PIPELINE_SERVICE_NAME}.{dag_id}", token
+    )
+    if existing:
+        return existing["id"]
+    created = _om_request(
+        "POST",
+        "/api/v1/pipelines",
+        token,
+        {
+            "name": dag_id,
+            "service": PIPELINE_SERVICE_NAME,
+            "sourceUrl": f"http://airflow.local-lite.test/dags/{dag_id}",
+        },
+    )
+    return created["id"]
+
+
+def _resolve_table_id(token: str, table_fqn: str) -> str | None:
+    result = _om_request("GET", f"/api/v1/tables/name/{table_fqn}", token)
+    return result["id"] if result else None
+
+
+@task(executor_config=POD_OVERRIDE)
+def push_lineage(**context) -> None:
+    """把这次运行写进的表登记进 OpenMetadata 的血缘图(Pipeline -> Table)。
+    OPENMETADATA_TOKEN 没配就静默跳过——和这个项目其他"可选凭据未配置就
+    降级"的模式一致(见 permission-request-app 的 WECOM_WEBHOOK_URL),不
+    应该因为血缘这个附加能力没配好就让整条数据管道失败。目标表如果还没在
+    OpenMetadata 里注册(比如还没通过 table-registration-app 建过),同样
+    只记日志跳过,不是报错——这属于"目录信息滞后于实际数据"的正常过渡态,
+    不是这个任务自己的 bug。"""
+    token = Variable.get("openmetadata_token", default_var="")
+    if not token:
+        print("openmetadata_token 未配置,跳过血缘推送")
+        return
+
+    job_config = _build_job_config("", "")  # 只读 sink 结构,凭据字段这里用不到
+    sink_fqns = extract_sink_table_fqns(job_config)
+    if not sink_fqns:
+        print("这个 job 配置里没有可识别的表级 sink,没有血缘可推送")
+        return
+
+    _ensure_pipeline_service(token)
+    pipeline_id = _ensure_pipeline(token, context["dag"].dag_id)
+
+    for fqn in sink_fqns:
+        table_id = _resolve_table_id(token, fqn)
+        if not table_id:
+            print(f"目标表 {fqn} 还没在 OpenMetadata 里注册,跳过这条血缘边")
+            continue
+        _om_request(
+            "PUT",
+            "/api/v1/lineage",
+            token,
+            {
+                "edge": {
+                    "fromEntity": {"id": pipeline_id, "type": "pipeline"},
+                    "toEntity": {"id": table_id, "type": "table"},
+                }
+            },
+        )
+        print(f"已推送血缘边:pipeline {context['dag'].dag_id} -> table {fqn}")
+
+
 # KubernetesExecutor 起的任务 pod 默认不带任何 resources(BestEffort
 # QoS)——排查一次任务被 SIGKILL(exit_code=-9)的问题时,在节点的
 # kernel OOM 日志里发现这台机器当时确实在被反复 OOM(`journalctl -k`,
@@ -174,4 +311,4 @@ with DAG(
     tags=["demo", "phase2", "seatunnel", "iceberg"],
 ) as dag:
     job_id = submit_seatunnel_job()
-    wait_for_completion(job_id)
+    wait_for_completion(job_id) >> push_lineage()
