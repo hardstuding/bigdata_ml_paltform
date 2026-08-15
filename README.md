@@ -173,6 +173,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 ## 文档地图
 
 - **实际使用这套平台,先打开 `http://portal.local-lite.test`**(ADR-047)—— 统一门户,现在有哪些工具、分别是干什么的、点哪里进去,一个页面看完;各工具共用同一个 Keycloak SSO,登录一次到处能用,不用重复输密码
+- [`docs/usage-guide.md`](docs/usage-guide.md) —— 给数据分析师/算法工程师看的日常使用指南(Trino 怎么连、怎么申请表权限、Superset/建表工具怎么用、notebook 交互式开发现在的真实差距),不是运维文档
 - [`docs/architecture.md`](docs/architecture.md) —— 架构总览、分层设计、组件清单、路线图(Phase 0-4)、还没定的设计决策
 - [`docs/decisions/`](docs/decisions/) —— ADR,每个非显而易见的技术选择,包含理由、踩过的坑、后续更正(是不是验证过、验证到什么程度都写在里面,不是"我们决定这么做"就完了)
 - [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md) —— 真实踩过的坑,排障时先查这里
