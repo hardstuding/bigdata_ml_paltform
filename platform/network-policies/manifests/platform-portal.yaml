@@ -95,3 +95,31 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+---
+# Keycloak 是例外——它本来就有 NetworkPolicy(试点阶段的第一批,见
+# platform/network-policies/manifests/keycloak.yaml),只放行了
+# ingress-nginx 一个来源。门户直连 Service 探活(不经 ingress-nginx),
+# 需要单独补一条,端口是容器端口 8080(和 keycloak.yaml 里那条注释
+# 强调的一样,不是 Service 的 80/8443/9000)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-portal-probe
+  namespace: keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-portal
+          podSelector:
+            matchLabels:
+              app: platform-portal
+      ports:
+        - protocol: TCP
+          port: 8080

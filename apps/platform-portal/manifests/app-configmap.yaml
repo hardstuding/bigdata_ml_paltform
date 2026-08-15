@@ -1,6 +1,4 @@
-# app.py 的内容和 apps/platform-portal/src/app.py 保持同步——改代码要
-# 同时改两个地方,和 permission-request-app/table-registration-app 是
-# 同一个权宜之计,见 ADR-032/ADR-043/ADR-047。
+# app.py 的内容和 apps/platform-portal/src/app.py 保持同步,改动时两边一起改
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -112,7 +110,7 @@ data:
             "name": "ArgoCD",
             "description": "GitOps 持续部署,谁在跑什么、状态是否正常",
             "url": "http://argocd.local-lite.test",
-            "probe": "https://argocd-server.argocd.svc.cluster.local/",
+            "probe": "http://argocd-server.argocd.svc.cluster.local/",
             "probe_verify": False,
         },
         {

@@ -102,7 +102,7 @@ TOOLS = [
         "name": "ArgoCD",
         "description": "GitOps 持续部署,谁在跑什么、状态是否正常",
         "url": "http://argocd.local-lite.test",
-        "probe": "https://argocd-server.argocd.svc.cluster.local/",
+        "probe": "http://argocd-server.argocd.svc.cluster.local/",
         "probe_verify": False,
     },
     {
