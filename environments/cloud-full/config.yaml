@@ -1,0 +1,15 @@
+# cloud-full 环境的唯一配置源——2026-08-16 真实故障(SSO 登录 404/502
+# 连环事故)之后建的:这几个值之前散落硬编码在 9 个文件里,改一处不代表
+# 其他跟着变,是当天那一路排查的根本原因。现在这些值只在这一份文件里
+# 出现,其他文件从模板(templates/ 目录下)渲染生成,不再手写。
+#
+# 用法:
+#   python3 scripts/render-environment-config.py cloud-full
+#   python3 scripts/render-environment-config.py cloud-full --check   # CI 用,检测漂移
+
+# ingress-nginx 的 ClusterIP 服务本身没有云 LoadBalancer,走 NodePort
+# 暴露(见 platform/apps/ingress-nginx.yaml 的说明,和 Codex 的项目共享
+# 节点、抢不到标准 80/443)。domain_suffix 不带协议/路径,纯后缀。
+domain_suffix: local-lite.test
+http_port_suffix: ":32460"
+https_port_suffix: ":32535"

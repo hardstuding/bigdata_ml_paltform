@@ -61,7 +61,7 @@ spec:
           # local-lite 上验证登录流程,这两行要临时改回
           # KC_HOSTNAME_STRICT=false 那个版本。
           - name: KC_HOSTNAME
-            value: "http://keycloak.local-lite.test:32460/auth"
+            value: "http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth"
           - name: KC_HOSTNAME_STRICT
             value: "true"
           # 加了固定 KC_HOSTNAME 之后实测抓到第二个问题:argo-workflows/
@@ -73,7 +73,7 @@ spec:
           # 这个场景拆开处理:frontchannel(浏览器要跳转去的 authorization_
           # endpoint)固定用上面配的 KC_HOSTNAME,backchannel(服务端自己发
           # 现/请求的 token_endpoint 等)改成"跟着请求方是怎么连进来的动态
-          # 决定"——集群内部服务本来就是用 keycloak.local-lite.test(不带
+          # 决定"——集群内部服务本来就是用 keycloak.{{DOMAIN_SUFFIX}}(不带
           # 端口,coredns-custom 解析到 ingress-nginx 的 ClusterIP:80)发起
           # 请求,拿到的 discovery 文档里 backchannel 地址会正确地也不带
           # 端口,回到内部能连通的地址,不需要额外配置区分"谁在问"。
@@ -122,7 +122,7 @@ spec:
           enabled: true
           ingressClassName: nginx
           rules:
-            - host: keycloak.local-lite.test
+            - host: keycloak.{{DOMAIN_SUFFIX}}
               paths:
                 - path: /auth/
                   pathType: Prefix

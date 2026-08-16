@@ -1,0 +1,11 @@
+# prod 环境的唯一配置源,见 environments/cloud-full/config.yaml 顶部
+# 注释了解这份文件的用途和用法。
+#
+# 占位值——真正上生产前必须换成真实域名(见 environments/prod/README.md
+# "TLS 证书从自签换成真实证书"一节),标准 80/443 端口不需要后缀。
+# 这份文件存在的意义是证明"以后换环境只改这一份文件",不代表 prod 已经
+# 可以直接拉起来用(还差真实域名本身、cert-manager 接真实 CA 这些,见
+# README 里列的其它未完成项)。
+domain_suffix: your-real-domain.example.com
+http_port_suffix: ""
+https_port_suffix: ""

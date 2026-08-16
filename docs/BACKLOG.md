@@ -64,15 +64,30 @@
    本身——这是更进一步的独立工作,需要搭一个临时本地 git 仓库或者更细的
    mock,这次没做。3 个 app 现在都有了扎实的测试覆盖,不再是"起点"这个
    量级了)
-3. 环境 overlay 重构(local-lite/cloud-full/prod 真正做到改配置切换,
-   不是手动 `git mv`)。**2026-08-16 cloud-full 首次全套拉起时,这个
-   已知差距的代价第一次真实体现**:好几个组件里硬编码了 colima 宿主机
-   专用代理地址(192.168.5.2:1087),cloud-full 连不上,导致
-   argo-workflows CRD 安装 Job、3 个 Flask 工具的 pip/apt 全部反复超时
-   崩溃——这次先用运行时自适应探测(连得上才用代理)这种不需要重构就能
-   两边工作的办法过渡(见 `docs/CURRENT_WORK.md` 对应记录里的具体
-   commit),没有动这个重构本身,但再出现同类硬编码,应该认真考虑是不是
-   该启动这一项了,不能一直靠打补丁应付。
+3. ~~环境 overlay 重构~~——**2026-08-16 已实现第一版**,直接回应 zhenghe
+   的明确要求("local、云、生产等,通过一份配置就可以拉起不同的服务...
+   你完全没做好呀")。机制:`environments/<env>/config.yaml`(目前
+   `domain_suffix`/`http_port_suffix`/`https_port_suffix` 三个变量)+
+   `templates/**`(9 个受环境值影响的文件的模板版本,`{{DOMAIN_SUFFIX}}`
+   等占位符)+ `scripts/render-environment-config.py <env> [--check]`
+   (把模板渲染进 `apps/definitions/`、`platform/apps/`、
+   `platform/bootstrap/`、`scripts/` 对应的真实部署文件,`--check` 模式
+   防漂移,已接进 CI)。**验证方式**:对 cloud-full 跑了一次真实渲染,
+   `git diff` 只多出各文件头部的"自动生成"说明注释(57 insertions, 0
+   deletions),证明渲染结果和当前已验证工作的部署文件语义完全一致,不是
+   臆想出来"应该等价"。zhenghe 后续切 local-lite/新建 prod,理论上只需要
+   `python3 scripts/render-environment-config.py <env>` 一条命令——但这句
+   "理论上"还没有真的针对 local-lite/prod 跑过一次渲染+部署验证,下次真
+   在这两个环境上操作时要先确认。**已知遗留限制**(诚实记录,不是隐藏
+   债务):① `templates/platform-bootstrap/argocd-values.yaml` 里
+   `global.hostAliases` 那段是 local-lite 专用的结构性 workaround(原文件
+   注释就写了"cloud-full/prod 用真实 DNS 后这段要删掉"),简单字符串替换
+   机制表达不了"整段删除"这种条件逻辑,现在渲染到其它环境时这段还在,
+   需要人工确认/删除,不是自动的;② 覆盖范围只是"曾经因为环境差异改错过
+   的 9 个文件",不是系统性扫描过全仓库、保证没有遗漏的第 10 个硬编码点
+   ——2026-08-16 记录过的 colima 代理地址硬编码(见本条历史记录)属于
+   另一类问题(网络可达性探测,不是域名/端口),不在这套机制覆盖范围内,
+   仍要靠"再出现就发现"的方式暴露。
 4. 扩大 CI(见 ADR-055 引用的原评审 P1-3 完整清单)——**2026-08-16 迈出
    第一步**:`.github/workflows/validate.yml` 新增 `test-flask-apps`
    job,把 3 个自建 Flask 工具刚补的测试(60 个,见上面"三个自建 Flask

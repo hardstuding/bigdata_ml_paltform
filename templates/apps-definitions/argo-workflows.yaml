@@ -9,7 +9,7 @@
 # 更简单但没有真实身份的模式):这个和 ArgoCD 自己的内置 OIDC 是同一种设计
 # ——只有一个 issuer 字段,服务端自己发起 OIDC discovery/token 交换也用它,
 # 不像 Grafana/JupyterHub 那样能把"浏览器跳转用的地址"和"后端自己发请求
-# 用的地址"分开配(见 ADR-025)。好在 keycloak.local-lite.test 已经在
+# 用的地址"分开配(见 ADR-025)。好在 keycloak.{{DOMAIN_SUFFIX}} 已经在
 # platform/coredns-custom/ 的自定义 DNS zone 里(当初是给 ArgoCD/Trino 配的,
 # 见 ADR-016/017),这里直接复用,不需要再加什么。
 apiVersion: argoproj.io/v1alpha1
@@ -51,7 +51,7 @@ spec:
             - sso
           sso:
             enabled: true
-            issuer: "http://keycloak.local-lite.test/auth/realms/platform"
+            issuer: "http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform"
             clientId:
               name: argo-workflows-oidc-secret
               key: client-id
@@ -65,7 +65,7 @@ spec:
             # 改端口——服务端自己发起的 discovery 请求走集群内部路径,
             # Keycloak 的 KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true 会让它拿到
             # 的 token_endpoint 也不带端口,跟这里保持一致能连通。
-            redirectUrl: "http://argo-workflows.local-lite.test:32460/oauth2/callback"
+            redirectUrl: "http://argo-workflows.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth2/callback"
             scopes:
               - openid
               - profile
@@ -74,7 +74,7 @@ spec:
             enabled: true
             ingressClassName: nginx
             hosts:
-              - argo-workflows.local-lite.test
+              - argo-workflows.{{DOMAIN_SUFFIX}}
           resources:
             requests:
               cpu: 50m

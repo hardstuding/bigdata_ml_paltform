@@ -1,0 +1,8 @@
+# local-lite 环境的唯一配置源,见 environments/cloud-full/config.yaml
+# 顶部注释了解这份文件的用途和用法。
+#
+# local-lite(colima)靠 colima 自动把宿主机的 80/443 转发到
+# 127.0.0.1,ingress-nginx 不需要 NodePort 高位端口,后缀留空。
+domain_suffix: local-lite.test
+http_port_suffix: ""
+https_port_suffix: ""

@@ -169,7 +169,7 @@ spec:
               # cloud-full 的 ingress-nginx 是 NodePort 32460,不带端口会
               # 404(完整根因见 platform/apps/keycloak.yaml 的 KC_HOSTNAME
               # 说明)。
-              root_url: http://grafana.local-lite.test:32460/
+              root_url: http://grafana.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/
             auth.generic_oauth:
               enabled: true
               name: Keycloak
@@ -180,7 +180,7 @@ spec:
               # platform/apps/keycloak.yaml),不再需要额外的端口转发;
               # token_url/api_url 是 Grafana 后端自己在集群内部发起的请求,
               # 走 service 的集群内域名,两者不一样是正常的,不是配置错了。
-              auth_url: http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth
+              auth_url: http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth
               token_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/token
               api_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/userinfo
               # 2026-08-11 起改成按 Keycloak group 映射角色(见 ADR-028、
@@ -204,7 +204,7 @@ spec:
             enabled: true
             ingressClassName: nginx
             hosts:
-              - grafana.local-lite.test
+              - grafana.{{DOMAIN_SUFFIX}}
           resources:
             requests:
               cpu: 50m

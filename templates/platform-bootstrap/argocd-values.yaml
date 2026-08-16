@@ -135,10 +135,10 @@ server:
   ingress:
     enabled: true
     ingressClassName: nginx
-    hostname: argocd.local-lite.test
+    hostname: argocd.{{DOMAIN_SUFFIX}}
 
 # argocd-server 自己也要向 issuer 发起 OIDC discovery/token 交换请求,不只是
-# 浏览器跳转要用这个域名——集群内部 DNS 不认识 keycloak.local-lite.test 这种
+# 浏览器跳转要用这个域名——集群内部 DNS 不认识 keycloak.{{DOMAIN_SUFFIX}} 这种
 # 自造域名,用 hostAliases 让它解析到 ingress-nginx 的 ClusterIP,和浏览器走
 # 同一个 Ingress 入口(只是浏览器经 127.0.0.1、pod 内部经集群网络到达同一个
 # Service)。cloud-full/prod 用真实 DNS 后这段要删掉。
@@ -146,7 +146,7 @@ global:
   hostAliases:
     - ip: 10.43.102.204 # ingress-nginx-controller 的 ClusterIP,变了要同步改
       hostnames:
-        - keycloak.local-lite.test
+        - keycloak.{{DOMAIN_SUFFIX}}
 
 configs:
   params:
@@ -171,10 +171,10 @@ configs:
     # 自动转发 80/443 不需要端口,cloud-full 的 ingress-nginx 是 NodePort
     # 32460,不带端口登录跳转回来会 404(完整根因见
     # platform/apps/keycloak.yaml 里 KC_HOSTNAME 那段说明)。
-    url: http://argocd.local-lite.test:32460
+    url: http://argocd.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}
     oidc.config: |
       name: Keycloak
-      issuer: http://keycloak.local-lite.test/auth/realms/platform
+      issuer: http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform
       clientID: argocd
       clientSecret: $oidc.keycloak.clientSecret
       requestedScopes: ["openid", "profile", "email"]

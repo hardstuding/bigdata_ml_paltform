@@ -45,13 +45,13 @@ spec:
             # 仍然要填带端口的完整值,这个不是网络请求,是本地校验收到的
             # JWT 的 iss claim 用的,必须和 Keycloak 实际签发的 issuer
             # 完全一致。
-            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            oidc_issuer_url = "http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform"
             skip_oidc_discovery = true
-            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
-            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
-            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
-            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
-            redirect_url = "http://portal.local-lite.test:32460/oauth2/callback"
+            login_url = "http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/userinfo"
+            redirect_url = "http://portal.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth2/callback"
             upstreams = [ "http://platform-portal.platform-portal.svc.cluster.local:8080/" ]
             email_domains = [ "*" ]
             cookie_secure = false
@@ -60,7 +60,7 @@ spec:
           enabled: true
           className: nginx
           hosts:
-            - portal.local-lite.test
+            - portal.{{DOMAIN_SUFFIX}}
         resources:
           requests:
             cpu: 50m
