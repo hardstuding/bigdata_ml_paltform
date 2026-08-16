@@ -211,11 +211,16 @@ Codex 的表格),结论:Codex 给的具体版本号和技术判断**基本全部
   create-db-job/cronjob + `apps/postgres/manifests/cluster.yaml` 的
   CNPG `imageName`)全部改完,Docker Hub/ghcr.io 两个 tag 都实测确认
   存在。
-- Trino 480→483:`environments/cloud-full/pending-definitions/
-  trino.yaml` 加了显式 `image.tag: "483"` 覆盖(官方 `trinodb/charts`
-  chart 目前只发布到 1.42.2/对应 app 480,还没跟上 483,这是绕开 chart
-  滞后的正常做法)。用 `helm template` 比对过 480 vs 483 渲染结果,除了
-  image tag 一行没有任何其它字段变化,确认是安全的补丁升级。
+- ~~Trino 480→483~~——**2026-08-16 已回退到 480**:`helm template` 渲染
+  diff 只能比出"改了一行 tag",测不出运行时行为差异。真正在 cloud-full
+  上拉起来才发现 483 对 `http-server.http.port` 收紧了配置校验,chart
+  自己无条件生成这行属性(`configmap-coordinator.yaml` 模板里写死,不受
+  `http.enabled` 控制),我们关了 `http-server.http.enabled`(只用
+  OAuth2+HTTPS)之后这个"未使用的属性"在 483 上直接报错拒绝启动,480
+  上不报错。已改回 chart 默认的 480,不再单独覆盖 tag。**教训**:纯
+  manifest diff 比对不足以验证跨版本兼容性,以后这类覆盖要么真的拉起来
+  跑一遍,要么去读官方 changelog 确认有没有校验行为变化,不能只信
+  render 结果一致。
 - Feast Redis:`apps/feast/manifests/redis.yaml` 从浮动的 `redis:7-alpine`
   改成固定 `redis:8.4.5-alpine`(同时解决 RCE 安全修复和许可证问题两件
   事)。

@@ -38,14 +38,18 @@ spec:
     targetRevision: 1.42.2
     helm:
       valuesObject:
-        # 2026-08-15 版本审计:trinodb/charts 官方 chart 目前发布到 1.42.2,
-        # 对应的 Trino app 版本还停在 480,还没跟上 Trino 自己已经发布的
-        # 483——显式覆盖 image.tag 解耦“chart 打包版本”和“实际镜像版本”,
-        # 已经用 `helm template` 比对过 480 vs 483 的渲染结果,除了这一行
-        # image tag 之外没有任何其它字段变化,是安全的补丁级升级。见
-        # docs/BACKLOG.md P1.6。
-        image:
-          tag: "483"
+        # 2026-08-15 版本审计时曾经把 image.tag 显式覆盖成 483(chart
+        # 1.42.2 打包的默认版本还是 480)。2026-08-16 在 cloud-full 上
+        # 真正跑起来才发现:`helm template` 渲染 diff 只比出"就改了一行
+        # tag",没能测出运行时行为差异——Trino 483 对
+        # `http-server.http.port` 这个属性收紧了校验,我们关了
+        # `http-server.http.enabled`(只用 OAuth2+HTTPS)之后,chart 自己
+        # 无条件生成的 `http-server.http.port={{ .Values.service.port }}`
+        # 这行在 483 上直接报 "Configuration property ... was not used"
+        # 拒绝启动,480 上不报这个错。回退到 chart 默认的 480,不再单独
+        # 覆盖——教训是"渲染结果一致"不等于"运行时行为一致",发布说明/
+        # 真实拉起来跑一遍才是可信的验证,纯 diff 比对不够,以后同类版本
+        # 覆盖不能只靠这一步。见 docs/BACKLOG.md P1.6。
         server:
           workers: 0
           config:
