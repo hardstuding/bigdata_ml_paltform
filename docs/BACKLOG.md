@@ -39,7 +39,14 @@
    两个 app 多得多,量级上应该算独立的后续任务,不是这次顺手能做完的。
    3 个 app 现在都有了测试起点,不再是从 0 开始)
 3. 环境 overlay 重构(local-lite/cloud-full/prod 真正做到改配置切换,
-   不是手动 `git mv`)
+   不是手动 `git mv`)。**2026-08-16 cloud-full 首次全套拉起时,这个
+   已知差距的代价第一次真实体现**:好几个组件里硬编码了 colima 宿主机
+   专用代理地址(192.168.5.2:1087),cloud-full 连不上,导致
+   argo-workflows CRD 安装 Job、3 个 Flask 工具的 pip/apt 全部反复超时
+   崩溃——这次先用运行时自适应探测(连得上才用代理)这种不需要重构就能
+   两边工作的办法过渡(见 `docs/CURRENT_WORK.md` 对应记录里的具体
+   commit),没有动这个重构本身,但再出现同类硬编码,应该认真考虑是不是
+   该启动这一项了,不能一直靠打补丁应付。
 4. 扩大 CI(见 ADR-055 引用的原评审 P1-3 完整清单)——**2026-08-16 迈出
    第一步**:`.github/workflows/validate.yml` 新增 `test-flask-apps`
    job,把 3 个自建 Flask 工具刚补的测试(60 个,见上面"三个自建 Flask
@@ -49,7 +56,16 @@
    还没做,这只是"测试写了就要接进 CI 让它自动跑"这一小步。
 5. Trino OPA 真正切换生效(需要用户在场,不是延后到"不重要",是延后到
    "需要人决策的窗口",见 ADR-051)
-6. ~~镜像缓存 digest 校验~~——**2026-08-16 已经做出来了**,不再是延后项:
+6. iam-sync/opa-grants-sync 这两个 CronJob 在 cloud-full 上暂时被
+   suspend 了(2026-08-16)——问题比其他组件更深:一个 fetch-kubectl
+   initContainer 靠 apt-get+curl 到 dl.k8s.io 现装 kubectl 二进制,主
+   容器又要 git clone github.com(配的还是 colima 专用代理地址)。三层
+   Mac-only 网络依赖叠在一起,不是改一两行能应付的,需要专门花时间要么
+   把 kubectl 换成官方 `registry.k8s.io/kubectl` 镜像(不用现装,和
+   argo-workflows CRD 那次 vendor 的思路一致)、要么给 git clone 这步找
+   一个 cloud-full 也能用的路径。suspend 之前先确认过 cloud-full 上
+   IAM/OPA 权限同步这两件事本来就不是这次主线验收范围。
+7. ~~镜像缓存 digest 校验~~——**2026-08-16 已经做出来了**,不再是延后项:
    `scripts/verify-image-digests.sh`,原因是这次 cloud-full 部署过程中
    真实靠这套核实逻辑抓到过 9 个国内镜像站(daocloud)内容和官方不一致
    的镜像(详见 `docs/CURRENT_WORK.md` 对应记录),不是纸面价值。**已知

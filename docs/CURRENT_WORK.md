@@ -83,7 +83,8 @@
 - **验收标准**:`kubectl get applications -n argocd`(cloud-full 集群)
   全部 Synced/Healthy;核心链路(Trino 查询、Superset 出图、Airflow 跑
   一次 DAG)至少各验证一次
-- **最后更新**:2026-08-15
+- **最后更新**:2026-08-16(见下面"2026-08-16 ArgoCD root-apps 拉起
+  排障记录"这节,任务#16 进行中)
 
 ## 正在运行的后台任务
 
@@ -228,11 +229,65 @@ registry blob,原理上不会有这个"多来源关联"的问题)而不是继续
 `docker save` 这条路上想办法,但这不是现在优先级,先如实记录根因,不
 再当成"未知的环境限制"去猜。
 
+## 2026-08-16 ArgoCD root-apps 拉起排障记录(任务#16 进行中)
+
+镜像缓存传输完成、ArgoCD 装好、`scripts/02-bootstrap-root-apps.sh` 跑完
+注册了 30+ 个 Application 之后,大批组件一开始都卡着(OutOfSync/Missing/
+Degraded)。逐个排查下来,**几乎所有故障的根源是同一类问题**:这套
+manifest 之前只在 Mac(colima)上验证过,里面藏了不少"这台机器专属"的
+硬编码假设,第一次在云主机上跑全套就暴露出来了。已修复并 push 到 git
+的(每条都有独立 commit,可以在 git log 里查到完整根因分析):
+
+- ArgoCD dex-server 128Mi 内存限制在真实压力下 SIGSEGV 崩溃 → 调到 512Mi。
+- argo-workflows chart 默认靠一个 pre-install Job 从
+  raw.githubusercontent.com 实时下载 CRD,配的 HTTP_PROXY 是 colima 宿主机
+  专用地址(192.168.5.2:1087),cloud-full 连不上 → 把 8 个 CRD(注意是
+  8 个,不是 7 个——workflowtemplates 这个和 clusterworkflowtemplates
+  长得像,第一版漏了)vendor 进 `apps/argo-workflows-crds/manifests/`,
+  chart 里关掉 `crds.install`,新增
+  `scripts/25-install-argo-workflows-crds.sh` 一次性装好,不再依赖任何
+  网络。
+- CloudNativePG/kube-prometheus-stack 的 CRD 超过 kubectl 262144 字节
+  annotation 上限(和 KServe 那次,ADR-027,是同一类问题)——
+  `scripts/16-install-cloudnative-pg-crds.sh`/
+  `scripts/04-install-kube-prometheus-crds.sh` 这两个脚本本来就是为这个
+  准备的,之前只是没在这台新集群上跑过,补跑就好。
+- postgres 镜像版本升级后(16.6→16.15,这次版本审计的一部分)cloud-full
+  没有对应缓存,`hive-metastore-create-db`/`keycloak-create-db` 这些 Job
+  在 postgres 起来之前就已经耗尽重试次数报错——postgres 起来后手动删了
+  这几个失败的 Job 触发重建,不是它们自己会重试。
+- 3 个自建 Flask 工具(permission-request-app/table-registration-app/
+  platform-portal)的 pip/apt 也硬编码了同一个 Mac 专用代理地址 → 改成
+  运行时先探测这个代理还在不在,连不上就跳过,不用代理直连
+  (cloud-full 直连 pypi.org/mirrors.aliyun.com 本身是通的,实测确认)。
+  table-registration-app 额外把 pip 超时从 120s 调到 240s(trino 这个
+  依赖比另外两个多拉几个包,和其他并发任务抢带宽时 120s 不够)。
+- `03-configure-keycloak.sh` 遇到还没 unpark 的 jupyterhub 命名空间就直接
+  报错退出(`set -euo pipefail`),后面 trino/superset/openmetadata 等
+  client 全部没建成 → 补了命名空间存在性检查,不存在就跳过继续。
+- kserve-controller-manager/ingress-nginx-controller 两个镜像之前从没
+  缓存到云主机上,直连 registry.k8s.io/docker.io 超时 → 通过国内镜像站
+  (`k8s.m.daocloud.io`)拉取再 retag。kserve-controller 这个还额外发现
+  chart 默认 `imagePullPolicy: Always`,即使本地已经有镜像,kubelet 每次
+  调度还是会去连 registry-1.docker.io 校验导致 ImagePullBackOff——改成
+  `IfNotPresent`(第一版改的 values 层级写错导致
+  `map[imagePullPolicy:IfNotPresent]:v0.19.0` 这种非法镜像名,第二个
+  commit 才修对)。
+- iam-sync/opa-grants-sync 这两个 CronJob 的问题更深(apt-get+dl.k8s.io+
+  github proxy 三层 Mac-only 网络依赖叠在一起),暂时 suspend 掉止损,
+  记进 `docs/BACKLOG.md`,不算这次主线的验收范围。
+
+**还没验证完的**:table-registration-app 用新超时能否稳定跑起来(正在
+观察);`kubectl get applications -n argocd` 的最终全量 Synced/Healthy
+扫描;Trino/Superset/Airflow 核心链路验证。feast-feature-server 的
+ErrImageNeverPull 是已知接受的差距(本地构建镜像,不指望能拉取),不算
+新问题。
+
 ## 下一步唯一动作
 
-镜像缓存导出+传输完成后,跑 `scripts/01-bootstrap-argocd.sh`(装
-ArgoCD,不加 `NEEDS_LOCAL_PROXY`),然后按
-`environments/cloud-full/STATUS.md` 的"进度清单"继续。
+等上面这批修复全部生效、`kubectl get applications -n argocd` 做一次
+全量健康扫描,然后跑核心链路验证(Trino 查询、Superset 出图、Airflow
+跑一次 DAG),达到验收标准就可以收尾任务#16。
 
 ## 结束一段工作前必须确认(照着过一遍,不要跳)
 
