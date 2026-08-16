@@ -32,3 +32,18 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+  # chart 自己的 admission-create/-patch 这两个 hook Job 会在集群里对
+  # ValidatingWebhookConfiguration 做一次性的 `kubectl patch` 注入
+  # caBundle(chart 渲染出的 desired manifest 里这个字段本来就是空的,
+  # 靠这个命令式 patch 补上,不是 Helm values 能声明的)。不 ignore 的话
+  # selfHeal 会把这个字段改回空,导致 Ingress 的 admission webhook 证书
+  # 校验失败(2026-08-16 云端部署时实测复现过,superset 等组件的 sync
+  # 因此卡在 "certificate signed by unknown authority"),和 Trino
+  # liveness probe(见 apps/definitions/trino.yaml)是同一类"命令式补丁 +
+  # ignoreDifferences"模式。
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      name: ingress-nginx-admission
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
