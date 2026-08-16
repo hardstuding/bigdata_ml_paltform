@@ -1,3 +1,22 @@
+## 2026-08-16 深夜(app 会话接手后):table-registration-app 修复 + Trino OPA 正式上线
+
+这段是从 CLI 会话交接过来、在 app 会话里继续做的(用户明确要求"接手 CLI
+那边的,继续做下去")。交接时发现的两个问题,都已解决:
+
+1. **`table-registration-app` 云端 CrashLoopBackOff 已修复**:根因是这台
+   云主机到 PyPI 官方 CDN 的真实带宽瓶颈(~22 kB/s,不是"抢带宽"的猜测),
+   换阿里云 PyPI 镜像后 8 秒装完。已验证 `1/1 Running`、`Synced/Healthy`。
+2. **Trino OPA 细粒度访问控制正式切换生效**(ADR-051):`access-control.
+   name=opa` 已经在 cloud-full 生效,不再是"部署了但没接上"的状态。详细
+   过程(审计现在实际在用 Trino 的身份、撞上的 3 个真实 bug、上线后端到端
+   验证)见 ADR-051"2026-08-16 正式上线"一节,这里不重复。`docs/
+   BACKLOG.md` P1.5 已相应标记完成。
+
+**这次没有做完的**:切换后应该再观察一段时间(比如确认 dbt_demo DAG 下次
+真实调度时用 `dbt_demo_service` 身份能正常建表/写入——这次只验证了 OPA
+决策 API 层面"这个账号会被放行",没有触发一次真实的 DAG 运行去看端到端
+效果),不算阻塞项,只是还没有拿到那个最后的真实证据。
+
 ## 2026-08-16 深夜:经济模式收尾 + Superset 自愈确认
 
 **RAM 角色方案已经补完,自动关机现在真的是经济模式**:`cloud-full-vm-

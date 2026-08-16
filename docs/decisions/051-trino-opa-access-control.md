@@ -1,7 +1,8 @@
 # 051. Trino 细粒度访问控制:OPA 策略引擎 + grants 数据同步机制
 
-- 状态: 已实现,已在本地 + 真实集群里充分验证——**但故意没有接进 Trino
-  生效**,这是这份 ADR 里最重要的一条,不是遗漏,见"上线前必须先做的事"
+- 状态: **2026-08-16 已正式接进 Trino 生效**(cloud-full,zhenghe 在场,
+  见文末"2026-08-16 正式上线"一节)。下面"已实现,已在本地 + 真实集群里
+  充分验证"和"上线前必须先做的事"两节是切换前的记录,保留作为过程存档
   一节。
 
 ## 背景
@@ -200,3 +201,80 @@ K8s 集群里也部署+验证了一遍:
 - **没有接进 Trino 生效**——见上面"上线前必须先做的事",这是故意的,
   不是没做完。这也是这台机器上 OPA 现在唯一"部署了但没有真实作用"的
   部分:它已经在跑、数据也在正常同步,但 Trino 现在完全不会去问它。
+
+## 2026-08-16 正式上线:cloud-full 切换 access-control.name=opa
+
+zhenghe 在场,按上面"上线前必须先做的事"清单执行,过程中额外发现并修
+了 3 个真实 bug(不是纸面计划,是实际操作时撞上的)。
+
+### 上线前审计(按清单第 1 条)
+
+查了 Superset 数据库(`superset` 库的 `dbs`/`tables` 表)和
+`scripts/00-generate-secrets.sh` 里 `ensure_trino_service_account` 的
+调用,确认现在实际连 Trino 的身份只有 3 个服务账号,不是猜的:
+
+- `superset_service`——Superset 所有看板/数据源共用一个连接。
+- `table_registration_service`——已经在原策略的白名单里。
+- `dbt_demo_service`——dbt_demo DAG 用,会真实执行 `CREATE TABLE`/
+  `INSERT` 这类写操作。
+
+原策略只放行了 `table_registration_service`,`superset_service` 和
+`dbt_demo_service` 补进 `apps/opa/policy/trino.rego` 的
+`service_accounts` 白名单(`apps/opa/manifests/policy-configmap.yaml`
+同步改,两边继续保持字节级一致)。补了 2 个对应的 `opa test` 用例,
+12/12 全部通过(`docker run openpolicyagent/opa:1.19.0 test` 本地验证,
+不是凭印象改完就信)。如果这一步漏做,切换瞬间 Superset 看板会查不到
+数据、dbt_demo DAG 会失败——这是切换前审计要防的真实后果,不是假设性
+风险。
+
+### 撞上的 3 个真实 bug
+
+1. **`opa-grants-sync` CronJob 硬编码 colima 专用代理地址**,cloud-full
+   上连不上导致一直失败、被临时 suspend(`docs/BACKLOG.md` 记过这件事,
+   但没细究是不是这个具体原因)。改成和
+   `permission-request-app`/`table-registration-app` 同一套"运行时探测
+   代理是否可达"模式(2 秒连不上就当作不需要),修完手动跑一次验证
+   `PUT /v1/data/trino/grants` 返回 `204`,`GET` 确认数据真的进去了。
+2. **Trino 拒绝把 `access-control.name`/`opa.policy.uri` 塞进主
+   `config.properties`**:实测启动直接报错"Configuration property
+   'access-control.name' was not used. Did you mean to use
+   'access-control.config-files'?"——Trino 要求访问控制配置必须是独立
+   文件。改用 `trinodb/charts` 原生的 `accessControl`(`type: properties`)
+   顶层 values key,会自动生成 `etc/access-control.properties`(Trino
+   按约定路径自动加载,不需要显式 `access-control.config-files`)。这次
+   先用 `helm template` 本地渲染确认生成的 ConfigMap 内容正确,再推上去,
+   不是"改完直接上线试错"。
+3. **ArgoCD `ignoreDifferences` 没有真正生效**:`apps/definitions/
+   trino.yaml` 里早就为 `livenessProbe`(chart 硬编码 httpGet,被
+   `scripts/07-fix-trino-liveness-probe.sh` 一次性 patch 成 exec)声明了
+   `ignoreDifferences`,但这是这条声明第一次真的被一次 `sync` 操作触发
+   ——实测发现 `ignoreDifferences` 只影响"要不要标记 OutOfSync"的比较
+   逻辑,不影响 sync 时补丁实际提交的内容:ArgoCD 把 chart 默认的
+   httpGet 和已经手动 patch 的 exec 合并提交,K8s API 拒绝("may not
+   specify more than 1 handler type"),sync 卡在无限重试(5 次后
+   Failed)。加 `syncOptions: [RespectIgnoreDifferences=true]` 之后
+   sync 补丁也跳过了这个字段,恢复正常——这是让原有的 `ignoreDifferences`
+   真正达到设计时想要的效果,不是新引入的例外。全程活的 Deployment 探针
+   字段没有被破坏(K8s API 拒绝了坏补丁,不是接受了坏补丁),没有真实
+   故障窗口。
+
+### 上线后端到端验证(真实查询,不是只看配置)
+
+- 直接对活的 OPA 实例(带真实 grants 数据,不是本地 mock)发 3 组
+  `POST /v1/data/trino/allow`:没有 grant 记录的用户查任意表 →
+  `false`;`analyst001` 查自己有 grant 的表 → `true`;`analyst001` 查
+  没有 grant 的表 → `false`。三组结果全部符合预期。
+- 用 `superset_service` 的真实凭据,在集群里起一次性 pod 直接用
+  Trino Python client 连 Trino(`https://trino.trino.svc.cluster.local:
+  8443`)查 `iceberg.demo.orders`,成功拿到数据(`[[10]]`)——证明
+  Superset 现在正在用的这条真实查询路径没有被打断,不是只测了 OPA 自己
+  的决策 API。
+- `kubectl get applications -n argocd`:`trino`/`opa` 都是
+  `Synced/Healthy`;`superset` pod 没有因为这次变更受影响
+  (`1/1 Running`)。
+
+### 回滚方式(记录清楚,不用临场想)
+
+`git revert` 这几条切换相关的 commit(`5bf9c78`/`b1e5a1d`,以及如果
+`RespectIgnoreDifferences` 那条 `8e6384e` 也想收回的话一起),push 后
+ArgoCD 会自动同步回 `AllowAllAccessControl`,不需要额外手动操作。

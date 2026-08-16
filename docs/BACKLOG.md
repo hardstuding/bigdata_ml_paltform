@@ -62,8 +62,13 @@
    ConfigMap 和 src/app.py 漂移。本地模拟过 CI 里的每一步命令,全部
    通过。原评审 P1-3 清单里其它更大的 CI 扩展(比如镜像构建/集成测试)
    还没做,这只是"测试写了就要接进 CI 让它自动跑"这一小步。
-5. Trino OPA 真正切换生效(需要用户在场,不是延后到"不重要",是延后到
-   "需要人决策的窗口",见 ADR-051)
+5. ~~Trino OPA 真正切换生效~~——**2026-08-16 已上线**(zhenghe 在场,见
+   ADR-051"2026-08-16 正式上线"一节)。access-control.name=opa 已生效,
+   服务账号白名单审计过、grants-sync 修好、真实查询验证过(未授权拒绝/
+   授权放行/Superset 数据源不受影响)。过程中顺带修了 2 个真实 bug:
+   opa-grants-sync 硬编码 colima 代理地址导致 cloud-full 上一直失败、
+   ArgoCD ignoreDifferences 需要配 RespectIgnoreDifferences 才能在真正
+   sync 时也生效(不只是比较逻辑)。
 6. iam-sync/opa-grants-sync 这两个 CronJob 在 cloud-full 上暂时被
    suspend 了(2026-08-16)——问题比其他组件更深:一个 fetch-kubectl
    initContainer 靠 apt-get+curl 到 dl.k8s.io 现装 kubectl 二进制,主
