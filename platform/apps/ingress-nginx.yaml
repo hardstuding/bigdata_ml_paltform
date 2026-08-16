@@ -15,6 +15,16 @@ spec:
       valuesObject:
         controller:
           replicaCount: 1
+          # 2026-08-16 真实故障:登录 SSO 之后跳回来 502,ingress-nginx
+          # 日志报 "upstream sent too big header while reading response
+          # header from upstream"——oauth2-proxy 在 /oauth2/callback 这一步
+          # 种下的 Set-Cookie(带完整 JWT access/id/refresh token)超过了
+          # nginx 默认的响应头缓冲区大小。调大是这类 OIDC 反向代理场景的
+          # 标准做法,不是这个项目独有的问题,全局设置一次,不用给每个
+          # 接了 oauth2-proxy 的 Ingress 单独加 annotation。
+          config:
+            proxy-buffer-size: "16k"
+            proxy-buffers-number: "4"
           resources:
             requests:
               cpu: 100m
