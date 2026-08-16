@@ -28,7 +28,11 @@ spec:
           configFile: |
             provider = "oidc"
             oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
-            redirect_url = "http://permission-request.local-lite.test/oauth2/callback"
+            # 2026-08-16 cloud-full 真实故障(和 platform-portal-oauth2-proxy
+            # 同一个坑,那边有完整说明):local-lite 靠 colima 自动转发
+            # 80/443,不需要端口;cloud-full 是 NodePort 32460,写死不带
+            # 端口会导致登录跳转回来时打到没人监听的 80 端口,404。
+            redirect_url = "http://permission-request.local-lite.test:32460/oauth2/callback"
             upstreams = [ "http://permission-request-app.permission-request-app.svc.cluster.local:8080/" ]
             email_domains = [ "*" ]
             cookie_secure = false

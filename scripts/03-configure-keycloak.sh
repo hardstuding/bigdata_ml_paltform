@@ -206,7 +206,13 @@ fi
 
 echo "==> permission-request-app client(给挡在前面的 oauth2-proxy 用,见 ADR-032)"
 if kubectl -n permission-request-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
-  PRA_REDIRECT_URIS='["http://permission-request.local-lite.test/oauth2/callback"]'
+  # 2026-08-16 cloud-full 真实故障:local-lite 靠 colima 自动把 80/443
+  # 转发到 127.0.0.1,回调地址不带端口;cloud-full 的 ingress-nginx 是
+  # NodePort(32460),回调地址必须带端口,不然登录跳转回来直接 404
+  # (对应 apps/definitions/permission-request-app-oauth2-proxy.yaml 那边
+  # 同步改过 redirect_url)。两个都注册进去,同一个脚本两边都能用,不需要
+  # 按环境分叉。
+  PRA_REDIRECT_URIS='["http://permission-request.local-lite.test/oauth2/callback","http://permission-request.local-lite.test:32460/oauth2/callback"]'
   pra_client_id=$(kcadm get clients -r platform -q clientId=permission-request-app --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -n "$pra_client_id" ]; then
     echo "client permission-request-app 已存在,只同步 redirectUris,不轮换密钥"
@@ -228,7 +234,8 @@ fi
 
 echo "==> table-registration-app client(给挡在前面的 oauth2-proxy 用,见 ADR-043)"
 if kubectl -n table-registration-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
-  TRA_REDIRECT_URIS='["http://table-registration.local-lite.test/oauth2/callback"]'
+  # 同上一个 client 的注释(cloud-full NodePort 32460 需要带端口的回调地址)。
+  TRA_REDIRECT_URIS='["http://table-registration.local-lite.test/oauth2/callback","http://table-registration.local-lite.test:32460/oauth2/callback"]'
   tra_client_id=$(kcadm get clients -r platform -q clientId=table-registration-app --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -n "$tra_client_id" ]; then
     echo "client table-registration-app 已存在,只同步 redirectUris,不轮换密钥"
@@ -250,7 +257,8 @@ fi
 
 echo "==> platform-portal client(给挡在前面的 oauth2-proxy 用,见 ADR-047)"
 if kubectl -n platform-portal get secret oauth2-proxy-secret >/dev/null 2>&1; then
-  PORTAL_REDIRECT_URIS='["http://portal.local-lite.test/oauth2/callback"]'
+  # 同上面两个 client 的注释(cloud-full NodePort 32460 需要带端口的回调地址)。
+  PORTAL_REDIRECT_URIS='["http://portal.local-lite.test/oauth2/callback","http://portal.local-lite.test:32460/oauth2/callback"]'
   portal_client_id=$(kcadm get clients -r platform -q clientId=platform-portal --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -n "$portal_client_id" ]; then
     echo "client platform-portal 已存在,只同步 redirectUris,不轮换密钥"
