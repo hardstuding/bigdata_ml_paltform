@@ -56,6 +56,20 @@ spec:
         # 覆盖——教训是"渲染结果一致"不等于"运行时行为一致",发布说明/
         # 真实拉起来跑一遍才是可信的验证,纯 diff 比对不够,以后同类版本
         # 覆盖不能只靠这一步。见 docs/BACKLOG.md P1.6。
+        #
+        # 2026-08-16 补:拉过 trino 官方 chart 1.42.2 源码确认根因——
+        # `templates/configmap-coordinator.yaml` 里 `http-server.http.port`
+        # 那一行不像 https 那段一样有 `{{- if }}` 包裹,是无条件生成的。
+        # 483 的"unused property"报错就是冲着这个来的,因为我们自己在下面
+        # additionalConfigProperties 里加了 `http-server.http.enabled=
+        # false`。理论上有个能让 483 跑起来的办法:把那一行删掉,放行
+        # Trino 默认的 HTTP 监听器。但 `templates/service-coordinator.yaml`
+        # 显示 K8s Service 本来就无条件转发 8080 端口(不受这个开关影响,
+        # 开关只决定 Trino 进程自己听不听)——真打开之后,集群内部会多出
+        # 一个走明文 HTTP、但仍然要求 PASSWORD/OAuth2 认证凭据的可达端点。
+        # 483 本身没有对应的 CVE 或安全动机(纯粹"版本最新"的审计建议,
+        # 见 docs/BACKLOG.md 483→480 那条),不值得为了这一点版本号换这个
+        # 代价,维持 480。
         server:
           workers: 0
           config:
