@@ -126,7 +126,18 @@ with DAG(
         name="dbt-build-and-upload",
         cmds=["sh", "-c"],
         arguments=[
-            "pip install --quiet dbt-core dbt-trino boto3 "
+            # 2026-08-16 云端部署时实测踩到:dbt-core 依赖树比另外几个
+            # 自建工具装的包重得多,这台机器网络繁忙时 pip 会真的卡住
+            # 不动(不是慢,是 CPU 时间/RSS 都不再增长,`/proc` 里确认过
+            # 连接还在但没有数据传输)——和 table-registration-app 那次
+            # 是同一类问题(见 apps/table-registration-app/manifests/
+            # deployment.yaml 的注释),这里之前漏了同样的超时保护。
+            # 版本也补上固定(dbt-core==1.10.23 dbt-trino==1.10.3
+            # boto3==1.43.72,任务#13 已经核实锁定过,这份源文件之前没跟
+            # ConfigMap 同步更新——这个项目目前没有类似
+            # scripts/sync-app-configmaps.py 的机制帮 Airflow DAG 源文件和
+            # ConfigMap 保持一致,是已知差距,见 docs/BACKLOG.md)。
+            "timeout -k 10 300 pip install --quiet dbt-core==1.10.23 dbt-trino==1.10.3 boto3==1.43.72 "
             "&& cd /project "
             "&& dbt build --profiles-dir . "
             "&& python3 -c \""

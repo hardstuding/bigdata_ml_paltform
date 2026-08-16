@@ -18,6 +18,14 @@
 1. 破坏性操作防护补全(目前只有轻量版
    `scripts/confirm-destructive-kubectl.sh`,评审建议的完整统一 guard
    框架还没做)
+2a. Airflow DAG 源文件(`apps/airflow/dags/*.py`)和实际部署的
+    `apps/airflow/manifests/dags-configmap.yaml` 之间没有类似
+    `scripts/sync-app-configmaps.py` 的同步/漂移检测机制——2026-08-16
+    发现 `dbt_demo.py` 这两处已经真实分叉了一次(ConfigMap 里的版本锁定
+    是任务#13 做的,源文件当时没有同步更新)。这次改超时保护时顺手把
+    两处都手动改成一致,但没有解决"以后还会分叉"这个根本问题,应该在
+    "三个自建 Flask 工具"那条(下一条)之后,评估要不要用同一套机制覆盖
+    Airflow DAG。
 2. 三个自建 Flask 工具补测试(依赖锁定已经在任务 #13 做完,见上面
    P1.6"Python 依赖锁定"那条;**单一源码问题 2026-08-16 已解决**——
    新增 `scripts/sync-app-configmaps.py`,`src/app.py` 是唯一源码真相,
