@@ -15,9 +15,13 @@
 [ADR-055](decisions/055-external-review-response-2026-08-15.md#后续明确排期不是无限期搁置)
 "后续"一节,这里只列条目:
 
-1. 破坏性操作防护补全(目前只有轻量版
-   `scripts/confirm-destructive-kubectl.sh`,评审建议的完整统一 guard
-   框架还没做)
+1. ~~破坏性操作防护补全~~——**2026-08-16 已完成**(见
+   `docs/CURRENT_WORK.md` 对应记录 + `docs/operations/incidents.md`):
+   `scripts/confirm-destructive-kubectl.sh` 补上了 namespace 允许清单
+   (动态从 ArgoCD Application 现查)+ 受保护 namespace 二次确认 +
+   Postgres 备份新鲜度检查,4 组拒绝路径全部验证通过。评审建议的"完整
+   统一 guard 框架"这个更大的版本仍然没做,按 ADR-055 的决定是"除非真的
+   反复出现同一种误用模式才做",不算这次的验收范围。
 2a. Airflow DAG 源文件(`apps/airflow/dags/*.py`)和实际部署的
     `apps/airflow/manifests/dags-configmap.yaml` 之间没有类似
     `scripts/sync-app-configmaps.py` 的同步/漂移检测机制——2026-08-16
@@ -90,22 +94,26 @@
    同一个镜像两次查到不同"官方 digest"的自相矛盾结果,脚本注释里已经
    记录清楚,现在更适合"抽查重点镜像"而不是"无脑跑全量清单当结论"。
 
-8. `alloy`/`loki`/`kube-prometheus-stack` 这 3 个 ArgoCD Application 的
-   Sync Status 长期卡在 `Unknown`(Health 一直是 `Healthy`,底层 Pod 没
-   问题,纯粹是 ArgoCD 自己刷新失败)——2026-08-16 已根因诊断清楚:
-   `kubectl -n argocd logs -l app.kubernetes.io/name=argocd-repo-server`
-   显示 `rpc error: code = DeadlineExceeded`,这 3 个 Application 的
-   chart 源(`prometheus-community.github.io/helm-charts`、
-   `grafana.github.io/helm-charts`)从这台云主机实测抓取
-   `index.yaml` 要 20 秒以上(`time curl ... --max-time 20` 几乎卡满
-   超时才勉强拿到 200),超过 repo-server 生成 manifest 的默认 deadline
-   ——和这个会话里反复出现的"这台机器/区域访问某些境外域名慢"是同一类
-   问题(PyPI/dbt-core 那几次也是),不是 ArgoCD 或这几个 Application 配置
-   本身有错。重启过 repo-server、硬刷新过 Application,没能稳定解决
-   (偶发能过、大概率还是超时)。真正的修法应该是给这两个 Helm 仓库配
-   一个可达性更好的镜像源(和 apt/pip 镜像源同一个思路),或者调大
-   repo-server 的生成超时——这次没有动,先如实记录根因,不影响当前
-   验收范围(底层组件本身健康)。
+8. ~~`alloy`/`loki`/`kube-prometheus-stack` 这 3 个 ArgoCD Application 的
+   Sync Status 长期卡在 `Unknown`~~——**2026-08-16:2/3 已修好,第 3 个
+   挖到了更深一层、目前改不了的限制**。根因不只一层:
+   `controller.repo.server.timeout.seconds`(controller 等 repo-server
+   这次 RPC 调用的耐心,默认 60 秒)只是第一层,调到 180 秒之后
+   `alloy`/`loki` 稳定 `Synced/Healthy` 了。`kube-prometheus-stack`
+   这个 chart 更大,卡在更里面一层:repo-server 自己执行
+   `helm pull` 子进程时,**Helm 自身的 HTTP 客户端有一个约 120 秒的硬
+   超时**(实测日志:`context deadline exceeded (Client.Timeout or
+   context cancellation while reading body)`),这个不是 ArgoCD 的
+   `ARGOCD_EXEC_TIMEOUT`(已经调到 180 秒)能覆盖的——两层超时管的是
+   不同东西,Helm 那层目前没找到官方支持的覆盖方式。`platform/
+   bootstrap/argocd-values.yaml` 里的这两处调整都已经提交(对
+   `alloy`/`loki` 是真实、验证过的修复,对 `kube-prometheus-stack`
+   是"抬高了上限但个别情况下网络慢到连 120 秒都不够"),不再需要重新
+   诊断根因,如果还想继续往下修,方向是给这个 Helm 仓库配
+   一个可达性更好的镜像源(和 apt/pip 镜像源同一个思路)——两层超时都已经
+   调大过,再往上调收益递减(要么再等更久,要么就是真的需要换一条网络
+   路径),不影响当前验收范围(底层组件本身健康,`kube-prometheus-stack`
+   的 Sync Status 显示 `Unknown` 纯粹是这一层比较逻辑的展示问题)。
 
 9. 公网域名+TLS 接入,环境驱动配置化:2026-08-16 用户明确提出的方向——
    "域名这个还是走配置化生效就好,比如目前配置 test,起来就是可临时访问

@@ -59,6 +59,16 @@ repoServer:
       memory: 128Mi
     limits:
       memory: 1024Mi
+  # 2026-08-16:上面 configs.params 里的 controller.repo.server.timeout.
+  # seconds 只调大了"controller 等 repo-server 这整个 RPC 调用"的耐心,
+  # repo-server 自己内部执行 `helm pull` 这类子进程还有一个独立的、更早
+  # 触发的超时(ARGOCD_EXEC_TIMEOUT,默认 90 秒)——实测抓到日志:
+  # "helm pull ... kube-prometheus-stack failed timeout after 1m30s",
+  # 就是卡在这一层,不是 RPC 层。两个超时管的是不同层级,得一起调大才
+  # 真的有效,只改一个没用。
+  env:
+    - name: ARGOCD_EXEC_TIMEOUT
+      value: "180s"
 
 dex:
   # 2026-08-16 真实事故:128Mi 内存限制对 dex-server v2.45.1 现在的实际
@@ -132,6 +142,17 @@ global:
 configs:
   params:
     server.insecure: true
+    # 2026-08-16 真实故障(docs/BACKLOG.md P1.8):alloy/loki/
+    # kube-prometheus-stack 这几个 Application 的 chart 源
+    # (prometheus-community.github.io/grafana.github.io 的 helm-charts
+    # 仓库)从这台云主机实测抓取 index.yaml 经常要 20-25 秒(和这个仓库
+    # 到处踩过的"访问境外域名慢"是同一类问题,不是这几个仓库本身有错),
+    # 加上 chart 渲染本身的时间,容易超过 controller 调 repo-server 的
+    # 默认 60 秒 deadline,导致 ComparisonError("context deadline
+    # exceeded")、Sync Status 卡在 Unknown——底层 Pod 一直是健康的,纯粹
+    # 是这一层比较逻辑超时,调大这个值不改变任何运行时行为,只是给"抓
+    # chart 源"这件事更多耐心。
+    controller.repo.server.timeout.seconds: "180"
   cm:
     # 协议是 http:server.insecure=true 之后 argocd-server 自己不再有 TLS,
     # 由 ingress-nginx 接收明文流量。cloud-full/prod 接真实域名 + cert-manager
