@@ -81,6 +81,13 @@ spec:
           # password-authenticator.properties(内容是 password-authenticator.name=file
           # + file.password-file 指向同目录的 password.db)。
           - password-authenticator.config-files=/secrets/trino-service-account/password-authenticator.properties
+          # 2026-08-16:接入 OPA 细粒度访问控制(ADR-051)。上线前已经审计
+          # 过现在实际在用 Trino 的身份并补齐 apps/opa/policy/trino.rego 里
+          # 的服务账号白名单(superset_service/dbt_demo_service/
+          # table_registration_service),回滚方式是 revert 这一条改动,
+          # ArgoCD 会自动同步回去,不需要额外操作。
+          - access-control.name=opa
+          - opa.policy.uri=http://opa.opa.svc.cluster.local:8181/v1/data/trino/allow
         # 证书文件故意不放在 /etc/trino/ 底下:那整个目录已经是 chart 自己的
         # ConfigMap(config-volume)挂载点,再往它下面嵌套挂一个 Secret 的
         # subPath 文件会导致 kubelet 创建目录失败(实测报 runc "mounting a
