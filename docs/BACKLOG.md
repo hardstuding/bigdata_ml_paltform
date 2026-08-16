@@ -81,7 +81,24 @@
    同一个镜像两次查到不同"官方 digest"的自相矛盾结果,脚本注释里已经
    记录清楚,现在更适合"抽查重点镜像"而不是"无脑跑全量清单当结论"。
 
-8. 公网域名+TLS 接入,环境驱动配置化:2026-08-16 用户明确提出的方向——
+8. `alloy`/`loki`/`kube-prometheus-stack` 这 3 个 ArgoCD Application 的
+   Sync Status 长期卡在 `Unknown`(Health 一直是 `Healthy`,底层 Pod 没
+   问题,纯粹是 ArgoCD 自己刷新失败)——2026-08-16 已根因诊断清楚:
+   `kubectl -n argocd logs -l app.kubernetes.io/name=argocd-repo-server`
+   显示 `rpc error: code = DeadlineExceeded`,这 3 个 Application 的
+   chart 源(`prometheus-community.github.io/helm-charts`、
+   `grafana.github.io/helm-charts`)从这台云主机实测抓取
+   `index.yaml` 要 20 秒以上(`time curl ... --max-time 20` 几乎卡满
+   超时才勉强拿到 200),超过 repo-server 生成 manifest 的默认 deadline
+   ——和这个会话里反复出现的"这台机器/区域访问某些境外域名慢"是同一类
+   问题(PyPI/dbt-core 那几次也是),不是 ArgoCD 或这几个 Application 配置
+   本身有错。重启过 repo-server、硬刷新过 Application,没能稳定解决
+   (偶发能过、大概率还是超时)。真正的修法应该是给这两个 Helm 仓库配
+   一个可达性更好的镜像源(和 apt/pip 镜像源同一个思路),或者调大
+   repo-server 的生成超时——这次没有动,先如实记录根因,不影响当前
+   验收范围(底层组件本身健康)。
+
+9. 公网域名+TLS 接入,环境驱动配置化:2026-08-16 用户明确提出的方向——
    "域名这个还是走配置化生效就好,比如目前配置 test,起来就是可临时访问
    的;未来配置 prod 等,就强制需要配置一个域名"。背景是当时想给
    cloud-full 挂一个统一域名+TLS(所有服务挂同一域名下,SSO 回跳一次
