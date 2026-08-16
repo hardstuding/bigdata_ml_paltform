@@ -81,13 +81,23 @@ spec:
           # password-authenticator.properties(内容是 password-authenticator.name=file
           # + file.password-file 指向同目录的 password.db)。
           - password-authenticator.config-files=/secrets/trino-service-account/password-authenticator.properties
-          # 2026-08-16:接入 OPA 细粒度访问控制(ADR-051)。上线前已经审计
-          # 过现在实际在用 Trino 的身份并补齐 apps/opa/policy/trino.rego 里
-          # 的服务账号白名单(superset_service/dbt_demo_service/
-          # table_registration_service),回滚方式是 revert 这一条改动,
-          # ArgoCD 会自动同步回去,不需要额外操作。
-          - access-control.name=opa
-          - opa.policy.uri=http://opa.opa.svc.cluster.local:8181/v1/data/trino/allow
+        # 2026-08-16:接入 OPA 细粒度访问控制(ADR-051)。第一版直接把
+        # access-control.name/opa.policy.uri 塞进 additionalConfigProperties
+        # (混进主 config.properties),实测启动直接拒绝:"Configuration
+        # property 'access-control.name' was not used. Did you mean to use
+        # 'access-control.config-files'?"——Trino 要求访问控制配置必须是
+        # 单独一个文件,通过 access-control.config-files 引用,不能塞进主
+        # 配置文件。chart 原生的 accessControl(type: properties)就是干
+        # 这个的,会自己生成独立文件并接好 access-control.config-files,不用
+        # 自己手写文件名/路径。上线前已经审计过现在实际在用 Trino 的身份并
+        # 补齐 apps/opa/policy/trino.rego 里的服务账号白名单
+        # (superset_service/dbt_demo_service/table_registration_service),
+        # 回滚方式是 revert 这一条改动,ArgoCD 会自动同步回去。
+        accessControl:
+          type: properties
+          properties: |
+            access-control.name=opa
+            opa.policy.uri=http://opa.opa.svc.cluster.local:8181/v1/data/trino/allow
         # 证书文件故意不放在 /etc/trino/ 底下:那整个目录已经是 chart 自己的
         # ConfigMap(config-volume)挂载点,再往它下面嵌套挂一个 Secret 的
         # subPath 文件会导致 kubelet 创建目录失败(实测报 runc "mounting a
