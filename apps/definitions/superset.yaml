@@ -54,27 +54,23 @@ spec:
         # 在这里补一个对应的 SQLAlchemy dialect 包,踩到就加,参考
         # docs/operations/troubleshooting.md 里 psycopg2/authlib 那条记录的
         # 处理方式。
-        # 2026-08-16 抢占式实例迁移后实测踩到:直连 pypi.org 反复卡住
-        # (`Resolved 20 packages in 1m 22s` 之后下载 psycopg2-binary/lz4
-        # 这两个几 MB 的小包卡住不动,删 pod 重试过两次都是同一个卡点)
-        # ——和这次会话里其他几个自建工具踩的是同一类网络问题。第一版
-        # 直接改成裸调 `pip install -i ...` 绕开了官方
-        # `/app/docker/pip-install.sh` 包装脚本,结果装到了 Superset 进程
-        # 读不到的路径(`ModuleNotFoundError: No module named 'psycopg2'`,
-        # pip 本身退出码是 0,没报错但装错地方了)——`bootstrapScript` 里
-        # 没有 `set -e`,这个"假成功"还把 `~/bootstrap` 标记文件写上了,
-        # 之后每次启动都会跳过重装,是个更隐蔽的坏状态。改成用
-        # `PIP_INDEX_URL` 环境变量(pip 全局认,不需要改官方脚本本身),
-        # 继续走原来验证过的 `/app/docker/pip-install.sh`,只是外面套一层
-        # `timeout` 兜底,`&&` 保证 pip 真失败时不会误写标记文件。
-        env:
-          - name: PIP_INDEX_URL
-            value: "https://mirrors.aliyun.com/pypi/simple/"
+        # 2026-08-16 抢占式实例迁移后一度实测踩到直连 pypi.org 反复卡住
+        # (下载 psycopg2-binary/lz4 这两个几 MB 的小包卡住不动)——排查
+        # 过程中试过换 `PIP_INDEX_URL` 阿里云镜像,结果引入了一个新问题
+        # (`pip-install.sh` 在这条路径下把包装到了 Superset 进程读不到的
+        # 地方,`ModuleNotFoundError: No module named 'psycopg2'`,没查清
+        # 具体是权限还是 UID/HOME 不一致导致,没有为了赶时间硬修)。这个
+        # 脚本本身(官方 `/app/docker/pip-install.sh`,不加任何镜像/超时
+        # 覆盖)是今天更早在原实例上反复验证过确实能正常跑通的版本,退回
+        # 这个已知能用的版本——网络偶尔慢是真实存在的问题,但换镜像源
+        # 这条路目前没能干净地修好,不该在没弄清楚根因之前继续留着一个
+        # "看起来更快但实际会装错地方"的版本。以后有专门时间再回来查
+        # 清楚是不是 UID 0 和 pip-install.sh 假设的默认用户 HOME 对不上。
         bootstrapScript: |
           #!/bin/bash
           if [ ! -f ~/bootstrap ]; then
-            timeout -k 10 240 /app/docker/pip-install.sh psycopg2-binary authlib trino \
-              && echo "Running Superset with uid 0" > ~/bootstrap
+            /app/docker/pip-install.sh psycopg2-binary authlib trino
+            echo "Running Superset with uid 0" > ~/bootstrap
           fi
         postgresql:
           enabled: false
