@@ -19,12 +19,12 @@
   `docs/BACKLOG.md`):Trino OPA 真正切换生效(需要用户在场,单独排期)、
   P1 工程收口(环境 overlay 重构/自建工具补测试/扩大 CI)、5 条产品主线
   (统一开发工作台等)、任何新组件/新功能。
-- **当前阶段**:2026-08-15 用户明确指示调整顺序——先把 Codex 提出的版本
-  审计清单(`docs/BACKLOG.md` P1.5/P1.6)逐条核实、能升级的先升级(到
-  社区/官方确认过再动),再把镜像传云端、拉起全部服务、端到端测一遍,
-  最后收口一键部署。5 个子任务已经用 TaskCreate 建好(#12~#16,按顺序
-  互相 blockedBy),不是脱离 CURRENT 的新支线,是同一个 CURRENT 的执行
-  顺序调整。
+- **当前阶段**:**2026-08-16 五个子任务(#12~#16)全部完成**,核心链路
+  (Trino/Superset/Airflow)端到端验证通过,详见下面"任务#16 完成"那节。
+  这个 CURRENT 本身达到了"明确范围"里写的验收水平——下一次恢复工作时
+  先判断:是要挑一个新的 CURRENT(参考 `docs/BACKLOG.md` P1),还是这个
+  cloud-full 主线还有没做完的收尾(比如上面"明确非目标"里列的那几项,
+  它们本来就没打算算进这个 CURRENT)。
 - **详细进度/实例信息**:见 `environments/cloud-full/STATUS.md`(这份
   文档不重复那些细节,只负责"现在主线是什么、下一步做什么")
 - **计费资源状态**:阿里云 ECS 按量付费,**2026-08-16 当前是开机状态**。
@@ -88,36 +88,15 @@
 
 ## 正在运行的后台任务
 
-(用 Bash 工具的 `run_in_background` 机制管理,任务 ID 是这个工具自己
-分配的,不是额外自建的 task-runner——这个项目目前是单 Claude 会话操作,
-Bash 工具自带的后台任务追踪+完成通知已经够用,没有必要再建一套平行机制)
+**2026-08-16 更新**:镜像导出/传输(任务#14/#15)已经全部完成,上面
+一段是完成之前的过程记录,不再是当前状态,不用再跑那几个脚本。现在
+唯一还在常驻的:
 
-- 本地 amd64 镜像导出(`scripts/export-image-cache-amd64.sh`):跑在
-  这台 Mac 上,输出到 `image-cache-amd64/`,进度看
-  `logs/export-image-cache-amd64.log` 或者
-  `wc -l image-cache-amd64/manifest.txt` 对比 68 这个总数。
-  **2026-08-15 发现的真实情况**:之前以为它一直在后台跑,回来检查发现
-  进程已经不在了(`pgrep` 查不到),日志停在 60/68、没有"完成"结尾标记
-  ——大概率是这次会话中间有一轮上下文压缩,压缩边界之前用
-  `run_in_background` 起的进程没有真的存活下来(不是脚本本身报错崩溃,
-  日志里没有任何 error 退出的痕迹)。**教训**:以后不能只凭"之前起过
-  后台任务"就假设它还在跑,回来接手时要先 `pgrep` 实际确认进程还活着,
-  不要只看日志内容判断"正在进行中"。已经重新用 `nohup ... &`(不是
-  Bash 工具的 `run_in_background`,这次故意用更抗会话边界的方式)拉起,
-  幂等,已有的 60 个会跳过。
 - SSH 隧道(`ssh -f -N -L 16443:127.0.0.1:6443 ...`):常驻后台进程,
   给 `KUBECONFIG=~/.kube/cloud-full-config` 用,断了要重新起。
-- 增量传输+加载(`scripts/22-load-image-cache-remote.sh`):每导出一批
-  本地镜像就传一批到云端,不用等 68 个全部导出完才开始传,云主机不空转。
-  2026-08-15 撞过一次真实故障:containerd 自己的存储没跟着 Docker
-  `data-root` 走,把云主机系统盘写满,导致这一批传输/加载失败——已经
-  在远程修好(containerd `root` 指到 `/data/containerd`)并回写进
-  `scripts/21-bootstrap-cloud-vm.sh`,详见 [ADR-054](decisions/054-cloud-full-bare-vm-bootstrap.md)
-  第 5 条,当前正在重新传这一批。
 
-如果你是接手这个工作的人(人类或者别的 AI):先跑
-`./scripts/cloud-full-preflight.sh`(设置 `CLOUD_VM_IP`/`CLOUD_VM_KEY`)
-看现在是不是 READY,不要凭猜测判断进度。
+如果你是接手这个工作的人(人类或者别的 AI):任务#12~#16 全部完成,
+先看上面"任务#16 完成"那节确认现状,不用重新跑 preflight 去猜进度。
 
 ## 2026-08-16 重大发现,阻塞了任务#15的"拉起全部服务"这一步
 
@@ -229,7 +208,75 @@ registry blob,原理上不会有这个"多来源关联"的问题)而不是继续
 `docker save` 这条路上想办法,但这不是现在优先级,先如实记录根因,不
 再当成"未知的环境限制"去猜。
 
-## 2026-08-16 ArgoCD root-apps 拉起排障记录(任务#16 进行中)
+## 2026-08-16 任务#16 完成:核心链路端到端验证通过
+
+`kubectl get applications -n argocd`(cloud-full):36 个 Application 里
+34 个 `Synced/Healthy`;`ingress-nginx`/`resource-quotas` 是
+`OutOfSync/Healthy`(前者是 admission webhook caBundle 的
+ignoreDifferences 已知展示问题,不影响功能,见下面记录;后者是次要
+的服务端字段级 drift,没深挖,不影响调度);`feast` 是
+`Synced/Degraded`(已知接受的差距——`feast-feature-server` 依赖本地构建
+镜像,`ErrImageNeverPull`,不是新问题)。
+
+验收标准三项全部真实验证过(不是"配置齐了应该能跑",是真的跑通了一次):
+- **Trino 查询**:`scripts/06-configure-superset-datasources.sh` 里
+  `SELECT 1` 查询成功,`scripts/08-create-demo-data.sh` 建表+插入也是
+  通过 Trino 真实执行的。
+- **Superset 出图**:`scripts/08-create-demo-data.sh` 建了 dataset +
+  chart + dashboard,"验证通过: 图表查询链路成功, 4 行数据"。
+- **Airflow 跑一次 DAG**:`dbt_demo` DAG 手动触发,
+  `manual__2026-08-16T04:51:01+00:00` 状态 `success`。
+
+**这一路排查修复的问题清单**(全部有独立 commit,根因见各自 commit
+message,这里只列条目方便回顾):
+1. ArgoCD dex-server 128Mi 内存不够,SIGSEGV → 调到 512Mi。
+2. argo-workflows CRD 安装依赖 Mac-only 代理地址 → vendor 8 个 CRD 到
+   仓库(第一版漏了 `workflowtemplates`,后补上)。
+3. CloudNativePG/kube-prometheus-stack CRD 超 262144 字节注解上限 →
+   补跑对应的一次性安装脚本。
+4. postgres 镜像升级后 cloud-full 没缓存,下游建库 Job 提前耗尽重试 →
+   删 Job 触发重建。
+5. 3 个 Flask 工具 + dbt_demo DAG 的 pip/apt 硬编码 Mac-only 代理地址 →
+   改成运行时自适应探测/换阿里云镜像站。
+6. `03-configure-keycloak.sh` 遇到未 unpark 的命名空间直接退出 → 补存在性
+   检查。
+7. kserve-controller/ingress-nginx-controller 镜像从没缓存到云主机 →
+   国内镜像站拉取;kserve 还额外发现 chart 默认
+   `imagePullPolicy: Always` 会无视本地缓存反复联网校验 → 改
+   `IfNotPresent`。
+8. ArgoCD 默认的 Ingress/Service 健康检查在裸机(没有云 LoadBalancer)
+   上永远卡在 Progressing → 加自定义健康检查覆盖。
+9. ingress-nginx admission webhook 的 caBundle 是命令式 patch 注入的,
+   selfHeal 会清空它导致证书校验失败 → 加 ignoreDifferences。
+10. `trino/trino:483` 对 `http-server.http.port` 收紧了配置校验,chart
+    无条件生成这行属性,和我们关掉 `http-server.http.enabled` 冲突,
+    483 直接拒绝启动 → 回退到 chart 默认的 480(**教训**:`helm
+    template` 渲染 diff 一致不代表运行时行为一致)。
+11. `trino/superset/airflow/mlflow/openmetadata` 等组件的定义文件一直
+    留在 `pending-definitions/`,从没真正 git mv 回 GitOps 管理——这次
+    把 trino/superset/airflow 三个核心链路必需的收回来了(其余仍按需
+    留在 pending,不在这次验收范围)。
+12. dbt_demo DAG 三个连续的根因性 bug(每个都挡住过一次,依次排查):
+    - `/project` 是只读 ConfigMap 挂载,dbt 没法写 `target/`/`logs/`,
+      exit code 2 且没有任何输出(靠手动起调试 pod 才定位到)→ 复制到
+      可写目录 `/workspace` 再跑。
+    - MinIO NetworkPolicy 消费者名单没有 `dbt` 命名空间 → 补上(和
+      2026-08-14 feast 那次是同一个模式的遗漏)。
+    - `catalog.json` 不是 `dbt build` 的产物,是 `dbt docs generate`
+      单独生成的 → DAG 里补这一步。
+    这三个 bug **在 local-lite 上大概率一直存在**,只是这个 DAG 之前
+    从没有真的端到端跑完过一次,没人发现——这次不是"云端特有问题",是
+    真正的历史遗留 bug 第一次被暴露。
+
+**排查方法论上的教训**:多次遇到"看不到真实错误"的情况(get_logs=False
+是 local-lite 专门绕过一个 Privoxy 问题的设置,继承到 cloud-full 上
+反而让人两眼一抹黑;KubernetesPodOperator 默认删除失败的 pod)。最后
+靠手动起一个和 DAG 里配置完全一致的调试 Pod(同样的 ConfigMap 挂载/
+Secret/镜像),一步步交互执行每条命令,才把三层叠加的 bug 一个个剥
+出来——这是比反复改配置再触发真实 DAG 跑一轮(每轮几分钟)快得多的
+排查方式,以后遇到"看不到日志"的黑盒故障应该优先想到这条路径。
+
+## 2026-08-16 ArgoCD root-apps 拉起排障记录(任务#16 进行中,已完成,见上)
 
 镜像缓存传输完成、ArgoCD 装好、`scripts/02-bootstrap-root-apps.sh` 跑完
 注册了 30+ 个 Application 之后,大批组件一开始都卡着(OutOfSync/Missing/
@@ -285,9 +332,10 @@ ErrImageNeverPull 是已知接受的差距(本地构建镜像,不指望能拉取
 
 ## 下一步唯一动作
 
-等上面这批修复全部生效、`kubectl get applications -n argocd` 做一次
-全量健康扫描,然后跑核心链路验证(Trino 查询、Superset 出图、Airflow
-跑一次 DAG),达到验收标准就可以收尾任务#16。
+任务#16(核心链路端到端验证)已完成,见上面"2026-08-16 任务#16 完成"
+那节。这个 CURRENT 的"明确范围"已经达到,下一次恢复工作时先判断要不要
+挑一个新的 CURRENT(参考 `docs/BACKLOG.md` P1 排序),不要默认接着在
+cloud-full 上找事做——"明确非目标"里列的那几项本来就没打算算进这次。
 
 ## 结束一段工作前必须确认(照着过一遍,不要跳)
 
