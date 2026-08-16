@@ -3,6 +3,15 @@
 # gitSync 需要一个独立可访问的 git 仓库/凭据,这个仓库统一用"没有镜像仓库/
 # 额外基础设施依赖时优先 ConfigMap 挂载"的思路(和 iam-sync、
 # permission-request-app 是同一个模式),不单独接 gitSync。
+#
+# 下面每个 data key 的内容和 apps/airflow/dags/ 里对应的同名 .py 保持
+# 字节级同步,改动时用 scripts/sync-airflow-dags-configmap.py 重新生成,
+# 不要手动改这个文件——手动改会导致下次重新生成时被覆盖丢失。这个脚本
+# 是 scripts/sync-app-configmaps.py(3 个自建 Flask 工具用)在 Airflow
+# DAG 场景下的对应实现,背景见 docs/BACKLOG.md P1.2a:这个仓库已经踩过
+# 一次真实的分叉(dbt_demo.py 的 image digest pin 只在这份 ConfigMap 里
+# 有,源文件那边在后续编辑时被意外丢了,靠这个脚本第一次跑起来时才发现
+# 并修复)。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -679,36 +688,39 @@ data:
         # 完自己核对时发现这个问题,改成一个任务)。用 boto3(S3 协议标准
         # 客户端,不额外装 mc 这类专门工具)做上传,复用 dbt-core 安装同一次
         # pip install。
-        #
-        # 2026-08-15 版本审计:三个包都显式固定版本(PyPI 实测确认存在)。
-        # dbt-core 特意固定在 1.10.23(1.10.x 线最新补丁),不是 PyPI 上
-        # 更新的 1.12.2——因为 dbt-trino 这个适配器目前发布到的最新版是
-        # 1.10.3,虽然它自己声明的依赖范围是 `dbt-core<2.0,>=1.8.0`(技术上
-        # 兼容 1.12.x),但适配器实际测试/发布的对应线还停在 1.10,跟前面
-        # Strimzi/Kafka、Trino chart/Trino app 版本那几处"上游适配器还没
-        # 跟上核心版本"是同一类判断,不抢先用适配器没跟上的核心版本。
         dbt_build_and_upload = KubernetesPodOperator(
             task_id="dbt_build_and_upload",
             name="dbt-build-and-upload",
             cmds=["sh", "-c"],
             arguments=[
                 # 2026-08-16 云端部署时实测踩到:dbt-core 依赖树比另外几个
-                # 自建工具装的包重得多,直连 pypi.org 反复卡到 300 秒超时
-                # (一次挂了 8 分钟以上才手动中止)——`/proc` 里确认过是
-                # 连接建立后没有数据传输,不是包太重。换成阿里云的公开
-                # PyPI 镜像后同样的安装 25 秒完成。这个镜像全球可公开
-                # 访问,local-lite 用应该也没坏处,不用按环境区分。
-                #
-                # 根因性 bug(不是网络/版本问题,local-lite 上大概率同样
-                # 会失败,只是之前没有真的跑完过一次):/project 是
-                # ConfigMap 挂载,天生只读,dbt 要写 target/(编译产物)和
-                # logs/,在只读目录下会在启动阶段就静默失败——exit code 2,
-                # stdout/stderr 完全没有任何输出(`dbt --version` 能正常
-                # 打印,但 `dbt build`/`dbt parse` 一个字都不吐,logs/
-                # 目录连创建都没创建),手动起一个调试 pod 逐步排查才定位到
-                # 是只读文件系统。先把 ConfigMap 内容复制到一个可写目录
-                # (`cp -rL` 展开 ConfigMap 的软链接结构,不是简单 cp -r
-                # 能处理的),dbt 在这个可写副本里跑。
+                # 自建工具装的包重得多,这台机器网络繁忙时 pip 会真的卡住
+                # 不动(不是慢,是 CPU 时间/RSS 都不再增长,`/proc` 里确认过
+                # 连接还在但没有数据传输)——和 table-registration-app 那次
+                # 是同一类问题(见 apps/table-registration-app/manifests/
+                # deployment.yaml 的注释),这里之前漏了同样的超时保护。
+                # 版本也补上固定(dbt-core==1.10.23 dbt-trino==1.10.3
+                # boto3==1.43.72,任务#13 已经核实锁定过,这份源文件之前没跟
+                # ConfigMap 同步更新——这个项目目前没有类似
+                # scripts/sync-app-configmaps.py 的机制帮 Airflow DAG 源文件和
+                # ConfigMap 保持一致,是已知差距,见 docs/BACKLOG.md)。
+                # 2026-08-16 云端部署时实测:pypi.org 直连给 dbt-core 这个大
+                # 依赖树反复卡到 300 秒超时(两次,一次挂了 8 分钟以上才手动
+                # 中止),换成阿里云的公开 PyPI 镜像后同样的安装 25 秒完成——
+                # 不是包太重,是这条网络路径本身的问题。这个镜像是公开、
+                # 全球可访问的(不是仅限内网),local-lite 用应该也没坏处,
+                # 不用按环境区分。
+                # 2026-08-16 云端第一次真正端到端跑通才发现的根因性 bug(不是
+                # 网络/版本问题,local-lite 上大概率同样会失败,只是之前没有
+                # 真的跑完过一次):/project 是 ConfigMap 挂载,天生只读,dbt
+                # 要写 target/(编译产物)和 logs/,在只读目录下会在启动阶段
+                # 就静默失败——exit code 2,stdout/stderr 完全没有任何输出
+                # (`dbt --version` 能正常打印,但 `dbt build`/`dbt parse` 一个
+                # 字都不吐,logs/ 目录连创建都没创建,一开始怀疑是权限/网络/
+                # kubectl exec 缓冲区问题,手动起一个调试 pod 逐步排查才定位到
+                # 是只读文件系统)。先把 ConfigMap 内容复制到一个可写目录
+                # (`cp -rL` 展开 ConfigMap 的软链接结构,不是简单 cp -r 能处理
+                # 的),dbt 在这个可写副本里跑。
                 "timeout -k 10 300 pip install --quiet -i https://mirrors.aliyun.com/pypi/simple/ dbt-core==1.10.23 dbt-trino==1.10.3 boto3==1.43.72 "
                 "&& mkdir -p /workspace && cp -rL /project/* /workspace/ "
                 "&& cd /workspace "
@@ -717,10 +729,9 @@ data:
                 # generate` 专门查一遍数据仓库实际的列/表元数据生成的,
                 # `dbt build` 只产出 manifest.json(编译期产物,不含真实
                 # schema 信息)。2026-08-16 云端第一次真正跑通才发现:上传
-                # 这步会报 `FileNotFoundError: target/catalog.json`,一直
-                # 没人注意到是因为这个 DAG 之前从没有真的跑到这一步过
-                # (前面两个 bug——只读挂载、MinIO NetworkPolicy——各自先
-                # 挡住过一次)。
+                # 这步会报 `FileNotFoundError: target/catalog.json`,一直没人
+                # 注意到是因为这个 DAG 之前从没有真的跑到这一步过(前面两个
+                # bug——只读挂载、MinIO NetworkPolicy——各自先挡住过一次)。
                 "&& dbt docs generate --profiles-dir . "
                 "&& python3 -c \""
                 "import boto3, os; "

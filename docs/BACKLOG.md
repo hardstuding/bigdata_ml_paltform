@@ -22,14 +22,18 @@
    Postgres 备份新鲜度检查,4 组拒绝路径全部验证通过。评审建议的"完整
    统一 guard 框架"这个更大的版本仍然没做,按 ADR-055 的决定是"除非真的
    反复出现同一种误用模式才做",不算这次的验收范围。
-2a. Airflow DAG 源文件(`apps/airflow/dags/*.py`)和实际部署的
-    `apps/airflow/manifests/dags-configmap.yaml` 之间没有类似
-    `scripts/sync-app-configmaps.py` 的同步/漂移检测机制——2026-08-16
-    发现 `dbt_demo.py` 这两处已经真实分叉了一次(ConfigMap 里的版本锁定
-    是任务#13 做的,源文件当时没有同步更新)。这次改超时保护时顺手把
-    两处都手动改成一致,但没有解决"以后还会分叉"这个根本问题,应该在
-    "三个自建 Flask 工具"那条(下一条)之后,评估要不要用同一套机制覆盖
-    Airflow DAG。
+2a. ~~Airflow DAG 源文件和 ConfigMap 之间没有同步/漂移检测机制~~——
+    **2026-08-16 已做完**:新增 `scripts/sync-airflow-dags-configmap.py`
+    (和 `scripts/sync-app-configmaps.py` 同一个模式,`--check` 模式已接进
+    `.github/workflows/validate.yml`)。第一次跑起来就抓到一个真实的、
+    这次才发现的漂移——不是之前记录的那次(`dbt_demo.py` 之前手动改成
+    一致过),是一次新的分叉:源文件的 `DBT_IMAGE` 丢了 image digest pin
+    (`python:3.12-slim` 而不是带 `@sha256:...` 的完整引用),线上实际
+    部署的 ConfigMap 是对的、源文件是错的——**先对比过线上真实内容再动
+    手**,确认这不是"用源文件覆盖 ConfigMap 就完事"这么简单(那样会把
+    正确的线上配置换成错的),而是先修好源文件缺的 pin,再从修好的源文件
+    重新生成 ConfigMap,最后核对"去掉注释后代码完全一致"确认没有改变
+    线上任何实际行为,才提交推送。
 2. 三个自建 Flask 工具补测试(依赖锁定已经在任务 #13 做完,见上面
    P1.6"Python 依赖锁定"那条;**单一源码问题 2026-08-16 已解决**——
    新增 `scripts/sync-app-configmaps.py`,`src/app.py` 是唯一源码真相,

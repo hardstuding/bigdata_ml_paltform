@@ -24,7 +24,7 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from airflow.sdk import DAG
 from kubernetes.client import models as k8s
 
-DBT_IMAGE = "python:3.12-slim"
+DBT_IMAGE = "python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4"
 
 # 和 apps/feast/manifests 的 subPath 挂法不同(dbt 不是 Python
 # importlib 相对导入,不会撞上那个坑,见 project-configmap.yaml 的注释)——

@@ -32,6 +32,9 @@ jobs:
       - name: helm template 渲染校验(所有 ArgoCD Application,含 pending-definitions)
         run: python3 scripts/validate-charts.py
 
+      - name: Airflow DAG 单一源码校验(ConfigMap 里的内容不能和 apps/airflow/dags/*.py 漂移)
+        run: python3 scripts/sync-airflow-dags-configmap.py --check
+
   test-flask-apps:
     # 2026-08-16 新增:3 个自建 Flask 工具(platform-portal/permission-
     # request-app/table-registration-app)之前完全没有自动化测试,补测试
