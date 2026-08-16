@@ -75,6 +75,13 @@ create_client_if_absent() {
     kcadm update "clients/${existing}" -r platform -s "redirectUris=${redirect_uris}"
     return
   fi
+  # 命名空间还不存在(组件还 park 着没同步过,和 00-generate-secrets.sh
+  # 里同一个跳过逻辑)——先建好 Keycloak client,但暂不写 k8s Secret,
+  # 避免 `kubectl apply` 直接报错打断整个脚本(set -euo pipefail)。
+  if ! kubectl get ns "$secret_ns" >/dev/null 2>&1; then
+    echo "命名空间 ${secret_ns} 还不存在(组件还没 unpark/同步),跳过写 Secret 这步——组件真正部署后重新跑一遍这个脚本补上"
+    return
+  fi
   local secret
   secret="$(gen_password)"
   kcadm create clients -r platform \
