@@ -1,4 +1,8 @@
-# app.py 的内容和 apps/permission-request-app/src/app.py 保持同步,改动时两边一起改
+# 这份 app.py 是从 apps/permission-request-app/src/app.py(唯一源码真相)
+# 自动生成的,不要手动改这个文件里的 app.py 内容——改 src/app.py,然后跑
+# `python3 scripts/sync-app-configmaps.py` 重新生成(2026-08-16 之前是靠
+# 人记得"两边一起改",见 docs/BACKLOG.md P1)。同一个文件里的
+# `employees.csv` 是 demo 数据,不受这个脚本管,可以直接改。
 apiVersion: v1
 kind: ConfigMap
 metadata:

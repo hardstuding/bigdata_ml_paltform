@@ -1,7 +1,10 @@
-# app.py 的内容和 apps/table-registration-app/src/app.py 保持同步——改代码要
-# 同时改两个地方(这个 ConfigMap 是运行时真正吃的那份,src/app.py 是给人看
-# /方便本地测试的那份),和 permission-request-app 是同一个权宜之计,见
-# ADR-032/ADR-043。
+# 这份 app.py 是从 apps/table-registration-app/src/app.py(唯一源码真相)
+# 自动生成的,不要手动改这个文件里的 app.py 内容——改 src/app.py,然后跑
+# `python3 scripts/sync-app-configmaps.py` 重新生成(2026-08-16 之前是靠
+# 人记得"两边一起改",真实存在漂移风险,见 docs/BACKLOG.md P1,现在改成
+# 脚本生成,不再手动维护两份)。这个 ConfigMap 仍然是运行时真正吃的那份,
+# src/app.py 是给人看/方便本地测试的那份,这一点和 ADR-032/ADR-043 的
+# 权宜之计没变,变的只是"怎么保持两边一致"这个环节。
 apiVersion: v1
 kind: ConfigMap
 metadata:
