@@ -36,18 +36,24 @@ spec:
           containers:
             - name: sync
               image: python:3.12-slim
-              env:
-                - name: HTTP_PROXY
-                  value: "http://192.168.5.2:1087"
-                - name: HTTPS_PROXY
-                  value: "http://192.168.5.2:1087"
-                - name: NO_PROXY
-                  value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
               command:
                 - python3
                 - -c
                 - |
-                  import csv, io, json, sys, urllib.request
+                  import csv, io, json, os, socket, sys, urllib.request
+
+                  # 2026-08-16:写死指向 192.168.5.2:1087(colima 宿主机专用
+                  # 代理)在 cloud-full 上连不上,导致这个 Job 一直失败、
+                  # 被临时 suspend(见 docs/BACKLOG.md)。改成运行时探测——
+                  # 和 apps/permission-request-app、apps/table-registration-app
+                  # 等已经踩过同一个坑的组件用的是同一个模式,2 秒连不上就
+                  # 当作不需要代理。
+                  _s = socket.socket()
+                  _s.settimeout(2)
+                  if _s.connect_ex(("192.168.5.2", 1087)) == 0:
+                      os.environ["HTTP_PROXY"] = "http://192.168.5.2:1087"
+                      os.environ["HTTPS_PROXY"] = "http://192.168.5.2:1087"
+                      os.environ["NO_PROXY"] = "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
 
                   RAW_URL = "https://raw.githubusercontent.com/hardstuding/bigdata_ml_paltform/main/platform/iam/table-access-grants.csv"
                   OPA_URL = "http://opa.opa.svc.cluster.local:8181/v1/data/trino/grants"
