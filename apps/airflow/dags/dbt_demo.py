@@ -143,8 +143,20 @@ with DAG(
             # 不是包太重,是这条网络路径本身的问题。这个镜像是公开、
             # 全球可访问的(不是仅限内网),local-lite 用应该也没坏处,
             # 不用按环境区分。
+            # 2026-08-16 云端第一次真正端到端跑通才发现的根因性 bug(不是
+            # 网络/版本问题,local-lite 上大概率同样会失败,只是之前没有
+            # 真的跑完过一次):/project 是 ConfigMap 挂载,天生只读,dbt
+            # 要写 target/(编译产物)和 logs/,在只读目录下会在启动阶段
+            # 就静默失败——exit code 2,stdout/stderr 完全没有任何输出
+            # (`dbt --version` 能正常打印,但 `dbt build`/`dbt parse` 一个
+            # 字都不吐,logs/ 目录连创建都没创建,一开始怀疑是权限/网络/
+            # kubectl exec 缓冲区问题,手动起一个调试 pod 逐步排查才定位到
+            # 是只读文件系统)。先把 ConfigMap 内容复制到一个可写目录
+            # (`cp -rL` 展开 ConfigMap 的软链接结构,不是简单 cp -r 能处理
+            # 的),dbt 在这个可写副本里跑。
             "timeout -k 10 300 pip install --quiet -i https://mirrors.aliyun.com/pypi/simple/ dbt-core==1.10.23 dbt-trino==1.10.3 boto3==1.43.72 "
-            "&& cd /project "
+            "&& mkdir -p /workspace && cp -rL /project/* /workspace/ "
+            "&& cd /workspace "
             "&& dbt build --profiles-dir . "
             "&& python3 -c \""
             "import boto3, os; "
