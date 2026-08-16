@@ -57,14 +57,24 @@ spec:
         # 2026-08-16 抢占式实例迁移后实测踩到:直连 pypi.org 反复卡住
         # (`Resolved 20 packages in 1m 22s` 之后下载 psycopg2-binary/lz4
         # 这两个几 MB 的小包卡住不动,删 pod 重试过两次都是同一个卡点)
-        # ——和这次会话里其他几个自建工具踩的是同一类网络问题。这里没有
-        # 用官方 `/app/docker/pip-install.sh` 包装脚本(不确定它认不认
-        # `-i` 参数),直接调 pip 换成阿里云镜像 + 超时保护。
+        # ——和这次会话里其他几个自建工具踩的是同一类网络问题。第一版
+        # 直接改成裸调 `pip install -i ...` 绕开了官方
+        # `/app/docker/pip-install.sh` 包装脚本,结果装到了 Superset 进程
+        # 读不到的路径(`ModuleNotFoundError: No module named 'psycopg2'`,
+        # pip 本身退出码是 0,没报错但装错地方了)——`bootstrapScript` 里
+        # 没有 `set -e`,这个"假成功"还把 `~/bootstrap` 标记文件写上了,
+        # 之后每次启动都会跳过重装,是个更隐蔽的坏状态。改成用
+        # `PIP_INDEX_URL` 环境变量(pip 全局认,不需要改官方脚本本身),
+        # 继续走原来验证过的 `/app/docker/pip-install.sh`,只是外面套一层
+        # `timeout` 兜底,`&&` 保证 pip 真失败时不会误写标记文件。
+        env:
+          - name: PIP_INDEX_URL
+            value: "https://mirrors.aliyun.com/pypi/simple/"
         bootstrapScript: |
           #!/bin/bash
           if [ ! -f ~/bootstrap ]; then
-            timeout -k 10 240 pip install --quiet -i https://mirrors.aliyun.com/pypi/simple/ psycopg2-binary authlib trino
-            echo "Running Superset with uid 0" > ~/bootstrap
+            timeout -k 10 240 /app/docker/pip-install.sh psycopg2-binary authlib trino \
+              && echo "Running Superset with uid 0" > ~/bootstrap
           fi
         postgresql:
           enabled: false
