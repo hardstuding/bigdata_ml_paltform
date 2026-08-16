@@ -191,3 +191,11 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # 2026-08-16 实测发现:ignoreDifferences 只管"要不要标成 OutOfSync",
+      # 不管"真正 sync 时补丁要不要带上这个字段"——一次真实触发的 sync 里,
+      # ArgoCD 仍然把 livenessProbe 整个对象的 httpGet 和已经手动 patch 成
+      # 的 exec 合并在一起提交,K8s API 拒绝("may not specify more than 1
+      # handler type"),sync 卡死重试。加这个选项让 sync 补丁也跳过
+      # ignoreDifferences 列出的字段,不是新加的 workaround,是让原来的
+      # ignoreDifferences 真正达到设计时想要的效果。
+      - RespectIgnoreDifferences=true
