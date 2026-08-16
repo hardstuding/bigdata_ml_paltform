@@ -129,6 +129,20 @@ spec:
         supersetNode:
           replicas:
             replicaCount: 1
+          # 2026-08-16 真实故障:chart 默认的 startupProbe 预算(15s 初始
+          # 延迟 + 60 次 * 5s = 315 秒)在这台机器网络慢的时候不够用——
+          # 实测确认(exitCode 137,SIGKILL,从 Started 到 Terminated 正好
+          # 5分44秒,不是随机崩溃),bootstrapScript 里装 psycopg2-binary/
+          # authlib/trino 这几个包在网络繁忙时会卡在预算耗尽之前那一刻,
+          # 一次次被杀重启,天然进度归零重来,不会自愈成功。换镜像源这条
+          # 路已经在别的坑里试过、会导致包装错位置(见上面 bootstrapScript
+          # 的注释),不重复踩;调大探针预算给它足够时间跑完官方脚本本身
+          # (已知能正常工作,只是慢),是这次判断更安全的修法。
+          startupProbe:
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 90
+            timeoutSeconds: 5
           resources:
             requests:
               cpu: 200m
