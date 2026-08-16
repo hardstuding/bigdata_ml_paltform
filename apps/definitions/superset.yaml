@@ -23,6 +23,19 @@
 # endpoint。AUTH_USER_REGISTRATION_ROLE=Admin 是 local-lite 简化(第一个登录
 # 的人自动拿 Admin),和 ArgoCD/Grafana 那两条待办一样,以后要换成按 Keycloak
 # group 映射角色。
+#
+# 2026-08-16 cloud-full 真实故障(端到端 curl 登录模拟,不是猜的):前面
+# 端口/discovery 那批修完之后,授权码能换回来,但最后一步报
+# "Error returning OAuth user info: Invalid URL 'openid-connect/userinfo':
+# No scheme supplied"。根因是 Flask-AppBuilder 对 provider name ==
+# "keycloak" 有一段专门写死的分支(`security/manager.py` 里
+# `get_oauth_user_info`),不走 server_metadata_url discovery 出来的
+# userinfo_endpoint,而是自己手动拼 `oauth_remotes["keycloak"].get(
+# "openid-connect/userinfo")`——这是一个相对路径,authlib 要靠
+# remote_app 里单独配置的 `api_base_url` 做前缀拼接,server_metadata_url
+# 管不到这条路径,漏配就是这个报错。补上 api_base_url(内部地址、不带
+# 端口,和 server_metadata_url 一样是服务端到服务端调用),对齐
+# Keycloak 官方 protocol 端点这段公共前缀。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -105,6 +118,7 @@ spec:
                         "client_id": "superset",
                         "client_secret": os.environ.get("OAUTH2_CLIENT_SECRET"),
                         "client_kwargs": {"scope": "openid profile email"},
+                        "api_base_url": "http://keycloak.local-lite.test/auth/realms/platform/protocol/",
                         "server_metadata_url": "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration",
                     },
                 }
