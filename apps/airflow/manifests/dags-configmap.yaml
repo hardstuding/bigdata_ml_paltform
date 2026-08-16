@@ -713,6 +713,15 @@ data:
                 "&& mkdir -p /workspace && cp -rL /project/* /workspace/ "
                 "&& cd /workspace "
                 "&& dbt build --profiles-dir . "
+                # catalog.json 不是 `dbt build` 的产物——它是 `dbt docs
+                # generate` 专门查一遍数据仓库实际的列/表元数据生成的,
+                # `dbt build` 只产出 manifest.json(编译期产物,不含真实
+                # schema 信息)。2026-08-16 云端第一次真正跑通才发现:上传
+                # 这步会报 `FileNotFoundError: target/catalog.json`,一直
+                # 没人注意到是因为这个 DAG 之前从没有真的跑到这一步过
+                # (前面两个 bug——只读挂载、MinIO NetworkPolicy——各自先
+                # 挡住过一次)。
+                "&& dbt docs generate --profiles-dir . "
                 "&& python3 -c \""
                 "import boto3, os; "
                 "s3 = boto3.client('s3', endpoint_url='http://minio.minio.svc.cluster.local:9000', "
