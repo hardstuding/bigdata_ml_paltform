@@ -22,13 +22,13 @@ spec:
       priorityClassName: interactive
       containers:
         - name: app
-          image: python:3.12-slim
+          image: python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
           command:
             - sh
             - -c
             - |
               set -e
-              pip install --quiet --timeout 30 flask requests
+              pip install --quiet --timeout 30 flask==3.1.3 requests==2.34.2
               python3 /src/app.py
           env:
             - name: HTTP_PROXY

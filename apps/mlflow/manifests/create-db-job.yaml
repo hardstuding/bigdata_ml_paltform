@@ -16,7 +16,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: create-db
-          image: postgres:16.6
+          image: postgres:16.15
           resources:
             requests:
               cpu: 50m

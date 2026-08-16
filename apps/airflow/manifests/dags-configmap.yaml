@@ -582,7 +582,7 @@ data:
     from airflow.sdk import DAG
     from kubernetes.client import models as k8s
 
-    DBT_IMAGE = "python:3.12-slim"
+    DBT_IMAGE = "python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4"
 
     # 和 apps/feast/manifests 的 subPath 挂法不同(dbt 不是 Python
     # importlib 相对导入,不会撞上那个坑,见 project-configmap.yaml 的注释)——
@@ -679,12 +679,20 @@ data:
         # 完自己核对时发现这个问题,改成一个任务)。用 boto3(S3 协议标准
         # 客户端,不额外装 mc 这类专门工具)做上传,复用 dbt-core 安装同一次
         # pip install。
+        #
+        # 2026-08-15 版本审计:三个包都显式固定版本(PyPI 实测确认存在)。
+        # dbt-core 特意固定在 1.10.23(1.10.x 线最新补丁),不是 PyPI 上
+        # 更新的 1.12.2——因为 dbt-trino 这个适配器目前发布到的最新版是
+        # 1.10.3,虽然它自己声明的依赖范围是 `dbt-core<2.0,>=1.8.0`(技术上
+        # 兼容 1.12.x),但适配器实际测试/发布的对应线还停在 1.10,跟前面
+        # Strimzi/Kafka、Trino chart/Trino app 版本那几处"上游适配器还没
+        # 跟上核心版本"是同一类判断,不抢先用适配器没跟上的核心版本。
         dbt_build_and_upload = KubernetesPodOperator(
             task_id="dbt_build_and_upload",
             name="dbt-build-and-upload",
             cmds=["sh", "-c"],
             arguments=[
-                "pip install --quiet dbt-core dbt-trino boto3 "
+                "pip install --quiet dbt-core==1.10.23 dbt-trino==1.10.3 boto3==1.43.72 "
                 "&& cd /project "
                 "&& dbt build --profiles-dir . "
                 "&& python3 -c \""

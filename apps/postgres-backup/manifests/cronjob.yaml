@@ -5,7 +5,7 @@
 # pg_dumpall(不是 pg_dump 单个库):这个 Postgres 是共享实例,一次性把
 # 所有数据库都备份,不用逐个组件维护一份备份配置。
 #
-# initContainer 用官方 postgres:16.6 镜像(和 apps/postgres/ 本体同一个
+# initContainer 用官方 postgres:16.15 镜像(和 apps/postgres/ 本体同一个
 # 镜像,自带 pg_dumpall,不用额外装东西)做 dump,主容器用官方
 # minio/mc(MinIO 项目自己的客户端工具,这个仓库里 apps/definitions/
 # minio.yaml 已经在用,不是新引入的镜像来源)上传到 MinIO 的 backups
@@ -33,7 +33,7 @@ spec:
           restartPolicy: Never
           initContainers:
             - name: dump
-              image: postgres:16.6
+              image: postgres:16.15
               env:
                 - name: PGHOST
                   value: postgres.data.svc.cluster.local

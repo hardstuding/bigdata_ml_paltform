@@ -1,0 +1,101 @@
+# 2026-08-15 版本审计后 vendor 进仓库的——之前 scripts/10-install-kserve-
+# serving-runtimes.sh 是直接 `kubectl apply -k` 官方 GitHub 仓库这个目录
+# (见 docs/decisions/027),每次跑都从上游实时拉,有两个问题:①上游哪天
+# 改了这份 kustomization.yaml,这台机器装出来的东西会跟着变,不可重现;
+# ②官方这份文件本身混着 7 个 `latest`/`latest-gpu` 浮动 tag(sklearnserver/
+# xgbserver/pmmlserver/paddleserver/lgbserver/predictiveserver/
+# huggingfaceserver),违反这个项目自己"版本必须显式固定"的规则(和
+# tensorflow-serving/mlserver/tritonserver/torchserve 这几个官方本来就有
+# 显式版本号的不是一回事)。
+#
+# 这份文件是从 https://github.com/kserve/kserve/config/runtimes?ref=v0.19.0
+# 原样 vendor 下来的(resources 部分完全没动),只改了 images 表:原来
+# newTag: latest 的 7 个全部改成 v0.19.0(和 kserve-resources 控制面
+# targetRevision 保持一致的版本,不是抢先用刚发布的 v0.20.0——控制面还是
+# v0.19.0 的情况下混用 v0.20.0 的 runtime 镜像,兼容性没人验证过),并且
+# 每个都加了 digest 精确固定(Docker Hub 实测查到的 amd64 digest)。
+# tensorflow-serving(2.6.2)/mlserver(1.7.1)/torchserve(0.9.0)这几个官方
+# 本来就没用 latest,没有改动版本号——是否要把这几个换成更新的推理服务
+# (比如 TF Serving 太旧、TorchServe 考虑弃用)是一个更大的"支持哪些推理
+# 框架"设计判断,不在这次"只固定 latest"的范围内,见 docs/BACKLOG.md
+# P1.6。**tritonserver 是例外**:这不是"固定 latest"这类问题,是单纯的
+# 版本号补丁升级(和 PostgreSQL/Trino 那几个一样的性质),2026-08-16 从
+# 23.05-py3(~3年前的版本)升到当前最新稳定版 26.07-py3,已核实
+# `nvcr.io/nvidia/tritonserver` 匿名拉取不需要 NGC 账号/API key(不会
+# 引入新的凭据依赖),`-py3` 是通用 tag、CPU 也能跑,不要求 GPU 驱动,
+# digest 是从 nvcr.io 实测查到的 amd64 平台 digest。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- kserve-tensorflow-serving.yaml
+- kserve-sklearnserver.yaml
+- kserve-predictiveserver.yaml
+- kserve-mlserver.yaml
+- kserve-xgbserver.yaml
+- kserve-tritonserver.yaml
+- kserve-pmmlserver.yaml
+- kserve-paddleserver.yaml
+- kserve-lgbserver.yaml
+- kserve-torchserve.yaml
+- kserve-huggingfaceserver.yaml
+- kserve-huggingfaceserver-multinode.yaml
+
+images:
+  # SMS Only Runtimes
+- name: tensorflow-serving
+  newName: tensorflow/serving
+  newTag: 2.6.2
+
+- name: kserve-sklearnserver
+  newName: kserve/sklearnserver
+  newTag: v0.19.0
+  digest: sha256:5dccffa1665d18a50c308b4056d1012d36ab988c0bdf51867a5187623d7b688b
+
+- name: mlserver
+  newName: docker.io/seldonio/mlserver
+  newTag: 1.7.1
+
+- name: kserve-xgbserver
+  newName: kserve/xgbserver
+  newTag: v0.19.0
+  digest: sha256:1113fb0c2455a849a34258662fbcd61ad07dff8dc1b7fd9498533162e9a78b48
+
+- name: kserve-tritonserver
+  newName: nvcr.io/nvidia/tritonserver
+  newTag: 26.07-py3
+  digest: sha256:551599c0812bb706121410a71abda07f9920d25e6c66edf1ec07a375e49f5f90
+
+- name: kserve-pmmlserver
+  newName: kserve/pmmlserver
+  newTag: v0.19.0
+  digest: sha256:17eec575dc668414f69e655bcd5618afaf8bf5116fd265503faca537d610ec85
+
+- name: kserve-paddleserver
+  newName: kserve/paddleserver
+  newTag: v0.19.0
+  digest: sha256:827d7920a19532e351164b9acadd02d974cb1ad01f907ee68b9a0ec151cb63c8
+
+- name: kserve-lgbserver
+  newName: kserve/lgbserver
+  newTag: v0.19.0
+  digest: sha256:88fca756267faf37149b27008b4afcd1d76f72d9d820ecfcf3d2cc1258c02ad3
+
+- name: kserve-predictiveserver
+  newName: kserve/predictiveserver
+  newTag: v0.19.0
+  digest: sha256:251e4bcec989f2b1f0e399009b8bc6f23bdefa233107896b4fa50fca3322577f
+
+- name: kserve-torchserve
+  newName: pytorch/torchserve-kfs
+  newTag: 0.9.0
+
+- name: huggingfaceserver
+  newName: kserve/huggingfaceserver
+  newTag: v0.19.0
+  digest: sha256:8004f7b754572414fff29356e68b1da397b805cf23b7bfbda86ced455c69a428
+
+- name: huggingfaceserver-gpu
+  newName: kserve/huggingfaceserver
+  newTag: v0.19.0-gpu
+  digest: sha256:e8d2f6eba0052751b1d7a367fb55b568fda00e2bb7640de372f39aaac3a7f209

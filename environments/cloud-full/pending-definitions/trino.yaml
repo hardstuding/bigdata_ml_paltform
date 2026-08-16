@@ -38,6 +38,14 @@ spec:
     targetRevision: 1.42.2
     helm:
       valuesObject:
+        # 2026-08-15 版本审计:trinodb/charts 官方 chart 目前发布到 1.42.2,
+        # 对应的 Trino app 版本还停在 480,还没跟上 Trino 自己已经发布的
+        # 483——显式覆盖 image.tag 解耦“chart 打包版本”和“实际镜像版本”,
+        # 已经用 `helm template` 比对过 480 vs 483 的渲染结果,除了这一行
+        # image tag 之外没有任何其它字段变化,是安全的补丁级升级。见
+        # docs/BACKLOG.md P1.6。
+        image:
+          tag: "483"
         server:
           workers: 0
           config:

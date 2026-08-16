@@ -13,6 +13,15 @@
 # 本机 local-lite 场景,单副本、无密码、无持久化(emptyDir)——特征数据的
 # 权威来源是 Iceberg(离线存储),Redis 只是物化后的在线缓存,重建集群或
 # 重启 pod 后重新跑一次 feast materialize 就能补回来,不需要 PVC。
+#
+# 2026-08-15 版本审计:镜像固定到 8.4.5-alpine,不用浮动的 `redis:7-alpine`
+# 了,原因不只是"该锁版本"——实测 `redis:7-alpine` 现在解析到的真实版本是
+# 7.4.10(`docker run --rm redis:7-alpine redis-server --version`),正好
+# 落在 Redis 官方自己标注的非开源许可证区间(`7.4.0 <= v < 8.0.0`,来源:
+# ArgoCD 官方 Helm chart values.yaml 里的注释,Redis Ltd 在这个区间换成了
+# RSALv2/SSPLv1,8.0 起才回到 AGPLv3 开源)。8.4.5 同时修了一个 `RESTORE`
+# 命令的 use-after-free(可导致 RCE)和 RedisBloom/TDigest 越界写,是一次
+# 安全发布。见 docs/BACKLOG.md P1.6。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,7 +40,7 @@ spec:
     spec:
       containers:
         - name: redis
-          image: redis:7-alpine
+          image: redis:8.4.5-alpine
           ports:
             - containerPort: 6379
           resources:

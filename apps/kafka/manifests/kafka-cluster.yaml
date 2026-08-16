@@ -52,6 +52,12 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
+    # 2026-08-15 版本审计:Kafka 4.3.1 已发布(修了 Streams RocksDB 原生
+    # 内存泄漏,KAFKA-20616/20688),但**没有升级**——Strimzi operator 当前
+    # 是 1.1.0(也是目前最新发布版),它的 kafka-versions.yaml 支持列表里
+    # 只有 4.3.0,还没收录 4.3.1,升上去 Strimzi 会拒绝这个 CR。等 Strimzi
+    # 出支持 4.3.1 的新版本再跟着升,不是这个项目选择不升级。见
+    # docs/BACKLOG.md P1.6。
     version: 4.3.0
     metadataVersion: 4.3-IV0
     listeners:

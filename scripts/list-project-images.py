@@ -177,24 +177,25 @@ def argocd_bootstrap_images() -> set[str]:
 def kserve_serving_runtime_images() -> set[str]:
     """KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等)不来自任何
     ArgoCD Application——kserve-resources chart v0.19.0 起不再打包这些,是
-    scripts/10-install-kserve-serving-runtimes.sh 直接 `kubectl apply -k`
-    官方 GitHub 仓库装的(见 ADR-027),完全在这个脚本正常扫描的"Application
-    -> helm template"路径之外,踩过一次"以为镜像清单扫全了,其实漏了整个
-    mlserver/sklearnserver 这一类"的坑,才补上这个特例,和上面 ArgoCD 自己
-    是同一个道理。
+    scripts/10-install-kserve-serving-runtimes.sh 装的,完全在这个脚本正常
+    扫描的"Application -> helm template"路径之外,踩过一次"以为镜像清单
+    扫全了,其实漏了整个 mlserver/sklearnserver 这一类"的坑,才补上这个
+    特例,和上面 ArgoCD 自己是同一个道理。
 
-    版本号不在这里硬编码第二份,直接读 apps/definitions/kserve-resources.yaml
-    的 targetRevision,避免两处版本号将来改一个忘了改另一个又对不上。
+    2026-08-15 版本审计后不再实时拉官方 GitHub 仓库——原来的写法每次跑
+    结果取决于上游此刻内容,不可重现,而且官方那份 kustomization.yaml 里
+    7 个 runtime 镜像用的是浮动 latest,已经 vendor 到
+    apps/kserve-runtimes/manifests/ 并且固定了版本+digest(见那个目录下
+    kustomization.yaml 的说明),这里直接读本地 vendor 的内容,和
+    scripts/10 用的是同一份。
     """
-    kserve_app_file = REPO_ROOT / "apps" / "definitions" / "kserve-resources.yaml"
-    if not kserve_app_file.exists():
+    kserve_runtimes_dir = REPO_ROOT / "apps" / "kserve-runtimes" / "manifests"
+    if not kserve_runtimes_dir.exists():
         return set()
-    app = yaml.safe_load(kserve_app_file.read_text())
-    version = app["spec"]["source"]["targetRevision"]
 
-    print(f"==> kserve ClusterServingRuntime(scripts/10,版本跟 kserve-resources 对齐:{version})", file=sys.stderr)
+    print("==> kserve ClusterServingRuntime(本地 vendor,apps/kserve-runtimes/manifests/)", file=sys.stderr)
     result = subprocess.run(
-        ["kubectl", "kustomize", f"https://github.com/kserve/kserve/config/runtimes?ref={version}"],
+        ["kubectl", "kustomize", str(kserve_runtimes_dir)],
         capture_output=True, text=True, timeout=60,
     )
     if result.returncode != 0:

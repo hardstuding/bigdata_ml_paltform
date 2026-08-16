@@ -7,23 +7,27 @@
 # (只有十几个 ClusterServingRuntime 声明,没有需要 GitOps 追踪变更的价值),
 # 所以和 scripts/04-install-kube-prometheus-crds.sh 一样,走一次性手动脚本。
 #
-# 这一步在宿主机上直接跑(不是在 pod 里),宿主机能直连 GitHub,不需要走
-# platform/coredns-custom 或代理那一套(那些是给集群内 pod 用的)。
+# 2026-08-15 版本审计后改成 apply 本地 vendor 的
+# apps/kserve-runtimes/manifests/(见那个目录下 kustomization.yaml 的
+# 说明),不再直接 `kubectl apply -k` 官方 GitHub 仓库——原来那种写法每次
+# 跑结果都取决于上游此刻的内容,不可重现,而且官方那份 kustomization.yaml
+# 里有 7 个 runtime 镜像用的是浮动的 latest/latest-gpu,违反这个项目自己
+# "版本必须显式固定"的规则。vendor 下来之后这些都改成了显式版本号
+# (v0.19.0,和 kserve-resources 控制面版本对齐)+ digest。
 #
 # 幂等:kubectl apply 天然幂等,重复跑安全。
 
 set -euo pipefail
-
-LOG_FILE="/tmp/kserve-serving-runtimes-install.log"
+cd "$(dirname "$0")/.."
+mkdir -p logs
+LOG_FILE="logs/install-kserve-serving-runtimes.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-KSERVE_VERSION="v0.19.0"
+echo "=== $(date -u +%FT%TZ) 安装 KServe ClusterServingRuntimes(本地 vendor,apps/kserve-runtimes/manifests/) ==="
 
-echo "=== $(date) 安装 KServe ClusterServingRuntimes (${KSERVE_VERSION}) ==="
-
-kubectl apply -k "https://github.com/kserve/kserve/config/runtimes?ref=${KSERVE_VERSION}"
+kubectl apply -k apps/kserve-runtimes/manifests/
 
 echo "=== 验证 ==="
 kubectl get clusterservingruntimes.serving.kserve.io
 
-echo "=== 完成 $(date) ==="
+echo "=== 完成 $(date -u +%FT%TZ) ==="

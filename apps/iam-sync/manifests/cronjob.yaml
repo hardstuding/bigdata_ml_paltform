@@ -114,7 +114,7 @@ spec:
             # 里所有会碰网络的命令都要显式给超时**,不能修一个漏一个,
             # 每个 curl 都补了 `-m`(总超时秒数)。
             - name: fetch-kubectl
-              image: python:3.12-slim
+              image: python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
               # 2026-08-13 colima 重启之后(用户重启了电脑)连续 3 次卡死,
               # crictl exec 进容器看 /proc/*/cmdline 显示卡在
               # `/usr/lib/apt/methods/http`,一开始怀疑是这个 initContainer
@@ -165,7 +165,7 @@ spec:
                   mountPath: /tools
           containers:
             - name: sync
-              image: python:3.12-slim
+              image: python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
               # 直连 github.com 在这台机器上会卡住/超时(和 Argo Workflows
               # 的 CRD 安装 Job 当初踩的是同一个网络限制,见 ADR-026),要走
               # colima 虚拟机内部看到的宿主机代理。地址来自
@@ -202,7 +202,7 @@ spec:
                   export PATH="/tools:$PATH"
                   timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
                   timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
-                  pip install --quiet --timeout 30 pyyaml
+                  pip install --quiet --timeout 30 pyyaml==6.0.3
                   git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
                   cd /tmp/repo
                   python3 scripts/12-sync-iam.py --no-create-users

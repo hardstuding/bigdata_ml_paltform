@@ -31,6 +31,18 @@
 # orders 表),整库 drop 重建后让 3.1.3 自己首次启动时重新建 schema,不是
 # 生产数据,可以这样处理;cloud-full/prod 上如果已经有真实数据,这个操作
 # 需要走真正的 Hive schematool 版本升降级流程,不能直接 drop。
+#
+# 2026-08-15 补充验证(外部 review 提出"升级到 Spark 4 是不是就不用锁
+# Hive 3.1.3 了",专门查证过,结论是不能):Spark 4.0 的 SPARK-45265
+# "Support Hive 4.0 metastore" 是真实存在的,但那是 Spark 自己内置的
+# HiveExternalCatalog 客户端(Spark 原生读写 Hive 表用的那条路径),不是
+# Iceberg 自己的 Hive Catalog 客户端(iceberg-spark-runtime 里的
+# HiveTableOperations,走的是完全独立的一份 Thrift 客户端代码)。真实证据:
+# apache/iceberg#13572,有人在 Spark 4.0.0 + iceberg-spark-runtime-4.0 上
+# 连 Hive 4.0.1 metastore,报的还是同一个
+# `TApplicationException: Invalid method name: 'get_table'`——说明升级
+# Spark 大版本本身解不开这个限制,是 Iceberg 自己的 Hive Catalog 客户端
+# 需要跟进适配(HIVE-26537 之后的 `get_table_req`),不是 Spark 版本问题。
 apiVersion: apps/v1
 kind: Deployment
 metadata:

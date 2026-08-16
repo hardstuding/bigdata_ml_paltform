@@ -17,9 +17,11 @@
 # Service,所有组件现在连的 `postgres.data.svc.cluster.local` 这个域名
 # 不用改一个字,不需要逐个组件改连接串/Secret。
 #
-# imageName 锁定 16.6(和旧实例的 postgres:16.6 大版本一致)——这次只想
-# 验证"换成 operator 管理"这一件事,不想把"换 operator"和"顺带大版本
-# 升级"这两个风险叠在一起做,CNPG operator 默认拉的是 18.4,显式锁定版本。
+# imageName 锁定 16.x(和旧实例的大版本一致)——不想把"换 operator"和
+# "顺带大版本升级"这两个风险叠在一起做,CNPG operator 默认拉的是 18.4,
+# 显式锁定版本。2026-08-15 版本审计后从 16.6 补丁升级到 16.15(同一
+# 大版本内的补丁,不是这里说的大版本升级,见 docs/BACKLOG.md P1.6)——
+# PostgreSQL 18 作为 major upgrade 仍然是单独评估的事,不是这次做的。
 #
 # superuserSecret 直接复用现有的 postgres-root 这个 Secret(username=
 # postgres,password=<既有值>,key 名字正好符合 CNPG 的约定)——这样迁移
@@ -37,7 +39,7 @@ spec:
   # (`kubectl explain cluster.spec.priorityClassName` 确认过),不需要
   # 像大多数 Helm chart 那样绕弯子。
   priorityClassName: platform-critical
-  imageName: ghcr.io/cloudnative-pg/postgresql:16.6
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.15
   superuserSecret:
     name: postgres-root
   enableSuperuserAccess: true
