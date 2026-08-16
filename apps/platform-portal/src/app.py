@@ -36,7 +36,10 @@ TOOLS = [
         "category": "数据",
         "name": "Trino",
         "description": "交互式 SQL / 联邦查询,连 Iceberg 湖仓",
-        "url": "http://trino.local-lite.test",
+        # Trino 走 HTTPS(apps/trino-tls/ 手写的 Ingress,不是 http),之前
+        # 这里写的 scheme 就是错的,2026-08-16 才发现——不是环境差异,是
+        # 单纯写错了。
+        "url": "https://trino.local-lite.test",
         "probe": "https://trino.trino.svc.cluster.local:8443/v1/info",
         "probe_verify": False,
     },
@@ -126,6 +129,31 @@ TOOLS = [
         "probe": "http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform",
     },
 ]
+
+# 2026-08-16 cloud-full 真实故障(用户实测:门户上点哪个链接都 404)——
+# 上面 13 个 url 全部写死不带端口,local-lite 靠 colima 自动转发 80/443
+# 不需要端口,cloud-full 的 ingress-nginx 是 NodePort(http 32460,trino
+# 单独用 https 32535),不带端口点开必然 404。之前修 SSO 那几个组件时
+# 是直接把端口写死进配置,这次改成读环境变量——按 zhenghe 的要求"预留好
+# 配置参数,以后接真实域名+80/443 时改配置就行,不用再动代码":两个
+# 都留空就是 local-lite/真实域名+标准端口的形态,配了就是 cloud-full
+# 这种 NodePort 形态。
+def apply_port_suffix(url: str, http_suffix: str, https_suffix: str) -> str:
+    """把配置的端口后缀插进 host 和 path 之间(比如
+    "http://trino.local-lite.test" + ":32460" ->
+    "http://trino.local-lite.test:32460")。suffix 是空字符串时原样
+    返回——local-lite/真实域名+标准端口的形态不需要改任何 url。"""
+    if url.startswith("https://") and https_suffix:
+        return f"https://{url[len('https://'):]}{https_suffix}"
+    if url.startswith("http://") and http_suffix:
+        return f"http://{url[len('http://'):]}{http_suffix}"
+    return url
+
+
+_HTTP_PORT_SUFFIX = os.environ.get("PUBLIC_HTTP_PORT_SUFFIX", "")
+_HTTPS_PORT_SUFFIX = os.environ.get("PUBLIC_HTTPS_PORT_SUFFIX", "")
+for _t in TOOLS:
+    _t["url"] = apply_port_suffix(_t["url"], _HTTP_PORT_SUFFIX, _HTTPS_PORT_SUFFIX)
 
 
 def probe(tool):

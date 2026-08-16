@@ -114,3 +114,41 @@ class TestRoutes:
         assert card_dots, "页面里没找到任何卡片状态点"
         assert all("dot-down" in line for line in card_dots)
         assert not any("dot-up" in line for line in card_dots)
+
+
+class TestApplyPortSuffix:
+    """2026-08-16 真实故障的回归测试:门户列出的工具链接全部没带端口,
+    cloud-full 的 ingress-nginx 是 NodePort,点开必然 404。这组测试锁住
+    "配了后缀就要出现在 host 和 path 之间、没配就原样不变"这个行为,
+    避免以后改坏。"""
+
+    def test_no_suffix_configured_leaves_url_unchanged(self):
+        assert portal.apply_port_suffix("http://trino.local-lite.test", "", "") == "http://trino.local-lite.test"
+
+    def test_http_suffix_inserted_after_host(self):
+        assert portal.apply_port_suffix("http://argocd.local-lite.test", ":32460", "") == "http://argocd.local-lite.test:32460"
+
+    def test_https_suffix_uses_https_suffix_not_http_suffix(self):
+        result = portal.apply_port_suffix("https://trino.local-lite.test", ":32460", ":32535")
+        assert result == "https://trino.local-lite.test:32535"
+
+    def test_http_url_ignores_https_suffix(self):
+        result = portal.apply_port_suffix("http://argocd.local-lite.test", "", ":32535")
+        assert result == "http://argocd.local-lite.test"
+
+    def test_every_tool_url_gets_correct_suffix_by_scheme(self):
+        """模拟部署时设的环境变量组合(cloud-full 用的那两个值),挨个检查
+        每个工具原始 url 套用 apply_port_suffix 之后,http 的带 :32460、
+        https 的带 :32535——不是只测函数本身,是确认覆盖了完整的 13 个
+        工具,不会有漏网之鱼。"""
+        for tool in portal.TOOLS:
+            result = portal.apply_port_suffix(tool["url"], ":32460", ":32535")
+            expected_suffix = ":32535" if tool["url"].startswith("https://") else ":32460"
+            assert result.endswith(expected_suffix), f"{tool['name']} 的 url 应该带上端口后缀"
+
+    def test_trino_uses_https_scheme(self):
+        """Trino 实际部署走 HTTPS(apps/trino-tls/),之前这里写成了
+        http,是这次顺带发现修掉的真实 bug,不是这次的主线,单独锁住
+        避免回退。"""
+        trino = next(t for t in portal.TOOLS if t["name"] == "Trino")
+        assert trino["url"].startswith("https://")
