@@ -11,6 +11,17 @@ test_service_account_allowed_anything if {
 	trino.allow with input as {"context": {"identity": {"user": "table_registration_service", "groups": []}}, "action": {"operation": "CreateTable"}}
 }
 
+test_superset_service_account_allowed_select_without_grant if {
+	trino.allow with input as {
+		"context": {"identity": {"user": "superset_service", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {"schemaName": "demo", "tableName": "orders"}}},
+	}
+}
+
+test_dbt_demo_service_account_allowed_create_table if {
+	trino.allow with input as {"context": {"identity": {"user": "dbt_demo_service", "groups": []}}, "action": {"operation": "CreateTable"}}
+}
+
 test_platform_admin_allowed_select_without_grant if {
 	trino.allow with input as {
 		"context": {"identity": {"user": "admin", "groups": ["platform-team"]}},

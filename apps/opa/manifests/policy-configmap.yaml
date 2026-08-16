@@ -24,13 +24,24 @@ data:
 
     default allow := false
 
-    # ---- 建表工具的服务账号:不走审批链约束 ----
-    # table_registration_service 是 apps/table-registration-app 用来建表/管理
-    # schema 的专属账号(platform/iam/... 之外单独维护,见
-    # scripts/00-generate-secrets.sh 的 trino-service-account),不是终端用户,
-    # 给它完整权限,不受这份策略后面那些针对人类用户的限制约束。
+    # ---- 平台工具的服务账号:不走审批链约束 ----
+    # 这些是平台自建工具连 Trino 用的专属账号(见
+    # scripts/00-generate-secrets.sh 的 trino-service-account),不代表某个
+    # 终端用户在查数据,不受这份策略后面那些针对人类用户的限制约束:
+    #   - table_registration_service:apps/table-registration-app 建表/管理 schema 用。
+    #   - superset_service:Superset 所有看板/数据源共用这一个 Trino 连接
+    #     (2026-08-16 ADR-051 切换上线前审计确认,见该 ADR"实际在用的表"
+    #     一节)——看谁能看哪个看板是 Superset 自己的 RBAC 管,不是靠 Trino
+    #     按人头发 grant;如果按人头发,以后每加一个 Superset 数据源都要
+    #     手动补 grant,和 Superset 自己的权限模型重复维护,也对不上"谁在
+    #     Superset 里能点开这个看板"这个真实的访问入口。
+    #   - dbt_demo_service:apps/airflow 的 dbt_demo DAG(dbt build)用,
+    #     真实执行 CREATE TABLE/INSERT 这类写操作,不是终端用户手工建表,
+    #     不应该被"终端用户默认禁止写操作"这条规则挡住。
+    service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service"}
+
     is_service_account if {
-    	input.context.identity.user == "table_registration_service"
+    	input.context.identity.user in service_accounts
     }
 
     allow if {
