@@ -11,3 +11,4 @@ image-cache/
 image-cache-amd64/
 __pycache__/
 *.pyc
+scripts/24-install-idle-shutdown-watchdog.sh

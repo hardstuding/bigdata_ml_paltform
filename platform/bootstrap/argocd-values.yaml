@@ -61,12 +61,24 @@ repoServer:
       memory: 1024Mi
 
 dex:
+  # 2026-08-16 真实事故:128Mi 内存限制对 dex-server v2.45.1 现在的实际
+  # 需求来说太紧,内存压力下直接以 SIGSEGV(容器退出码139)崩溃重启,
+  # 不是干净的 OOMKilled(所以从 `kubectl get pods` 的 STATUS 一栏看着
+  # 像随机崩溃,不容易联想到内存)。cloud-full 集群上实测确认:把限制
+  # 提到 512Mi 之后 pod 立刻变成 1/1 Running,0 次重启,这个数值是真实
+  # 验证过、不是拍脑袋加大的。这份 values 文件目前 local-lite/cloud-full
+  # 共用(环境 overlay 重构还没做,见 docs/BACKLOG.md P1),没有单独区分
+  # 环境资源预算,128Mi 这个值本来是照 local-lite 的紧张内存配的,但连
+  # cloud-full(64GB 内存充裕)都撑不住,说明这个限制对 dex-server 本身
+  # 已经过时,不只是"local-lite 该有的紧张预算被沿用到了不该紧张的地方"
+  # 这么简单——local-lite 上大概率也有同样的问题,只是当时没有专门查过
+  # 这一个 pod 的崩溃原因。
   resources:
     requests:
       cpu: 50m
       memory: 32Mi
     limits:
-      memory: 128Mi
+      memory: 512Mi
 
 redis:
   resources:
