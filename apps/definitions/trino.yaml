@@ -63,10 +63,23 @@ spec:
                 path: /secrets/trino-tls/tls-combined.pem
         additionalConfigProperties:
           - http-server.http.enabled=false
-          - http-server.authentication.oauth2.issuer=http://keycloak.local-lite.test/auth/realms/platform
+          # 2026-08-16 真实故障(用户实测:Trino Web UI 打开是自己的用户名
+          # 密码表单,不是跳 Keycloak):issuer 之前没带端口,和 Keycloak
+          # 修完 KC_HOSTNAME 之后实际签发的 issuer(带 :32460)对不上——
+          # 这是和 3 个 oauth2-proxy 同一类问题,但 Trino 原生 OAuth2
+          # 支持的修法不一样:它可以手动分开指定 auth-url(浏览器跳转用,
+          # 带端口,外部路径)/token-url/jwks-url(Trino 服务端自己发起,
+          # 不带端口,内部路径能连通),不需要像 oauth2-proxy 那样整个
+          # 关掉 discovery 再逐项配——这几个 url-override 本身就是 Trino
+          # 官方文档记录的标准用法(trino.io/docs 的 OAuth2 认证一节),
+          # 配了之后 oidc.discovery 这行就不再需要,删掉。
+          - http-server.authentication.oauth2.issuer=http://keycloak.local-lite.test:32460/auth/realms/platform
+          - http-server.authentication.oauth2.auth-url=http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth
+          - http-server.authentication.oauth2.token-url=http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token
+          - http-server.authentication.oauth2.jwks-url=http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs
+          - http-server.authentication.oauth2.userinfo-url=http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo
           - http-server.authentication.oauth2.client-id=trino
           - http-server.authentication.oauth2.client-secret=${ENV:OAUTH2_CLIENT_SECRET}
-          - http-server.authentication.oauth2.oidc.discovery=true
           - http-server.authentication.oauth2.principal-field=preferred_username
           - internal-communication.shared-secret=${ENV:INTERNAL_SHARED_SECRET}
           # http-server.http.enabled=false 之后,Trino 算自己的 internal
