@@ -53,6 +53,30 @@ GitOps 管理)的 Secret(`postgres-root` 等)全部丢失。这是 local-lite
    把整个 namespace 重新跑起来。这台 colima 节点当时内存占用长期在
    90%+,恢复过程中每个 Pod 从创建到真正 Running 都比正常慢很多,
    属于这台本机资源紧张的既有限制,不是这次事故额外造成的新问题。
+6. 中途发现一个衍生的小坑:CNPG 的 `postgres-cnpg` Cluster 在
+   `postgres-root` 这个 Secret(它声明的 `superuserSecret`)还不存在的
+   窗口期就已经完成了 `initdb`(namespace 刚重建出来、我还没来得及重跑
+   `00-generate-secrets.sh`),导致 `superset-create-db` 这个 Job 连续
+   4 次因为密码不对报 `exit code 2` 失败(`airflow-create-db` 没受影响,
+   运气好没撞上这个时间窗口)。**这不是手动修的**——CNPG 自己的
+   reconcile 循环最终检测到 `postgres-root` 出现/更新,把数据库里的
+   superuser 密码同步过去,几分钟后 Job 自动重试成功(`succeeded:1`)。
+   排查过程中还确认了一件事:这台 Mac 上 `kubectl logs`/`kubectl exec`
+   对 local-lite 集群完全不可用(命中已经记录过的"Internal Privoxy
+   Error",见 `docs/operations/troubleshooting.md`),只能靠
+   `kubectl get pod -o jsonpath`(containerStatuses/exitCode)和
+   `kubectl get events`/`kubectl get job -o jsonpath`(状态而不是文本
+   日志)这些走 API server(不直连 kubelet)的只读方式间接推断根因,
+   这次算是把这套"看不了日志时怎么排障"的方法在真实场景里跑通了一次。
+7. **最终确认结果**(2026-08-16 10:28 UTC):`postgres-cnpg` Cluster
+   状态 `Cluster in healthy state`,`airflow-create-db`/
+   `superset-create-db` 两个 Job 都是 `Complete`,`data` namespace 本身
+   完全恢复。keycloak/superset/airflow 这几个应用 Pod 当时仍有 Pending/
+   CrashLoopBackOff(`kubectl get pods` 的 AGE 显示是几小时前就这样,
+   早于这次事故开始的时间点)——核实过是这台 colima 节点本来就资源紧张
+   (内存长期 90%+,而且本机工作重心已经转移到 cloud-full,local-lite
+   故意缩到 6G/4vCPU 并 park 掉重量级组件)的既有、独立问题,不是这次
+   事故新造成的,不在这次恢复范围内处理。
 
 **已经落地的防复发控制**:
 - 上面第 2/3 步这个"临时关自动同步、让 Kubernetes 删除动作跑完、再
