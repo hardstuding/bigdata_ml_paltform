@@ -1,3 +1,23 @@
+## 2026-08-16 深夜:经济模式收尾 + Superset 自愈确认
+
+**RAM 角色方案已经补完,自动关机现在真的是经济模式**:`cloud-full-vm-
+self-stop` 这个角色(权限已经改指向新实例 ARN,`AttachInstanceRamRole`
+挂到 `i-0jlbped4h1959tp591pe`),看门狗脚本(不进 git 的
+`/usr/local/bin/idle-shutdown-watchdog.sh`)判定空闲后,改成用装在
+虚拟机上的 `aliyun` CLI(`--mode EcsRamRole --ram-role-name
+cloud-full-vm-self-stop`)直接调 `StopInstance --StoppedMode
+StopCharging`,`--dryrun` 验证过请求参数正确,失败时兜底退回本地
+`shutdown -h now`(不保证经济模式,但保证"空闲还是会停"这个底线不失效)。
+`scripts/26-stop-cloud-vm-economical.sh`(手动立即停机用)的头部注释
+同步更新,不再说"AccessKey 没有 RAM 权限做不了"——这条已经做完了。
+这台虚拟机上额外装了一份 `aliyun` CLI 二进制(从阿里云自己的 CDN
+`aliyuncli.alicdn.com` 下的,不是 PyPI,没有踩到那个网络不稳定的坑)。
+
+**Superset 已经自愈**:`kubectl -n superset get pods` 确认
+`superset-55fd8b5bbd-hpklk` 现在 `1/1 Running`(只重启了1次)——印证
+了上一条记录里"网络偶尔不稳定,K8s 自动重试会自己好"的判断,不需要
+再人工介入,标记为已解决。
+
 ## 2026-08-16 晚:cloud-full 迁移到抢占式实例(省钱),记录当前真实状态
 
 **实例已经换了**:旧实例 `i-0jl7spqzz0rfnqv2abd2`(按量付费)已经**释放**

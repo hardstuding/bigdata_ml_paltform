@@ -5,17 +5,19 @@
 # StopInstance API 的这一刻指定**,不是能一次设置永久生效的实例属性,
 # 更不是虚拟机内部 `shutdown -h now` 能带得上的参数。
 #
-# 之前装的看门狗脚本(scripts/24-install-idle-shutdown-watchdog.sh)是在
-# 虚拟机内部执行 `shutdown -h now` 触发关机,天生拿不到经济模式——真正
-# 想拿到"停机不计费",必须从外部调这个 API。理想方案是给虚拟机挂一个
-# 权限受限的"实例 RAM 角色"让它自己能这么做,但这次 zhenghe 给的
-# AccessKey 权限范围只到 ECS 操作,没有 RAM/角色相关权限,做不了那个
-# 方案(如果以后想做,需要额外授权 ram:CreateRole 等权限)。
+# 2026-08-16 已经补上了 RAM 实例角色方案:`cloud-full-vm-self-stop`
+# (仅有 ecs:StopInstance/DescribeInstances/DescribeInstanceStatus 权限,
+# scope 到这一台实例的 ARN)挂在实例上,看门狗脚本
+# (scripts/24-install-idle-shutdown-watchdog.sh 安装的
+# /usr/local/bin/idle-shutdown-watchdog.sh,不进 git)自己会用
+# `aliyun ecs StopInstance --mode EcsRamRole ... --StoppedMode
+# StopCharging` 从虚拟机内部调这个 API,不再依赖本地 `shutdown -h now`
+# ——所以自动空闲关机现在本来就是经济模式,不需要人/Claude 守在这台 Mac
+# 上才能触发。
 #
-# 现阶段的实际做法:看门狗继续负责"检测有没有人在用"这件事(这个能力
-# 还是有价值,能在日志里看到判断记录),但**真正执行关机这个动作,由我
-# 主动从这边(有 aliyun CLI 权限的这台 Mac)调用这个脚本完成**,不依赖
-# 虚拟机自己关自己——这样保证每次都是经济模式,不会漏计费优化。
+# 这个脚本(26-)的用途因此收窄成:**手动/立即想停机时**的快捷方式(比如
+# 不想等 30 分钟空闲判定,或者看门狗那条路径万一失败需要兜底重试),不再
+# 是达成经济模式的唯一途径。
 #
 # 用法:
 #   CLOUD_VM_INSTANCE_ID=<实例ID> CLOUD_VM_REGION=<地域> ./scripts/26-stop-cloud-vm-economical.sh
