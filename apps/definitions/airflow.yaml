@@ -156,6 +156,16 @@ spec:
         dags:
           gitSync:
             enabled: false
+        # 2026-08-16 发现的真实缺口:这个 Application 从一开始就没配
+        # Ingress,平台门户(apps/platform-portal)列了 Airflow 这个入口
+        # 但点进去根本没有路由——之前一直没暴露是因为都是靠
+        # `kubectl port-forward` 直连调试,没人真的走过 Ingress 这条路。
+        ingress:
+          apiServer:
+            enabled: true
+            ingressClassName: nginx
+            hosts:
+              - name: airflow.local-lite.test
         # KubernetesExecutor 每个任务起一个独立 pod,用的是 workers.kubernetes
         # 这份 pod 模板——不是 scheduler/dagProcessor 那份。一开始只挂了
         # scheduler/dagProcessor,任务 pod 里根本没有 DAG 文件,报

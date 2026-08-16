@@ -21,8 +21,23 @@ spec:
               memory: 128Mi
             limits:
               memory: 256Mi
+          # 2026-08-16 云端要开公网访问才发现:裸机没有云 LoadBalancer,
+          # Service type: LoadBalancer 实际走的是 kube-proxy 的 NodePort
+          # 机制(随机高位端口,这次是 32460/32535)。想让公网走标准
+          # 80/443 端口,手动加 iptables REDIRECT 规则把流量转到这两个
+          # NodePort 试过,会和 k3s 自己的 KUBE-SERVICES 链在 nat 表
+          # PREROUTING 里的处理顺序打架(REDIRECT 是 terminating target,
+          # 排在 KUBE-SERVICES 前面的话,原本该由 KUBE-SERVICES 做的
+          # NodePort→真实 pod IP 转换根本不会执行,后面这个"端口"其实
+          # 没有真正监听;排在后面又变成对已经被 REDIRECT 消费掉的包
+          # 不起作用)——裸机场景更标准的做法是让 controller 直接绑定
+          # 宿主机网络(hostNetwork),完全绕开 kube-proxy/NodePort 这层,
+          # 容器的 80/443 就是宿主机真实的 80/443,不需要任何额外转发。
+          # 这台机器全程只有 1 个节点、1 个 replica,不会有端口冲突。
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
           service:
-            type: LoadBalancer
+            type: ClusterIP
   destination:
     server: https://kubernetes.default.svc
     namespace: ingress-nginx

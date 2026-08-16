@@ -53,6 +53,13 @@ data:
         },
         {
             "category": "数据",
+            "name": "Airflow",
+            "description": "任务调度(dbt/SeaTunnel/Feast 物化等 DAG)",
+            "url": "http://airflow.local-lite.test",
+            "probe": "http://airflow-api-server.airflow.svc.cluster.local:8080/api/v2/monitor/health",
+        },
+        {
+            "category": "数据",
             "name": "Superset",
             "description": "BI 看板 / 出图",
             "url": "http://superset.local-lite.test",
