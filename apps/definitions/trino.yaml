@@ -63,6 +63,12 @@ spec:
                 path: /secrets/trino-tls/tls-combined.pem
         additionalConfigProperties:
           - http-server.http.enabled=false
+          # http-server.authentication.type 管的是"接受哪些认证方式"
+          # (OAUTH2 给人用、PASSWORD 给服务账号用),不等于"网页界面默认
+          # 用哪个"——Web UI 自己另外认 web-ui.authentication.type,不设
+          # 的话会退回显示 Trino 自己的用户名密码表单,不会自动跳
+          # Keycloak。这个是分开配的,2026-08-16 真实故障排查时才发现。
+          - web-ui.authentication.type=oauth2
           # 2026-08-16 真实故障(用户实测:Trino Web UI 打开是自己的用户名
           # 密码表单,不是跳 Keycloak):issuer 之前没带端口,和 Keycloak
           # 修完 KC_HOSTNAME 之后实际签发的 issuer(带 :32460)对不上。
