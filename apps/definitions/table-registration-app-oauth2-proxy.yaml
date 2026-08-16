@@ -20,11 +20,17 @@ spec:
           existingSecret: oauth2-proxy-secret
           configFile: |
             provider = "oidc"
-            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
             # 2026-08-16 cloud-full 真实故障(和 platform-portal-oauth2-proxy
-            # 同一个坑,那边有完整说明):local-lite 靠 colima 自动转发
-            # 80/443,不需要端口;cloud-full 是 NodePort 32460,写死不带
-            # 端口会导致登录跳转回来时打到没人监听的 80 端口,404。
+            # 同一个坑,那边有完整两层说明:①redirect_url 不带端口 404,
+            # ②修完之后 Keycloak 的 issuer 带了端口,自动 discovery 校验
+            # 不通过 + 集群内部又连不上带端口的外部地址,改成关掉自动
+            # discovery,手动分开配置)。
+            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            skip_oidc_discovery = true
+            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
             redirect_url = "http://table-registration.local-lite.test:32460/oauth2/callback"
             upstreams = [ "http://table-registration-app.table-registration-app.svc.cluster.local:8080/" ]
             email_domains = [ "*" ]

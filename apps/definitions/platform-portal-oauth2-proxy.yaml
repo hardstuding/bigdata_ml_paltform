@@ -20,16 +20,31 @@ spec:
           existingSecret: oauth2-proxy-secret
           configFile: |
             provider = "oidc"
-            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
-            # 2026-08-16 cloud-full 真实故障:redirect_url 之前没带端口,
-            # local-lite 上 ingress-nginx 靠 colima 自动把 80/443 转发到
-            # 127.0.0.1 所以不需要写端口,但 cloud-full 上 ingress-nginx
-            # 是 NodePort(32460/32535,见 ADR 对应记录),浏览器打开门户
-            # 页面第一步(带着 :32460)是正常的,登录完 Keycloak 跳回这个
-            # 写死不带端口的 URL 就会打到没人监听的 80 端口,404。加上端口
-            # 号是真正修好登录流程,不是权宜之计——这个仓库目前没有环境
-            # overlay 机制(见 docs/BACKLOG.md P1.3),local-lite 如果之后
-            # 也要验证登录流程,这里要记得改回不带端口的版本。
+            # 2026-08-16 cloud-full 真实故障,分两层:①redirect_url 之前
+            # 没带端口,local-lite 靠 colima 自动转发 80/443 不需要端口,
+            # cloud-full 的 ingress-nginx 是 NodePort(32460/32535),不带
+            # 端口登录跳转回来就 404。②修完①之后又炸出更深的问题:加了
+            # 端口的 Keycloak(见 platform/apps/keycloak.yaml 的
+            # KC_HOSTNAME)让 discovery 文档里 issuer 变成带端口的地址,
+            # oauth2-proxy 自动 OIDC discovery 会拿这个 issuer 和自己配的
+            # oidc_issuer_url 做精确字符串比对,不匹配直接拒绝启动
+            # ("oidc: issuer did not match")——但 oauth2-proxy 在集群内部
+            # 又连不通这个带端口的外部地址(NodePort 只在节点网卡上监听,
+            # ClusterIP 没有这个端口,实测 HTTP:000)。改成关掉自动
+            # discovery,手动分别指定:login_url(浏览器要跳转去的地址,
+            # 带端口,走外部路径)、redeem_url/oidc_jwks_url/profile_url
+            # (oauth2-proxy 自己服务端发起的调用,不带端口,走集群内部
+            # 能连通的路径)——和 Grafana(kube-prometheus-stack.yaml)
+            # 一直以来的做法是同一个模式,不是新发明的方案。oidc_issuer_url
+            # 仍然要填带端口的完整值,这个不是网络请求,是本地校验收到的
+            # JWT 的 iss claim 用的,必须和 Keycloak 实际签发的 issuer
+            # 完全一致。
+            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            skip_oidc_discovery = true
+            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
             redirect_url = "http://portal.local-lite.test:32460/oauth2/callback"
             upstreams = [ "http://platform-portal.platform-portal.svc.cluster.local:8080/" ]
             email_domains = [ "*" ]
