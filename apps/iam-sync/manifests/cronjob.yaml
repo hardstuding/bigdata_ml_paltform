@@ -142,31 +142,40 @@ spec:
                 - -c
                 - |
                   set -e
-                  # 2026-08-16 云端部署时发现:①192.168.5.2:1087 是 colima
-                  # 宿主机专用代理,cloud-full 连不上,改成运行时探测——
-                  # 2 秒连不上就当作不需要(和这个仓库其他组件同一个模式)。
-                  # ②cloud-full 上实测直连 deb.debian.org 明显比走
-                  # mirrors.aliyun.com 慢(和这个仓库到处踩过的 PyPI/npm
-                  # 官方源带宽瓶颈是同一类问题),换镜像站,不管是不是需要
-                  # 代理都先换。③dl.k8s.io 实测两个环境都能直连,不需要
-                  # 镜像/代理。
+                  # 2026-08-16 云端部署时发现两层问题:
+                  # ①192.168.5.2:1087 是 colima 宿主机专用代理,cloud-full
+                  # 连不上,改成运行时探测——2 秒连不上就当作不需要(和这个
+                  # 仓库其他组件同一个模式)。
+                  # ②原来这里是 curl 直接下 dl.k8s.io 上的 kubectl 二进制
+                  # (59MB),实测这条路径本身限速到约 50kB/s(和这个仓库
+                  # 到处踩过的 PyPI/apt 官方源带宽瓶颈是同一类问题,只是
+                  # 这次是文件大小放大了影响——dl.k8s.io/release/stable.txt
+                  # 这种几字节的小文件测连通性时看着很快,骗过了第一轮判断,
+                  # 真正的大文件下载才暴露问题),90 秒超时下载不完直接失败。
+                  # 改成走 apt 装(mirrors.aliyun.com 镜像的 pkgs.k8s.io 官方
+                  # 仓库,不是野路子打包),和这个仓库其他组件"apt 换镜像站"
+                  # 是同一个模式,实测 12 秒装完,比裸下二进制更快也更省心
+                  # (不用自己判断架构、chmod +x 这些 apt 都处理好了)。
                   if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('192.168.5.2',1087))==0 else 1)" 2>/dev/null; then
                     export HTTP_PROXY="http://192.168.5.2:1087"
                     export HTTPS_PROXY="http://192.168.5.2:1087"
                     export NO_PROXY="localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
                   fi
                   sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
-                  timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
-                  timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl git >/dev/null
-                  ARCH=$(uname -m)
-                  case "$ARCH" in
-                    x86_64) KARCH=amd64 ;;
-                    aarch64) KARCH=arm64 ;;
-                    *) echo "未知架构: $ARCH" >&2; exit 1 ;;
-                  esac
-                  KUBECTL_VERSION=$(curl -fsSL -m 30 https://dl.k8s.io/release/stable.txt)
-                  curl -fsSL -m 90 -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KARCH}/kubectl"
-                  chmod +x /tools/kubectl
+                  timeout -k 10 60 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+                  timeout -k 10 60 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl gnupg ca-certificates >/dev/null
+                  # dl.k8s.io/release/stable.txt 本身是几字节的小文件,直连
+                  # 一直很快,只用来确定当前 stable 分支的 major.minor(比如
+                  # v1.36.3 -> v1.36),真正的仓库内容走下面的阿里云镜像。
+                  KUBECTL_MINOR=$(curl -fsSL -m 15 https://dl.k8s.io/release/stable.txt | sed -E 's/^(v[0-9]+\.[0-9]+)\..*/\1/')
+                  mkdir -p /etc/apt/keyrings
+                  curl -fsSL -m 15 "https://mirrors.aliyun.com/kubernetes-new/core/stable/${KUBECTL_MINOR}/deb/Release.key" \
+                    | gpg --dearmor -o /etc/apt/keyrings/k8s.gpg
+                  echo "deb [signed-by=/etc/apt/keyrings/k8s.gpg] https://mirrors.aliyun.com/kubernetes-new/core/stable/${KUBECTL_MINOR}/deb/ /" \
+                    > /etc/apt/sources.list.d/kubernetes.list
+                  timeout -k 10 60 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
+                  timeout -k 10 60 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq kubectl >/dev/null
+                  cp "$(command -v kubectl)" /tools/kubectl
               volumeMounts:
                 - name: tools
                   mountPath: /tools
