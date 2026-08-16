@@ -91,6 +91,26 @@ AI/ML:[JupyterHub](https://jupyterhub.readthedocs.io/)、[MLflow](https://mlflow
 
 前提:已经有一个能用的 Kubernetes 集群,`kubectl`/`helm` 能连上它,本机装了 `git`。
 
+**一键版本**:下面手动的 7+ 步(含之前漏记的 argo-workflows CRD、Trino
+探针修复这些)现在串成了一个脚本,`scripts/bootstrap-all.sh`——2026-08-16
+在 cloud-full 上真实跑过全流程验证(对着一个已经完全跑起来的集群幂等重跑
+一遍,14 步全部成功,零失败),不是纸面设计。核心步骤(装 ArgoCD、拉起
+root-apps、装各种 CRD、配 Keycloak)任何一步失败都会让脚本停下来,后面
+"组件专属初始化"那几步(建 Airflow 账号、配 Superset 数据源等)是尽力
+而为——对应组件如果还是 park 状态会自动跳过,不会拖垮整个脚本:
+
+```bash
+git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
+# 需要过代理才能出网的环境(比如本机 + colima):
+# NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
+./scripts/bootstrap-all.sh
+```
+
+完整执行日志在 `logs/bootstrap-all.log`(不进 git)。中途失败了直接重跑
+这份脚本就行——每一步各自的脚本本来就是幂等的,重跑不会产生副作用。
+
+**手动逐步版本**(想理解每一步在做什么、或者调试某一步卡住时用):
+
 ```bash
 # 1. 把仓库同步过去(如果目标环境要从 GitLab 拉,先在那边 git clone)
 git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
@@ -125,6 +145,11 @@ git add -A && git commit -m "chore: 迁移仓库地址" && git push
 #     ADR-038)也要单独装一次,不然 apps/definitions/postgres.yaml 这个
 #     Application 会一直卡在 Missing(`Cluster` 这个 kind 不存在)。
 ./scripts/16-install-cloudnative-pg-crds.sh
+
+# 6.7 argo-workflows 的 CRD 已经 vendor 进仓库(见脚本头部注释,原来
+#     chart 靠一个 pre-install Job 运行时下载,cloud-full 连不上代理地址
+#     会卡死),单独装一次,不依赖任何网络。
+./scripts/25-install-argo-workflows-crds.sh
 
 # 7. 等 keycloak Application Synced/Healthy 之后,建 platform realm +
 #    ArgoCD/Grafana 等组件的 OIDC client + 一个初始登录用户。SSO 能不能用
