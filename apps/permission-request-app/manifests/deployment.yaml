@@ -83,19 +83,19 @@ spec:
               sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
               timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
               timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
+              # 2026-08-16 云端部署时发现:192.168.5.2:1087 是 colima 宿主机
+              # 专用地址,cloud-full 连不上,写死成 env 反而会让 pip/后面
+              # app.py 自己发起的 git 操作在 cloud-full 上连接超时。还没有
+              # 环境 overlay 机制(见 environments/cloud-full/README.md),
+              # 改成运行时探测这个代理还在不在——2 秒连不上就当作不需要。
+              if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('192.168.5.2',1087))==0 else 1)" 2>/dev/null; then
+                export HTTP_PROXY="http://192.168.5.2:1087"
+                export HTTPS_PROXY="http://192.168.5.2:1087"
+                export NO_PROXY="localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+              fi
               pip install --quiet --timeout 30 flask==3.1.3 requests==2.34.2
               python3 /src/app.py
           env:
-            # 2026-08-14 补:table-registration-app 那边同一个 python:3.12-slim
-            # 起手式一直没配代理,连续 6 次 pip install 超时崩溃才发现漏了
-            # 这个(iam-sync CronJob 早就配了)。这里当时是运气好没踩到,
-            # 一起补上,不要等它也开始随机崩溃才修。
-            - name: HTTP_PROXY
-              value: "http://192.168.5.2:1087"
-            - name: HTTPS_PROXY
-              value: "http://192.168.5.2:1087"
-            - name: NO_PROXY
-              value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
             - name: DB_PATH
               value: /data/requests.db
             - name: GIT_TOKEN
