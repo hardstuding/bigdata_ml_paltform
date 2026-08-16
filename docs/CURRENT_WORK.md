@@ -79,25 +79,45 @@ CLAUDE.md 里"已知差距——一键部署目前仍是多个手动脚本"这�
 > 一个 CURRENT,新想法默认进 `docs/BACKLOG.md`,不自动抢占 CURRENT**。
 > 每次恢复工作先看这份文档,不要只信聊天记录/记忆摘要。
 
-## CURRENT
+## CURRENT(已切换,2026-08-16 深夜)
 
-- **标题**:cloud-full 环境(阿里云)部署上线
-- **为什么现在做**:local-lite 本机资源已经到物理上限(16GB Mac),
-  用户确认生产是 x86_64,需要一个和生产架构一致、资源充足的环境完成
-  Trino OPA 真实权限闭环、dbt/SeaTunnel 端到端验证等本机做不完的事。
-- **明确范围**:把 `environments/cloud-full/pending-definitions/` 里的
-  组件收回常驻、跑通 ArgoCD、完成"从零拉起整套服务"流程,达到和
-  local-lite 同等的核心链路验证水平。
-- **明确非目标**(这些不属于当前主线,出现新想法先记
-  `docs/BACKLOG.md`):Trino OPA 真正切换生效(需要用户在场,单独排期)、
-  P1 工程收口(环境 overlay 重构/自建工具补测试/扩大 CI)、5 条产品主线
-  (统一开发工作台等)、任何新组件/新功能。
-- **当前阶段**:**2026-08-16 五个子任务(#12~#16)全部完成**,核心链路
-  (Trino/Superset/Airflow)端到端验证通过,详见下面"任务#16 完成"那节。
-  这个 CURRENT 本身达到了"明确范围"里写的验收水平——下一次恢复工作时
-  先判断:是要挑一个新的 CURRENT(参考 `docs/BACKLOG.md` P1),还是这个
-  cloud-full 主线还有没做完的收尾(比如上面"明确非目标"里列的那几项,
-  它们本来就没打算算进这个 CURRENT)。
+- **标题**:破坏性操作防护补全(ADR-055 P1 排期第一条)
+- **为什么现在做**:上一个 CURRENT(cloud-full 部署上线)已经在
+  2026-08-16 达到验收标准(见下面"已归档"),ADR-055"后续"一节明确写了
+  "下一段工作的默认优先级是破坏性操作防护补全和三个自建工具补测试,
+  原因是这两条风险敞口最大"。当天晚些时候的抢占式迁移过程里又出现了
+  一次没有走任何 guard 脚本的手动 `kubectl delete pv`(虽然操作前做了
+  Retain+备份,没有出事故,但流程上确实又是一次"裸操作"),进一步印证
+  这条该排第一。
+- **明确范围**:不是重写成评审建议的"完整统一 guard 框架"(ADR-055 已经
+  明确决定不做,除非真的反复出现同一种误用模式)——而是给现有轻量版
+  `scripts/confirm-destructive-kubectl.sh` 补上原始评审 5 条建议里当时
+  没做的两处具体缺口:①按环境的 namespace 白名单(现在没有,任何
+  namespace 名字都能传进去);②namespace/PVC/数据库删除前的备份状态
+  检查(现在没有)。外加把历史误删事故(`kubectl delete namespace
+  airflow` 误删成 `data`)补一份仓库里的短事故复盘(评审第 5 条建议,
+  当时只存在私有 memory 里,不在仓库),并做一次 dry-run 演练证明 guard
+  真的能挡住误删 `data`(评审给的验收标准)。
+- **明确非目标**:完整统一 guard 框架本身、三个自建工具补测试(下一条,
+  这次不切进去)、环境 overlay 重构、5 条产品主线、任何新组件。
+- **当前阶段**:2026-08-16 深夜已完成:①`docs/operations/incidents.md`
+  新建,补上原始事故复盘 + 这次改 guard 脚本时自己又真实删了一次
+  local-lite `data` namespace 的完整记录(如实写清楚是操作判断失误,
+  不是脚本 bug,已经恢复,详见该文档);②`scripts/
+  confirm-destructive-kubectl.sh` 补上 namespace 允许清单(动态从
+  ArgoCD Application 的 destination.namespace 现查)+ 受保护 namespace
+  二次确认(`data`/`kube-system`/`kube-public`/`kube-node-lease`/
+  `argocd`,需要额外的 `--i-understand-protected-namespace`)+ `data`
+  namespace 的 Postgres 备份新鲜度检查(有 20 秒超时保护,查不到只警告
+  不阻塞);③4 组拒绝路径(缺确认 flag/目标不在清单/环境 context 不
+  匹配/预览模式不执行)全部验证通过。**三个自建工具补测试**(ADR-055
+  排期的第二条)还没开始,是这个 CURRENT 剩下唯一没做的部分。
+
+**已归档的上一个 CURRENT**:cloud-full 环境(阿里云)部署上线——
+2026-08-16 五个子任务(#12~#16)全部完成,核心链路(Trino/Superset/
+Airflow)端到端验证通过,详见下面"任务#16 完成"那节,以及
+`environments/cloud-full/STATUS.md`。Trino OPA 真正切换生效(需要用户
+在场)仍然单独排期,不属于任何一个 CURRENT,见 ADR-051。
 - **详细进度/实例信息**:见 `environments/cloud-full/STATUS.md`(这份
   文档不重复那些细节,只负责"现在主线是什么、下一步做什么")
 - **计费资源状态**:阿里云 ECS 按量付费,**2026-08-16 当前是开机状态**。
