@@ -1,0 +1,44 @@
+# 授权 airflow 命名空间的 airflow-worker ServiceAccount 能在 dbt 命名空间
+# 管理 pod。和 apps/feast/manifests/airflow-worker-rbac.yaml 是同一个问题、
+# 同一个解法(照抄那份文件的规则,不是碰巧长得像)。
+#
+# 背景:apps/airflow/dags/dbt_demo.py 用 KubernetesPodOperator 把 dbt build
+# 的目标 pod 建在 dbt 命名空间,Airflow 官方 chart 默认只在自己的命名空间
+# 建 airflow-pod-launcher-role(Role,不跨命名空间)——2026-08-16 在
+# cloud-full 上第一次真正跑这个 DAG 才实测到这个 403(之前只验证过 DAG
+# 能被解析/触发,没有真正端到端跑完过一次,这个 RBAC 缺口一直没暴露):
+# `403 Forbidden: pods is forbidden: User
+# "system:serviceaccount:airflow:airflow-worker" cannot list resource
+# "pods"...in the namespace "dbt"`。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-worker-pod-launcher-role
+  namespace: dbt
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "list", "get", "patch", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-worker-pod-launcher-rolebinding
+  namespace: dbt
+subjects:
+  - kind: ServiceAccount
+    name: airflow-worker
+    namespace: airflow
+roleRef:
+  kind: Role
+  name: airflow-worker-pod-launcher-role
+  apiGroup: rbac.authorization.k8s.io
