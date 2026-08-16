@@ -658,7 +658,7 @@ data:
         # Privoxy Error"那条,和 feast_materialize.py 同一个应对方式:关掉
         # get_logs,只轮询 pod phase,不走会被拦截的 kubelet containerLogs 路径。
         get_logs=False,
-        is_delete_operator_pod=True,
+        is_delete_operator_pod=False,  # DEBUG-临时,排查完改回 True
         startup_timeout_seconds=180,
         executor_config=EXECUTOR_POD_OVERRIDE,
     )
