@@ -1,3 +1,56 @@
+## 2026-08-16 晚:cloud-full 迁移到抢占式实例(省钱),记录当前真实状态
+
+**实例已经换了**:旧实例 `i-0jl7spqzz0rfnqv2abd2`(按量付费)已经**释放**
+(含它的 40G 系统盘+200G 数据盘,全部删除,不再计费)。现在用的是**新的
+抢占式实例 `i-0jlbped4h1959tp591pe`**(`ecs.g9i.4xlarge`,同样规格,
+`SpotStrategy=SpotAsPriceGo`,`SpotInterruptionBehavior=Stop`——被回收时
+只是停机不是销毁,数据安全,但停机后重开不保证能立刻抢到资源)。价格
+约 ¥0.72/小时,比原价 ¥3.58/小时便宜约 80%。公网 IP 恰好还是
+`8.130.69.252`(旧实例停机后释放、被新实例接手,纯巧合,不保证以后
+还是这个)。两块盘(40G 系统盘+200G 数据盘)都已确认设置成
+`DeleteWithInstance=False`(和旧实例一致,实例被删不会连带删数据)。
+
+**迁移方式**:从旧实例(停机状态)直接 `CreateImage` 打一份系统盘+数据盘
+一起的镜像,再用这份镜像 `RunInstances` 开新实例——不是"detach/attach
+同一块物理盘"那条路(本来计划这样,但镜像顺带把两块盘都拍了快照,更省事
+就直接用了,代价是新实例的盘是从快照克隆出来的新盘,不是原来那两块物理
+盘,原来那两块后来已经删除)。
+
+**迁移过程中真实踩到、修好的问题**(以后再做类似迁移会用得上):
+1. k3s 集群里同时出现新旧两个节点记录(旧节点是克隆前的残留状态)——
+   `kubectl delete node <旧节点名>` 清掉。
+2. **本地存储(`local-path` provisioner)的 9 个 PV 全部记着旧节点的
+   `nodeAffinity`**,导致 Postgres 等好几个组件 Pending
+   (`didn't match PersistentVolume's node affinity`)——这个字段
+   immutable,不能 patch,得整个删除重建(先把 `persistentVolumeReclaimPolicy`
+   patch 成 `Retain` 防止删除时真把数据删了,备份每个 PV 的完整 YAML,
+   去掉 `pv-protection` finalizer 才能真正删掉,改好 `nodeAffinity` 里的
+   节点名重新 apply——**这一步风险最高,操作前一定要先 Retain+备份**)。
+3. Codex 的 traefik(和这台节点共享,见下面 STATUS.md 引用的历史记录)
+   在排查 ingress-nginx 想用 `hostNetwork` 抢公网标准端口时被发现也在
+   抢 80/443——`hostNetwork` 这条路最终**放弃**(会跟 Codex 的 svclb
+   冲突,已经在用户授权下临时停过一次 Codex 的 traefik 验证过这个结论,
+   验证完照原样恢复了),继续用 NodePort(32460/32535)。
+4. Superset 的 `bootstrapScript`(装 psycopg2-binary/authlib/trino)在
+   新实例上反复卡在下载小包不动——**排查过换阿里云 PyPI 镜像这条路,
+   实测会把包装到 Superset 进程读不到的地方**(具体是不是 UID 0 和
+   `pip-install.sh` 假设的 HOME 路径不一致导致,没查清楚,不是这次
+   优先级),已经回退到原始验证过的脚本。**这是这次唯一没有收尾的
+   问题**——原脚本本身没错,是这台机器网络这几个小时里反复出现的真实
+   不稳定(dbt-core、table-registration-app 之前也撞过同一类问题),
+   K8s 会自动持续重试,不需要人守着,下次接手时先查
+   `kubectl -n superset get pods` 确认是不是已经自己成功了。
+
+**Why 记这些**:这次迁移过程本身就是一次没有脚本化、纯靠命令行临场
+操作完成的"重要操作"(按 `~/.claude/CLAUDE.md` 的要求应该脚本化,这次
+没有,是一次已知的欠账,不是疏漏——迁移涉及的判断点太多,当时判断没有
+把它写成可重复脚本的必要性,以后如果要经常做这类"实例类型切换"迁移,
+值得补一个)。用户当场也指出"过程中很多东西没及时改代码"这个更大的
+问题——今天这个会话里确实有几次直接 `kubectl patch`/手动改活集群、
+事后才补写回 git 的操作(有的忘了补,靠这次记录兜底),这正是仓库
+CLAUDE.md 里"已知差距——一键部署目前仍是多个手动脚本"这条的真实代价,
+不是纸面上的担忧。
+
 # 当前唯一主任务
 
 > 这份文档解决的问题(2026-08-15 Codex review 第二轮指出的):这次会话

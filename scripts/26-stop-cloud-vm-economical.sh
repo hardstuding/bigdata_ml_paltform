@@ -22,7 +22,7 @@
 #   不传参数则用下面这两个默认值(这台机器现在唯一在用的 cloud-full 验证机)。
 set -euo pipefail
 
-CLOUD_VM_INSTANCE_ID="${CLOUD_VM_INSTANCE_ID:-i-0jl7spqzz0rfnqv2abd2}"
+CLOUD_VM_INSTANCE_ID="${CLOUD_VM_INSTANCE_ID:-i-0jlbped4h1959tp591pe}"
 CLOUD_VM_REGION="${CLOUD_VM_REGION:-cn-wulanchabu}"
 ALIYUN_PROFILE="${ALIYUN_PROFILE:-cloud-full}"
 
