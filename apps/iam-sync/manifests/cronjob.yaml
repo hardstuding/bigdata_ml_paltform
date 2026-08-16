@@ -137,18 +137,25 @@ spec:
               # 忽略了普通 SIGTERM、还是别的原因,但 `timeout` 默认只发
               # 一次信号不会自动升级——不管具体机制是什么,加 `-k` 保证
               # 最终一定能被强杀,是更保险的写法,没有理由不加。
-              env:
-                - name: HTTP_PROXY
-                  value: "http://192.168.5.2:1087"
-                - name: HTTPS_PROXY
-                  value: "http://192.168.5.2:1087"
-                - name: NO_PROXY
-                  value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
               command:
                 - sh
                 - -c
                 - |
                   set -e
+                  # 2026-08-16 云端部署时发现:①192.168.5.2:1087 是 colima
+                  # 宿主机专用代理,cloud-full 连不上,改成运行时探测——
+                  # 2 秒连不上就当作不需要(和这个仓库其他组件同一个模式)。
+                  # ②cloud-full 上实测直连 deb.debian.org 明显比走
+                  # mirrors.aliyun.com 慢(和这个仓库到处踩过的 PyPI/npm
+                  # 官方源带宽瓶颈是同一类问题),换镜像站,不管是不是需要
+                  # 代理都先换。③dl.k8s.io 实测两个环境都能直连,不需要
+                  # 镜像/代理。
+                  if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('192.168.5.2',1087))==0 else 1)" 2>/dev/null; then
+                    export HTTP_PROXY="http://192.168.5.2:1087"
+                    export HTTPS_PROXY="http://192.168.5.2:1087"
+                    export NO_PROXY="localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+                  fi
+                  sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
                   timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
                   timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl git >/dev/null
                   ARCH=$(uname -m)
@@ -166,13 +173,13 @@ spec:
           containers:
             - name: sync
               image: python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
-              # 直连 github.com 在这台机器上会卡住/超时(和 Argo Workflows
-              # 的 CRD 安装 Job 当初踩的是同一个网络限制,见 ADR-026),要走
-              # colima 虚拟机内部看到的宿主机代理。地址来自
-              # `colima ssh -- env | grep -i proxy`,换了网络或者重启
-              # colima 后如果这个 Job 又卡在 git clone 上,先重新跑一遍这条
-              # 命令确认地址没变。dl.k8s.io(kubectl 二进制)不受影响,不需要
-              # 代理也能直连,只有这一步的 github.com 需要。
+              # local-lite(colima)上直连 github.com 会卡住/超时(和 Argo
+              # Workflows 的 CRD 安装 Job 当初踩的是同一个网络限制,见
+              # ADR-026),要走 colima 虚拟机内部看到的宿主机代理;
+              # cloud-full 上实测直连 github.com/pypi.org/deb.debian.org
+              # 都是通的,不需要这个代理(硬编码反而连不上,已经改成运行时
+              # 探测,见下面 command)。dl.k8s.io(kubectl 二进制)两个环境都
+              # 不受影响,不需要代理也能直连。
               #
               # git clone 用 `http.lowSpeedLimit`/`http.lowSpeedTime`(git
               # 自己的传输层超时机制)而不是简单包一层 `timeout N`——这两个
@@ -187,22 +194,27 @@ spec:
               # "delayed item" 重试队列不受 Acquire::Retries 约束,会话死
               # 循环),这里是同一个命令、同一个镜像,没道理不会踩到同一个
               # bug,提前一起加固。
-              env:
-                - name: HTTP_PROXY
-                  value: "http://192.168.5.2:1087"
-                - name: HTTPS_PROXY
-                  value: "http://192.168.5.2:1087"
-                - name: NO_PROXY
-                  value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
               command:
                 - sh
                 - -c
                 - |
                   set -e
                   export PATH="/tools:$PATH"
+                  # 2026-08-16 云端部署时发现:cloud-full 实测直连
+                  # github.com/pypi.org/deb.debian.org 都是通的,不需要这个
+                  # colima 宿主机专用代理(硬编码在 cloud-full 上反而连不上,
+                  # 见 fetch-kubectl 那个 initContainer 的同类注释)——改成
+                  # 运行时探测,apt 换阿里云镜像站(实测直连官方源明显更慢,
+                  # 这个仓库到处踩过同一类 PyPI/apt 官方源带宽瓶颈)。
+                  if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('192.168.5.2',1087))==0 else 1)" 2>/dev/null; then
+                    export HTTP_PROXY="http://192.168.5.2:1087"
+                    export HTTPS_PROXY="http://192.168.5.2:1087"
+                    export NO_PROXY="localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+                  fi
+                  sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
                   timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
                   timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
-                  pip install --quiet --timeout 30 pyyaml==6.0.3
+                  pip install --quiet --timeout 30 -i https://mirrors.aliyun.com/pypi/simple/ pyyaml==6.0.3
                   git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
                   cd /tmp/repo
                   python3 scripts/12-sync-iam.py --no-create-users
