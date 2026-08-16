@@ -32,8 +32,20 @@ spec:
           # 公网想用标准 80/443,得等真实域名+TLS 项目落地(那时候会有
           # 独立的公网入口方案,不需要这台节点自己抢 80/443),现阶段
           # 公网访问只能用这两个 NodePort 高位端口。
+          #
+          # 2026-08-16 抢占式实例迁移后真实踩到:不固定 nodePorts 的话,
+          # Service 每次重建(比如这次镜像克隆+新实例)k8s 都会重新随机
+          # 分配高位端口——这次导致端口从 32460/32535 变成了 31265/32644,
+          # 而阿里云安全组规则是按具体端口号开的,新端口没开,造成公网
+          # access 直接断掉且没有任何明显报错(NodePort 本身在集群内没问题,
+          # 只是外部连不进来),差点被当成"没问题"而漏掉。固定成显式值,
+          # 端口号就不会再因为 Service 重建而漂移,安全组规则也能对应固定
+          # 下来,不用每次迁移后重新对齐。
           service:
             type: LoadBalancer
+            nodePorts:
+              http: 32460
+              https: 32535
   destination:
     server: https://kubernetes.default.svc
     namespace: ingress-nginx
