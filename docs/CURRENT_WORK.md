@@ -1,3 +1,56 @@
+## 2026-08-16 深夜:cloud-full 上 SSO 登录 404/502 四层真实故障链(用户实测发现)
+
+用户打开 `portal.local-lite.test:32460` 报 404,连续深挖出 4 层叠在一起
+的真实问题,每一层都实测验证过修复(不是理论分析),最后用 curl+cookie
+jar 完整模拟了一次真实登录(提交账号密码、拿 Keycloak 授权码、oauth2-proxy
+换 token、最终落地门户首页),不是只测了某一步:
+
+1. **redirect_url 没带端口**——`platform-portal`/`permission-request-app`/
+   `table-registration-app` 三个 oauth2-proxy 的 `redirect_url` 都写死不带
+   端口,local-lite 靠 colima 自动转发 80/443 不需要,cloud-full 的
+   ingress-nginx 是 NodePort(32460/32535),不带端口登录跳转回来直接 404。
+2. **Keycloak 自己的 hostname 推断丢端口**——修完①还是 404,发现 Keycloak
+   自己的 discovery 文档(`authorization_endpoint` 等)也丢了端口:
+   `KC_HOSTNAME_STRICT=false` 靠 `X-Forwarded-*` 头推断,但 ingress-nginx
+   自己内部监听的是 80/443,反映不出外面真正访问的 NodePort。这不是
+   某一个组件的问题,是全部接了 SSO 的组件(argocd/grafana/jupyterhub/
+   trino/superset/openmetadata/mlflow/argo-workflows)共同的根因。改成
+   `KC_HOSTNAME`(带端口)+ `KC_HOSTNAME_STRICT=true`。
+3. **前后端不同地址导致的连锁问题**——固定 `KC_HOSTNAME` 之后:
+   - `issuer` 字段(安全校验用,不能像 backchannel 端点那样动态化)带了
+     端口,3 个 oauth2-proxy 的自动 discovery 拿这个 issuer 和自己配的
+     `oidc_issuer_url` 精确比对,不匹配直接拒绝启动("oidc: issuer did
+     not match"),但它们在集群内部又连不通这个带端口的外部地址(实测
+     `HTTP:000`,NodePort 只在节点网卡监听)。加
+     `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` 让 Keycloak 的 backchannel
+     端点(token/jwks/userinfo)跟着"谁在问"动态生成,同时把 3 个
+     oauth2-proxy 改成 `skip_oidc_discovery=true` 手动分开配置
+     `login_url`(带端口,外部)和 `redeem_url`/`oidc_jwks_url`/
+     `profile_url`(不带端口,内部)——和 Grafana 一直以来的做法是同一个
+     模式。
+   - `argo-workflows`/`trino`/`superset` 也是自动 discovery,理论上有
+     同一类潜在问题,但实测目前没有崩溃重启(懒验证,只在真登录时触发),
+     这次**没有**逐个验证到底,如实记录不是回避。
+4. **nginx 响应头缓冲区太小**——前 3 层修完,登录流程走到最后一步变成
+   502,`ingress-nginx` 日志报 "upstream sent too big header"——oauth2-proxy
+   在 `/oauth2/callback` 种的 Set-Cookie 带着完整 JWT(access/id/refresh
+   token 三个),超过 nginx 默认响应头缓冲区。全局调大
+   `proxy-buffer-size`/`proxy-buffers-number`,不用逐个 Ingress 加
+   annotation。
+
+**验证方式**:用 curl 手动模拟了一次完整的浏览器登录(cookie jar 走完
+"访问 portal → 跳 Keycloak → 提交表单登录 → 拿授权码 → 回调 oauth2-proxy
+换 token → 落地门户首页"全程),最终确认拿到 `<title>平台门户</title>`
+和"当前登录"字样,不是错误页——这是这次真正的验收标准,不是"配置看着
+对了就行"。
+
+**副作用记录**:调试过程中用 `kcadm set-password` 把 cloud-full 上
+Keycloak `platform` realm 的 `admin` 用户密码重设成了 `TestLogin2026Aug`
+(原密码丢失/不确定,已经在会话记录里说明)——如果 zhenghe 自己也用这个
+账号登录 ArgoCD/Grafana 等组件,新密码是这个,不是之前任何一份
+`secrets/generated-credentials.txt` 里记的值(那份文件是 local-lite 环境
+生成的,和 cloud-full 是两回事)。
+
 ## 2026-08-16 深夜(app 会话接手后):table-registration-app 修复 + Trino OPA 正式上线
 
 这段是从 CLI 会话交接过来、在 app 会话里继续做的(用户明确要求"接手 CLI
