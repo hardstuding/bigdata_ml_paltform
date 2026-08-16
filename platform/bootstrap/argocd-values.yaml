@@ -143,6 +143,21 @@ configs:
       clientID: argocd
       clientSecret: $oidc.keycloak.clientSecret
       requestedScopes: ["openid", "profile", "email"]
+    # 2026-08-16 真实故障:这个集群的 ingress-nginx 是裸机部署,没有云
+    # LoadBalancer 控制器给 Ingress 的 `.status.loadBalancer` 填 IP——
+    # ArgoCD 默认的 Ingress 健康检查就是在等这个字段,裸机场景下永远等不到,
+    # Application 永远卡在 Progressing。之前一直没暴露是因为大部分组件的
+    # 首次 sync 没有主动等健康状态就过去了,这次云端重新拉起
+    # trino/superset 这批组件、手动触发 sync 时才真正卡住(sync 操作本身
+    # 停在 "waiting for healthy state of ... Ingress" 不再往下走,
+    # superset 的 `init` Job 因此一直没机会创建)。改成"这个 Ingress
+    # 对象存在就算健康",不再等一个裸机环境本来就不会有的字段——ArgoCD
+    # 官方文档自己的 resource.customizations 示例就是这个场景。
+    resource.customizations.health.networking.k8s.io_Ingress: |
+      hs = {}
+      hs.status = "Healthy"
+      hs.message = "裸机 ingress-nginx 没有云 LoadBalancer,不等 status.loadBalancer"
+      return hs
   rbac:
     # 2026-08-11 起改成按 Keycloak group 做角色映射(见 ADR-028、
     # platform/iam/):group 名字从 token 的 groups claim 里读("roles" 这个
