@@ -69,15 +69,19 @@
    opa-grants-sync 硬编码 colima 代理地址导致 cloud-full 上一直失败、
    ArgoCD ignoreDifferences 需要配 RespectIgnoreDifferences 才能在真正
    sync 时也生效(不只是比较逻辑)。
-6. iam-sync/opa-grants-sync 这两个 CronJob 在 cloud-full 上暂时被
-   suspend 了(2026-08-16)——问题比其他组件更深:一个 fetch-kubectl
-   initContainer 靠 apt-get+curl 到 dl.k8s.io 现装 kubectl 二进制,主
-   容器又要 git clone github.com(配的还是 colima 专用代理地址)。三层
-   Mac-only 网络依赖叠在一起,不是改一两行能应付的,需要专门花时间要么
-   把 kubectl 换成官方 `registry.k8s.io/kubectl` 镜像(不用现装,和
-   argo-workflows CRD 那次 vendor 的思路一致)、要么给 git clone 这步找
-   一个 cloud-full 也能用的路径。suspend 之前先确认过 cloud-full 上
-   IAM/OPA 权限同步这两件事本来就不是这次主线验收范围。
+6. ~~iam-sync/opa-grants-sync 这两个 CronJob 在 cloud-full 上暂时被
+   suspend~~——**2026-08-16 都已修复并验证,不再是延后项**。
+   `opa-grants-sync`:硬编码的 colima 专用代理地址在 cloud-full 上连不上,
+   改成运行时探测。`iam-sync` 比想象中更深一层:除了同样的代理硬编码,
+   fetch-kubectl 这个 initContainer 原来靠裸 curl 下 dl.k8s.io 上
+   59MB 的 kubectl 二进制,实测这条路径本身限速到约 50kB/s(和 PyPI
+   CDN 那次是同一类"小文件测连通性很快、大文件才暴露真实带宽瓶颈"的
+   坑),改成 apt 装 mirrors.aliyun.com 镜像的 pkgs.k8s.io 官方仓库
+   (动态取当前 stable 分支的 major.minor,不是写死版本号)。两个都用
+   `kubectl create job --from=cronjob/...` 手动触发过真实运行:
+   `iam-sync` 真的克隆了仓库、连上 Keycloak、同步了 roles/groups;
+   `opa-grants-sync` 真的把 grants.csv 同步进了 OPA(见 ADR-051"2026-08-16
+   正式上线"一节)。
 7. ~~镜像缓存 digest 校验~~——**2026-08-16 已经做出来了**,不再是延后项:
    `scripts/verify-image-digests.sh`,原因是这次 cloud-full 部署过程中
    真实靠这套核实逻辑抓到过 9 个国内镜像站(daocloud)内容和官方不一致

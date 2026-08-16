@@ -11,6 +11,13 @@
    过程(审计现在实际在用 Trino 的身份、撞上的 3 个真实 bug、上线后端到端
    验证)见 ADR-051"2026-08-16 正式上线"一节,这里不重复。`docs/
    BACKLOG.md` P1.5 已相应标记完成。
+3. **`iam-sync`/`opa-grants-sync` 两个之前被 suspend 的 CronJob 都修复
+   验证过了**(`docs/BACKLOG.md` P1.6):都是硬编码 colima 专用代理地址
+   在 cloud-full 上连不上;`iam-sync` 还多一层——`fetch-kubectl`
+   initContainer 原来裸 curl 下 dl.k8s.io 的 kubectl 二进制(59MB),
+   实测被限速到约 50kB/s,改成 apt 装 mirrors.aliyun.com 镜像的官方
+   仓库。两个都手动触发过真实 Job 运行确认端到端生效(`iam-sync` 真的
+   同步了 Keycloak 的 roles/groups)。
 
 **这次没有做完的**:切换后应该再观察一段时间(比如确认 dbt_demo DAG 下次
 真实调度时用 `dbt_demo_service` 身份能正常建表/写入——这次只验证了 OPA
