@@ -14,6 +14,11 @@
 #     `EndpointConnectionError` 才发现(这条 NetworkPolicy 是
 #     default-deny-ingress 之外唯一放行的口子,新命名空间不在这份列表里
 #     就是连不通,不是配置错)。
+#   - dbt(2026-08-16 新增,ADR-053):dbt_demo DAG 的 KubernetesPodOperator
+#     任务 pod 建在 dbt 这个命名空间,build 完要把 manifest.json/
+#     catalog.json 上传到 MinIO——和上面 feast 那条是完全一样的坑,同样是
+#     cloud-full 第一次真正端到端跑通 dbt_demo 才实测到
+#     `EndpointConnectionError`/`Connection refused` 才发现漏了这条。
 #   - minio(同命名空间自己)——2026-08-13 推倒重建测试实测踩到的坑:
 #     minio 官方 chart 的 buckets(见 apps/definitions/minio.yaml 的
 #     `buckets:` 字段)是靠一个 Helm post-install hook Job(`minio-post-job`,
@@ -71,6 +76,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: feast
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dbt
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: minio
