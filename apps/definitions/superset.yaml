@@ -54,10 +54,16 @@ spec:
         # 在这里补一个对应的 SQLAlchemy dialect 包,踩到就加,参考
         # docs/operations/troubleshooting.md 里 psycopg2/authlib 那条记录的
         # 处理方式。
+        # 2026-08-16 抢占式实例迁移后实测踩到:直连 pypi.org 反复卡住
+        # (`Resolved 20 packages in 1m 22s` 之后下载 psycopg2-binary/lz4
+        # 这两个几 MB 的小包卡住不动,删 pod 重试过两次都是同一个卡点)
+        # ——和这次会话里其他几个自建工具踩的是同一类网络问题。这里没有
+        # 用官方 `/app/docker/pip-install.sh` 包装脚本(不确定它认不认
+        # `-i` 参数),直接调 pip 换成阿里云镜像 + 超时保护。
         bootstrapScript: |
           #!/bin/bash
           if [ ! -f ~/bootstrap ]; then
-            /app/docker/pip-install.sh psycopg2-binary authlib trino
+            timeout -k 10 240 pip install --quiet -i https://mirrors.aliyun.com/pypi/simple/ psycopg2-binary authlib trino
             echo "Running Superset with uid 0" > ~/bootstrap
           fi
         postgresql:
