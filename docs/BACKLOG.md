@@ -50,10 +50,20 @@
    规则算出谁要审批"的核心逻辑(20 个测试全过,专门覆盖了 app.py 注释里
    提到的那个真实修过的"L2/L3 重复审批人"bug,作为回归测试锁住),
    `/request`/`/table-access/*` 这些路由的完整状态机(approve/reject/
-   escalation/transfer/audit/external-callback)**还没测**,涉及的
-   分支/外部依赖(git clone+push、企微 webhook、外部 OA 回调)比另外
-   两个 app 多得多,量级上应该算独立的后续任务,不是这次顺手能做完的。
-   3 个 app 现在都有了测试起点,不再是从 0 开始)
+   escalation/transfer/audit/external-callback)**2026-08-16 已补上**:
+   新增 32 个测试(总共 52 个,全部通过),用 Flask `test_client` 走真实
+   路由,不是直接调内部函数——覆盖组权限申请的 approve/reject、表访问
+   多级审批链的完整走查(L1 全部批完才解锁 L2、越级审批被 409 拦下、
+   任意一级拒绝导致整体拒绝+其余步骤 skipped)、外部 OA 回调的 token
+   校验+状态流转、升级检查(提醒 vs 真正换人审两条阈值线都测了)、权限
+   交接、审计页权限拦截。**如实说明覆盖范围仍不是全部**:GIT_TOKEN 在
+   测试环境里始终不配置,所以 `apply_to_git`/`apply_grant_to_git`/
+   `reclaim_expired`/`transfer` 里真正执行 git clone/push 的分支,以及
+   `dispatch_step` 里真实 POST 到外部 OA webhook 的这条网络路径,都只
+   测到了"没配置/mock 掉时优雅降级",没有测到真实 subprocess/网络调用
+   本身——这是更进一步的独立工作,需要搭一个临时本地 git 仓库或者更细的
+   mock,这次没做。3 个 app 现在都有了扎实的测试覆盖,不再是"起点"这个
+   量级了)
 3. 环境 overlay 重构(local-lite/cloud-full/prod 真正做到改配置切换,
    不是手动 `git mv`)。**2026-08-16 cloud-full 首次全套拉起时,这个
    已知差距的代价第一次真实体现**:好几个组件里硬编码了 colima 宿主机
