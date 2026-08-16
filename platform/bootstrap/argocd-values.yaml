@@ -158,6 +158,17 @@ configs:
       hs.status = "Healthy"
       hs.message = "裸机 ingress-nginx 没有云 LoadBalancer,不等 status.loadBalancer"
       return hs
+    # 同一个问题的另一个表现:ingress-nginx-controller 自己的 Service 是
+    # type: LoadBalancer(EXTERNAL-IP 永远 <pending>),ArgoCD 默认的
+    # Service 健康检查也在等同一个不存在的云 LB 状态。这条会覆盖所有
+    # Service 类型的默认健康检查,不只是 LoadBalancer——但这个集群是单
+    # 裸机节点,ClusterIP/NodePort 类型的 Service 本来创建出来就应该算
+    # 健康,不会因为这条覆盖丢失真实的异常检测能力。
+    resource.customizations.health.Service: |
+      hs = {}
+      hs.status = "Healthy"
+      hs.message = "裸机没有云 LoadBalancer,不等 status.loadBalancer"
+      return hs
   rbac:
     # 2026-08-11 起改成按 Keycloak group 做角色映射(见 ADR-028、
     # platform/iam/):group 名字从 token 的 groups claim 里读("roles" 这个
