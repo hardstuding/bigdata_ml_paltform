@@ -48,42 +48,28 @@
 
 ## 进度清单
 
-- [x] 阿里云 ECS 实例创建(按量付费、x86_64、200GB 数据盘、SSH 密钥登录)
-- [x] 数据盘格式化 + 挂载到 `/data`(`scripts/21-bootstrap-cloud-vm.sh`
-      第 1 步)
-- [x] Docker 安装(阿里云 apt 镜像源,`data-root` 指向 `/data/docker`)
-- [x] k3s 安装(Rancher 中国镜像,`--docker` 运行时,`--data-dir /data/k3s`,
-      `--tls-san 8.130.69.252`)——节点 Ready,确认
-      `CONTAINER-RUNTIME: docker://29.7.2`
-- [ ] 本机 x86_64 镜像缓存打包完成(`scripts/export-image-cache-amd64.sh`
-      后台跑着,68 个镜像,写这份文档时进度 20/68——确认了 ArgoCD 自己的
-      镜像 `quay.io/argoproj/argocd:v3.5.1` 也在这批清单里,不会漏。
-      中途被一次 colima resize 打断过一次,有一个文件传输时发现损坏
-      (`mlserver:1.7.1`,已清理重新导出),之后没有再发生)
-- [x]/[ ] 镜像缓存传输到云主机 + `docker load` 灌入
-      (`scripts/22-load-image-cache-remote.sh`,**已经真实用过,不是
-      只写了没用**)——第一批 14 个镜像已经传完灌入(13 个成功,1 个
-      因为上面那次损坏失败,已经补做),**支持增量续传**,不用等全部
-      68 个导出完才开始传,已导出的可以先传一批。
-- [x] SSH 隧道建立(`ssh -f -N -L 16443:127.0.0.1:6443 ...` 常驻后台;
-      本机单独一份 kubeconfig `~/.kube/cloud-full-config`,不动默认的
-      `~/.kube/config`——那个还是指向本机 colima 集群,操作云端集群务必
-      显式 `KUBECONFIG=~/.kube/cloud-full-config`,别搞混)
-- [x] `scripts/00-generate-secrets.sh`(针对全新集群跑,过程中发现并修
-      了一个真实 bug:`ensure_secret()` 缺了 `copy_secret()` 早就有的
-      "命名空间不存在就跳过"guard,直接报错中止整个脚本——本机 colima
-      从来没有真的从零测过这条路径,这次在真实全新集群上才暴露。修完之后
-      重跑成功,输出写进 `secrets/generated-credentials-cloud-full.txt`
-      (本地文件,不进 git)。还有一批 Secret 会在对应 Application 第一次
-      同步、命名空间建出来之后需要重跑这个脚本补齐,这是预期行为,不是
-      没做完)
-- [ ] `scripts/01-bootstrap-argocd.sh`(装 ArgoCD,准备先等镜像缓存灌完
-      再装,避免 ArgoCD 自己的镜像还要现拉 quay.io)
-- [ ] `scripts/02-bootstrap-root-apps.sh`(交给 GitOps 管理)
-- [ ] `pending-definitions/` 里的组件 `git mv` 到 `apps/definitions/`
-      (cloud-full 要求全部组件常驻,不是 local-lite 那种按需 park)
-- [ ] 按 `README.md` 的资源建议表调大每个组件的 resources
-- [ ] 其余"从零拉起整套服务"步骤(见主仓库 `README.md`)
+**2026-08-16 更新:下面这份清单是最初搭建阶段(2026-08-15)写的,当时
+ArgoCD/PV/组件常驻这些都还没做——现在全部已经做完并且验证通过,清单
+本身长期没跟着改,和实际状态不一致,已经具备误导接手人的风险,这次
+一次性更正。往后这份文档只记"当前实例是什么/怎么连上",细粒度的
+"做到哪一步了"交给 `docs/CURRENT_WORK.md`(会持续更新,不会像这里一样
+过时),这里不重复维护第二份进度清单。**
+
+- [x] 阿里云 ECS 实例创建、数据盘挂载、Docker、k3s——节点 Ready
+- [x] 镜像缓存(68 个)导出+灌入云主机,增量续传验证过
+- [x] SSH 隧道 + 独立 kubeconfig(`~/.kube/cloud-full-config`)
+- [x] `scripts/00-generate-secrets.sh`
+- [x] ArgoCD 安装 + root apps 接管(GitOps)
+- [x] `pending-definitions/` 全部组件收回常驻(cloud-full 要求,不同于
+      local-lite 的按需 park)
+- [x] 核心链路(Trino/Superset/Airflow)端到端验证通过——详见
+      `docs/CURRENT_WORK.md` 任务 #12~#16 完成记录
+- [x] 2026-08-16 抢占式实例迁移(省钱)+ 经济模式关机(RAM 角色 +
+      看门狗自动调 `StopInstance --StoppedMode StopCharging`)
+- [ ] 按 `README.md` 资源建议表精调各组件 resources(能跑,没有针对
+      抢占式实例的规格做过专门优化)
+- [ ] `docs/BACKLOG.md` P1 清单里的工程收口项(测试覆盖/CI 扩大/环境
+      overlay 重构等,明确不是"从零拉起"这一步的范围)
 
 ## 过程中做过的关键决策(带原因,方便后来者理解"为什么"不只是"是什么")
 
@@ -117,22 +103,17 @@
 
 ## 下一步(接手的人从这里继续)
 
-**2026-08-15 更正:这一节之前写着"远程加载脚本还没做,需要照抄逻辑"是
-过时的错误信息——`scripts/22-load-image-cache-remote.sh` 早就写好了
-并且已经真实用过(见上面"进度清单"),不要再重新写一遍或者怀疑它不
-存在。这处漂移是 Codex review 指出来的,教训记进了 ADR-055:同一份
-文档内部出现自相矛盾(进度清单说"已写好",这一节说"还没做")比单纯
-"信息过时"更容易误导接手的人,以后改完进度清单要顺手检查这里有没有
-跟上,不能只改一处。**
+**2026-08-16 更正**:这一节之前写的是"从零搭建阶段"的下一步(镜像缓存
+灌入、装 ArgoCD),那一批早就做完了,不要照着执行一遍。真正的"现在该
+干什么"以 `docs/CURRENT_WORK.md` 顶部为准——那份文档持续更新、不会
+像这里一样过时。这里只留给"这台实例本身怎么连上"这类稳定信息:
 
-1. 检查本地导出进度(`tail logs/export-image-cache-amd64.log` 或者直接
-   看 `wc -l image-cache-amd64/manifest.txt` 对比 68 这个总数)。
-2. 不需要等全部导出完:`CLOUD_VM_IP=8.130.69.252
-   CLOUD_VM_KEY=~/.ssh/cloud-full-key.pem
-   ./scripts/22-load-image-cache-remote.sh image-cache-amd64` 可以随时
-   针对当前已经导出好的部分跑一次(rsync 增量,已经传过的会跳过,不会
-   重复传)。
-3. 全部 68 个都灌完之后,再跑 `scripts/01-bootstrap-argocd.sh`(不加
-   `NEEDS_LOCAL_PROXY`,云主机不需要走本机代理)——这个顺序是故意的,
-   等镜像缓存备齐了再装 ArgoCD,避免它自己的镜像还要连 quay.io 现拉。
-4. 继续"进度清单"里没打勾的部分。
+1. 连接前先确认实例状态和当前公网 IP(不是固定 EIP,重启后可能变):
+   `aliyun ecs DescribeInstances --profile cloud-full --InstanceIds
+   '["i-0jlbped4h1959tp591pe"]'`。
+2. SSH:`ssh -i ~/.ssh/cloud-full-key.pem root@<当前IP>`。
+3. 操作集群:`KUBECONFIG=~/.kube/cloud-full-config kubectl ...`(SSH 隧道
+   如果已断开,需要先重新建:`ssh -f -N -L
+   16443:127.0.0.1:6443 -i ~/.ssh/cloud-full-key.pem root@<当前IP>`)。
+4. 具体"接下来做什么"看 `docs/CURRENT_WORK.md` 的 CURRENT 和
+   `docs/BACKLOG.md`,不在这份文档里重复维护第二套待办。
