@@ -85,7 +85,7 @@ pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其
 | 数据工程 | SeaTunnel | 批流一体数据集成 | 中 | — | ✅ | ✅ | Phase 2 |
 | 数据工程 | Spark Operator | k8s 原生 Spark 作业 | 重 | — | ✅ | ✅ | Phase 2 |
 | 数据工程 | Kafka | 消息队列,公司现有生产环境同款 | 中 | — | ✅ | ✅ | Phase 2 |
-| 数据工程 | Flink | 实时计算 / CDC | 重 | — | — | ✅ | Phase 4 |
+| 数据工程 | Flink | 实时计算 / CDC | 重 | — | — | ✅ | Phase 4(2026-08-15 用户确认为必要组件,不是"按需"可选项,见 `docs/BACKLOG.md`) |
 | AI/ML | JupyterHub | 多用户 Notebook | 中 | — | ✅ | ✅ | Phase 3 |
 | AI/ML | MLflow | 实验跟踪 / 模型注册 | 轻 | — | ✅ | ✅ | Phase 3 |
 | AI/ML | Argo Workflows | 训练流水线编排 | 中 | — | ✅ | ✅ | Phase 3 |
@@ -145,6 +145,51 @@ pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其
 真实指标构建,不先造空看板)→ 新引擎(只有现有引擎量化验证撑不住时才
 评估 ClickHouse 这类新增)。**这五条现在都还没有开始实现**,不要在还没
 真正启动某一条时误以为"已经在做"。
+
+**2026-08-15 Codex 补的一轮架构细化(核心结论:不反对上面五条,是给
+"怎么落地"补细节)**——核心判断是**"这些开源组件不应该整套部署后拼起来,
+而应该按职责选用,平台自己的门户/权限/项目模型才是统一入口和控制面",
+否则容易从"缺功能"变成"部署了五六个平台,每个平台一套用户/权限/菜单/
+运维体系"**。逐条判断,大部分是给已经决定的方向补执行细节,不是新方向,
+只有一条(Stackable)是真正新提出、还没评估过的:
+
+- **OpenMetadata 定位不变**(已经在用,不用换),但建议不要让 Spark/
+  Flink/Trino/Airflow 等每个组件分别直连它写血缘,改成平台后端统一一个
+  `metadata-sync-service` 适配层(任务事件 → 内部事件总线 → 这个 service
+  → OpenMetadata API,同步失败进重试队列,不能让 OpenMetadata 暂时不可用
+  拖垮 Spark 作业)。**判断:合理,而且和 [ADR-030](decisions/030-pluggable-external-infrastructure.md)
+  "统一注释标出可替换点、不做重抽象层"的哲学一致**——这本身就是一个
+  "统一改动点",不是新增一层重框架,值得在真正做 A/B 两条产品主线时
+  采纳,不需要现在就动工。
+- **MinIO/S3 存储抽象**:建议业务代码统一走 `s3a://`/标准 S3 SDK/Iceberg
+  Catalog,不绑定 MinIO 专有 API,以后能换 Ceph/AWS S3/阿里云 OSS。
+  **判断:这条现状已经满足**,这个项目本来就是这么做的(Hive Metastore/
+  Trino/Spark 都是标准 S3A 配置连 MinIO,没有任何地方用 MinIO 专有 SDK),
+  不需要额外动作,记录下来是为了确认"已经做对了",不是发现新差距。
+- **Stackable(Spark/Trino/Hive 统一 Operator 平台)**:**这是真正新提出
+  的候选项,这个项目目前完全没有评估过**。Codex 自己给的判断是它有明显
+  的版本滞后代价(比如 Spark 4.x 支持明显晚于社区发布,当前长期支持线是
+  3.5.8),CRD/Operator/镜像本身会形成中等到较高程度的平台绑定,建议
+  只当独立 PoC 验证(非生产环境、对比部署/升级/故障恢复成本、通过统一
+  "计算引擎适配层"调用、保留绕开 Stackable 直接用官方 Operator 的能力),
+  不建议现在迁移任何现有组件。**判断:认可这个"仅 PoC、不替换"的谨慎
+  态度**,列入下面的 P2 候选项,现在不做。
+- **Kubeflow**:建议只评估 Notebook/训练任务/MLflow/KServe 这几块能力,
+  不整套部署 Kubeflow UI 当最终产品。**判断:这一条本来就是这个项目
+  已经在做的事**——路线图里 Phase 3 是 JupyterHub+MLflow+Argo
+  Workflows+KServe 分别独立部署,而不是装一个 Kubeflow 全家桶,方向
+  完全一致,不是新信息。
+- **Backstage**:建议学习它的实体模型(System/Component/API/Resource/
+  Owner)、插件架构、模板化创建能力,但不要现在部署一套 Backstage UI。
+  **判断:这条是已经决定过的事**,[ADR-032](decisions/032-permission-request-app.md)的"背景"一节
+  记过这个判断(指向 ADR-028"后续"部分的完整评估:Backstage 需要自己
+  开发维护一个 React+TypeScript 应用才能用,不是"装了就能用"的产品,
+  不满足这个项目"只用官方支持部署方式"的门槛),这次 Codex 给的结论和
+  当时一致,没有推翻,不需要重新评估。
+
+**一句话总结这轮补充**:没有改变"5 条产品主线还没开始、可靠底座优先"
+这个既定判断,唯一真正的新增行动项是"Stackable 值得找时间做一次独立
+PoC(不影响现有部署)",已经加进 `docs/BACKLOG.md` P2。
 
 ## 还没定的事
 
