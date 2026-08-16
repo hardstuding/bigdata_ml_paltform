@@ -30,6 +30,13 @@ spec:
             gateway:
               ingressGateway:
                 className: nginx
+            image:
+              # chart 默认 Always——2026-08-16 云端部署时发现:即使这个镜像
+              # 已经通过国内镜像站(daocloud)拉到本地、tag 完全匹配,
+              # Always 每次调度还是会去连 registry-1.docker.io 校验,超时
+              # 后直接 ImagePullBackOff,完全无视本地已有的缓存。改成
+              # IfNotPresent——本地有就用本地的,不需要每次都联网校验。
+              imagePullPolicy: IfNotPresent
   destination:
     server: https://kubernetes.default.svc
     namespace: kserve
