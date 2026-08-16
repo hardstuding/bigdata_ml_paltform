@@ -21,23 +21,19 @@ spec:
               memory: 128Mi
             limits:
               memory: 256Mi
-          # 2026-08-16 云端要开公网访问才发现:裸机没有云 LoadBalancer,
-          # Service type: LoadBalancer 实际走的是 kube-proxy 的 NodePort
-          # 机制(随机高位端口,这次是 32460/32535)。想让公网走标准
-          # 80/443 端口,手动加 iptables REDIRECT 规则把流量转到这两个
-          # NodePort 试过,会和 k3s 自己的 KUBE-SERVICES 链在 nat 表
-          # PREROUTING 里的处理顺序打架(REDIRECT 是 terminating target,
-          # 排在 KUBE-SERVICES 前面的话,原本该由 KUBE-SERVICES 做的
-          # NodePort→真实 pod IP 转换根本不会执行,后面这个"端口"其实
-          # 没有真正监听;排在后面又变成对已经被 REDIRECT 消费掉的包
-          # 不起作用)——裸机场景更标准的做法是让 controller 直接绑定
-          # 宿主机网络(hostNetwork),完全绕开 kube-proxy/NodePort 这层,
-          # 容器的 80/443 就是宿主机真实的 80/443,不需要任何额外转发。
-          # 这台机器全程只有 1 个节点、1 个 replica,不会有端口冲突。
-          hostNetwork: true
-          dnsPolicy: ClusterFirstWithHostNet
+          # 2026-08-16 云端要开公网访问时试过 hostNetwork(绑定宿主机
+          # 80/443,绕开 kube-proxy NodePort 这层)——**行不通,已回退**:
+          # 这台节点是和 Codex 的 bigdata_ai_platform_v2 共享的同一个
+          # k3s 集群(见 docs/CURRENT_WORK.md 的相关记录),Codex 那边的
+          # traefik 已经用 k3s 自带的 svclb 机制常驻占了宿主机 80/443,
+          # 两边没法同时 hostNetwork 抢同一对端口。裸机+单节点没有云
+          # LoadBalancer,`service: type: LoadBalancer` 实际走的是
+          # kube-proxy NodePort(随机高位端口,目前是 32460/32535)——
+          # 公网想用标准 80/443,得等真实域名+TLS 项目落地(那时候会有
+          # 独立的公网入口方案,不需要这台节点自己抢 80/443),现阶段
+          # 公网访问只能用这两个 NodePort 高位端口。
           service:
-            type: ClusterIP
+            type: LoadBalancer
   destination:
     server: https://kubernetes.default.svc
     namespace: ingress-nginx
