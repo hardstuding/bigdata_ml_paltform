@@ -104,7 +104,11 @@ echo "==> argocd client"
 # redirectUris 是 http——argocd-server 现在 server.insecure=true,自己不再起
 # TLS,由 ingress-nginx 接 http 明文流量(见 platform/bootstrap/argocd-values.yaml),
 # 不是随手改的。
-ARGOCD_REDIRECT_URIS='["http://argocd.local-lite.test/auth/callback","http://argocd.local-lite.test/*"]'
+# 2026-08-16 cloud-full 真实故障:local-lite 靠 colima 自动转发 80/443,
+# 不需要端口;cloud-full 的 ingress-nginx 是 NodePort 32460,所有 client
+# 都要注册带端口的回调地址,不然登录跳转回来 404(根因和修法见
+# platform/apps/keycloak.yaml 里 KC_HOSTNAME 那段完整说明)。
+ARGOCD_REDIRECT_URIS='["http://argocd.local-lite.test/auth/callback","http://argocd.local-lite.test/*","http://argocd.local-lite.test:32460/auth/callback","http://argocd.local-lite.test:32460/*"]'
 argocd_client_id=$(kcadm get clients -r platform -q clientId=argocd --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
 if [ -n "$argocd_client_id" ]; then
   echo "client argocd 已存在,跳过创建(只同步 redirectUris,不轮换密钥)"
@@ -122,28 +126,31 @@ else
 fi
 
 echo "==> grafana client"
-create_client_if_absent grafana '["http://grafana.local-lite.test/login/generic_oauth"]' monitoring grafana-oidc-secret clientSecret
+create_client_if_absent grafana '["http://grafana.local-lite.test/login/generic_oauth","http://grafana.local-lite.test:32460/login/generic_oauth"]' monitoring grafana-oidc-secret clientSecret
 
 echo "==> jupyterhub client"
 # oauthenticator 的回调路径固定是 /hub/oauth_callback。
-create_client_if_absent jupyterhub '["http://jupyterhub.local-lite.test/hub/oauth_callback"]' jupyterhub jupyterhub-oidc-secret clientSecret
+create_client_if_absent jupyterhub '["http://jupyterhub.local-lite.test/hub/oauth_callback","http://jupyterhub.local-lite.test:32460/hub/oauth_callback"]' jupyterhub jupyterhub-oidc-secret clientSecret
 
 echo "==> trino client"
 # Trino OAuth2 的回调路径固定是 /oauth2/callback,不能改。
-create_client_if_absent trino '["http://trino.local-lite.test/oauth2/callback"]' trino trino-oidc-secret clientSecret
+# Trino 走 HTTPS(apps/trino-tls/ 手写的 Ingress,8443),NodePort 是
+# 32535(https),不是 32460(http)——和其它组件不一样,单独说明一下避免
+# 以后照抄错端口。
+create_client_if_absent trino '["http://trino.local-lite.test/oauth2/callback","https://trino.local-lite.test:32535/oauth2/callback"]' trino trino-oidc-secret clientSecret
 
 echo "==> superset client"
 # Flask-AppBuilder 的 OAuth 回调路径是 /oauth-authorized/<provider name>,
 # provider name 是 apps/definitions/superset.yaml 里 OAUTH_PROVIDERS 配的
 # "keycloak",不能改一边不改另一边。
-create_client_if_absent superset '["http://superset.local-lite.test/oauth-authorized/keycloak"]' superset superset-oidc-secret clientSecret
+create_client_if_absent superset '["http://superset.local-lite.test/oauth-authorized/keycloak","http://superset.local-lite.test:32460/oauth-authorized/keycloak"]' superset superset-oidc-secret clientSecret
 
 echo "==> openmetadata client"
 # 不能直接用 create_client_if_absent——OpenMetadata chart 的
 # oidcConfiguration.clientId 也是 secretRef(不像其他组件那样直接在 values
 # 里写字面量 client_id),这个 Secret 要同时装 clientId 和 clientSecret 两个
 # key,helper 函数只管一个 key,这里单独写。
-OM_REDIRECT_URIS='["http://openmetadata.local-lite.test/callback"]'
+OM_REDIRECT_URIS='["http://openmetadata.local-lite.test/callback","http://openmetadata.local-lite.test:32460/callback"]'
 om_client_id=$(kcadm get clients -r platform -q clientId=openmetadata --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
 if [ -n "$om_client_id" ]; then
   echo "client openmetadata 已存在,只同步 redirectUris,不轮换密钥"
@@ -165,7 +172,7 @@ echo "==> mlflow client(给挡在前面的 oauth2-proxy 用,MLflow 自己不接 
 # oauth2-proxy 的回调路径固定是 /oauth2/callback。这里不能用
 # create_client_if_absent——密钥要 patch 进 mlflow/oauth2-proxy-secret 的
 # client-secret 这个 key,不是建一个新 Secret。
-MLFLOW_REDIRECT_URIS='["http://mlflow.local-lite.test/oauth2/callback"]'
+MLFLOW_REDIRECT_URIS='["http://mlflow.local-lite.test/oauth2/callback","http://mlflow.local-lite.test:32460/oauth2/callback"]'
 mlflow_client_id=$(kcadm get clients -r platform -q clientId=mlflow --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
 if [ -n "$mlflow_client_id" ]; then
   echo "client mlflow 已存在,只同步 redirectUris,不轮换密钥"
@@ -184,7 +191,7 @@ fi
 
 echo "==> spark-history-server client(给挡在前面的 oauth2-proxy 用,和 mlflow 同一个模式,见 ADR-029)"
 if kubectl -n spark-operator get secret oauth2-proxy-secret >/dev/null 2>&1; then
-  SHS_REDIRECT_URIS='["http://spark-history.local-lite.test/oauth2/callback"]'
+  SHS_REDIRECT_URIS='["http://spark-history.local-lite.test/oauth2/callback","http://spark-history.local-lite.test:32460/oauth2/callback"]'
   shs_client_id=$(kcadm get clients -r platform -q clientId=spark-history-server --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -n "$shs_client_id" ]; then
     echo "client spark-history-server 已存在,只同步 redirectUris,不轮换密钥"
@@ -283,7 +290,7 @@ echo "==> argo-workflows client"
 # chart 的 server.sso.clientId/clientSecret 都是 secretRef(key 名字是
 # client-id/client-secret,chart 自己约定的,不能改),这个 Secret 要同时
 # 装两个 key。
-AW_REDIRECT_URIS='["http://argo-workflows.local-lite.test/oauth2/callback"]'
+AW_REDIRECT_URIS='["http://argo-workflows.local-lite.test/oauth2/callback","http://argo-workflows.local-lite.test:32460/oauth2/callback"]'
 aw_client_id=$(kcadm get clients -r platform -q clientId=argo-workflows --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
 if [ -n "$aw_client_id" ]; then
   echo "client argo-workflows 已存在,只同步 redirectUris,不轮换密钥"

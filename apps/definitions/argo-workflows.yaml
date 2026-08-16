@@ -52,7 +52,14 @@ spec:
             clientSecret:
               name: argo-workflows-oidc-secret
               key: client-secret
-            redirectUrl: "http://argo-workflows.local-lite.test/oauth2/callback"
+            # 2026-08-16 cloud-full 真实故障:local-lite 靠 colima 自动转发
+            # 80/443 不需要端口,cloud-full 的 ingress-nginx 是 NodePort
+            # 32460,不带端口登录跳转回来会 404(完整根因见
+            # platform/apps/keycloak.yaml 的 KC_HOSTNAME 说明)。issuer 不用
+            # 改端口——服务端自己发起的 discovery 请求走集群内部路径,
+            # Keycloak 的 KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true 会让它拿到
+            # 的 token_endpoint 也不带端口,跟这里保持一致能连通。
+            redirectUrl: "http://argo-workflows.local-lite.test:32460/oauth2/callback"
             scopes:
               - openid
               - profile

@@ -157,7 +157,12 @@ configs:
     # 协议是 http:server.insecure=true 之后 argocd-server 自己不再有 TLS,
     # 由 ingress-nginx 接收明文流量。cloud-full/prod 接真实域名 + cert-manager
     # 之后这里要同步改成 https。
-    url: http://argocd.local-lite.test
+    # 2026-08-16 cloud-full 真实故障:这个 url 是 ArgoCD 拼 OAuth 回调地址
+    # 的依据(和 Grafana 的 root_url 同一个机制),local-lite 靠 colima
+    # 自动转发 80/443 不需要端口,cloud-full 的 ingress-nginx 是 NodePort
+    # 32460,不带端口登录跳转回来会 404(完整根因见
+    # platform/apps/keycloak.yaml 里 KC_HOSTNAME 那段说明)。
+    url: http://argocd.local-lite.test:32460
     oidc.config: |
       name: Keycloak
       issuer: http://keycloak.local-lite.test/auth/realms/platform

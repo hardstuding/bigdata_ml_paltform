@@ -38,8 +38,41 @@ spec:
               secretKeyRef:
                 name: keycloak-admin
                 key: password
+          # 2026-08-16 cloud-full 真实故障(用户实测:登录跳转到 Keycloak
+          # 直接 404):KC_HOSTNAME_STRICT=false 靠 X-Forwarded-* 头推断
+          # 自己的外部地址,但 ingress-nginx 在这台机器上是 NodePort
+          # (32460/32535),它自己内部监听的还是 80/443,X-Forwarded-Port
+          # 反映的是它自己的端口,不知道外面真正访问的是 32460——Keycloak
+          # 生成的 discovery 文档/authorization_endpoint 全部丢了端口,
+          # 浏览器跳过去必然 404。这不是某一个接 SSO 的组件的问题(一开始
+          # 只发现 platform-portal 一个,后来查 scripts/03-configure-
+          # keycloak.sh 发现 argocd/grafana/jupyterhub/trino/superset/
+          # openmetadata/mlflow/argo-workflows 全部受影响),根源在
+          # Keycloak 自己,改成显式声明 hostname(带端口)+ strict=true,
+          # 一处修好比逐个组件在 redirect_uri 上打补丁更对。local-lite 上
+          # ingress-nginx 靠 colima 直接转发 80/443,不需要端口——这个仓库
+          # 目前没有环境 overlay 机制(见 docs/BACKLOG.md P1.3),以后谁在
+          # local-lite 上验证登录流程,这两行要临时改回
+          # KC_HOSTNAME_STRICT=false 那个版本。
+          - name: KC_HOSTNAME
+            value: "http://keycloak.local-lite.test:32460/auth"
           - name: KC_HOSTNAME_STRICT
-            value: "false"
+            value: "true"
+          # 加了固定 KC_HOSTNAME 之后实测抓到第二个问题:argo-workflows/
+          # trino/superset 这几个走"discovery 文档自动发现 token_endpoint"
+          # 的组件,服务端在集群内部换 token 时也会拿到这个写死的外部地址
+          # (带 :32460),但集群内部 Pod 连不通这个 NodePort(实测
+          # HTTP:000,连接不上——NodePort 只在节点对外网卡上监听,ClusterIP
+          # 上没有这个端口)。Keycloak 26 的 hostname v2 provider 专门支持
+          # 这个场景拆开处理:frontchannel(浏览器要跳转去的 authorization_
+          # endpoint)固定用上面配的 KC_HOSTNAME,backchannel(服务端自己发
+          # 现/请求的 token_endpoint 等)改成"跟着请求方是怎么连进来的动态
+          # 决定"——集群内部服务本来就是用 keycloak.local-lite.test(不带
+          # 端口,coredns-custom 解析到 ingress-nginx 的 ClusterIP:80)发起
+          # 请求,拿到的 discovery 文档里 backchannel 地址会正确地也不带
+          # 端口,回到内部能连通的地址,不需要额外配置区分"谁在问"。
+          - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+            value: "true"
           - name: KC_PROXY_HEADERS
             value: "xforwarded"
           # 审计日志(见 docs/decisions/024):jboss-logging 这个事件监听器

@@ -158,8 +158,12 @@ spec:
             server:
               # OAuth 回调地址(redirect_uri)是从 root_url 拼出来的,不写死会
               # 默认成 localhost:3000(以前端口转发时代的地址),导致回调地址
-              # 和 Keycloak client 里注册的对不上。
-              root_url: http://grafana.local-lite.test/
+              # 和 Keycloak client 里注册的对不上。2026-08-16 cloud-full 真实
+              # 故障:local-lite 靠 colima 自动转发 80/443 不需要端口,
+              # cloud-full 的 ingress-nginx 是 NodePort 32460,不带端口会
+              # 404(完整根因见 platform/apps/keycloak.yaml 的 KC_HOSTNAME
+              # 说明)。
+              root_url: http://grafana.local-lite.test:32460/
             auth.generic_oauth:
               enabled: true
               name: Keycloak
@@ -170,7 +174,7 @@ spec:
               # platform/apps/keycloak.yaml),不再需要额外的端口转发;
               # token_url/api_url 是 Grafana 后端自己在集群内部发起的请求,
               # 走 service 的集群内域名,两者不一样是正常的,不是配置错了。
-              auth_url: http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/auth
+              auth_url: http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth
               token_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/token
               api_url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/userinfo
               # 2026-08-11 起改成按 Keycloak group 映射角色(见 ADR-028、
