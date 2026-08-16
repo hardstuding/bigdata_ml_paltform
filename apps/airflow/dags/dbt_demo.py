@@ -137,7 +137,13 @@ with DAG(
             # ConfigMap 同步更新——这个项目目前没有类似
             # scripts/sync-app-configmaps.py 的机制帮 Airflow DAG 源文件和
             # ConfigMap 保持一致,是已知差距,见 docs/BACKLOG.md)。
-            "timeout -k 10 300 pip install --quiet dbt-core==1.10.23 dbt-trino==1.10.3 boto3==1.43.72 "
+            # 2026-08-16 云端部署时实测:pypi.org 直连给 dbt-core 这个大
+            # 依赖树反复卡到 300 秒超时(两次,一次挂了 8 分钟以上才手动
+            # 中止),换成阿里云的公开 PyPI 镜像后同样的安装 25 秒完成——
+            # 不是包太重,是这条网络路径本身的问题。这个镜像是公开、
+            # 全球可访问的(不是仅限内网),local-lite 用应该也没坏处,
+            # 不用按环境区分。
+            "timeout -k 10 300 pip install --quiet -i https://mirrors.aliyun.com/pypi/simple/ dbt-core==1.10.23 dbt-trino==1.10.3 boto3==1.43.72 "
             "&& cd /project "
             "&& dbt build --profiles-dir . "
             "&& python3 -c \""
