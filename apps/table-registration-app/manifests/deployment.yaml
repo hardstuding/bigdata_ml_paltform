@@ -66,7 +66,13 @@ spec:
                 export HTTPS_PROXY="http://192.168.5.2:1087"
                 export NO_PROXY="localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
               fi
-              timeout -k 10 120 pip install --quiet --timeout 30 flask==3.1.3 requests==2.34.2 trino==0.338.0
+              # 2026-08-16 云端部署时观测到:trino 这个依赖比 flask/requests
+              # 多拉几个包(orjson/lz4/zstandard 等带 wheel 编译产物,体积
+              # 更大),PyPI 下载耗时波动明显——单独实测过一次 1-2 分钟内
+              # 完成,也有一次跟一堆并发的镜像拉取任务抢带宽时卡了 10+
+              # 分钟。120 秒在这台机器网络繁忙时余量不够,调到 240 秒,
+              # 不改变"这本来就该正常完成"这个前提。
+              timeout -k 10 240 pip install --quiet --timeout 60 flask==3.1.3 requests==2.34.2 trino==0.338.0
               python3 /src/app.py
           env:
             - name: DB_PATH
