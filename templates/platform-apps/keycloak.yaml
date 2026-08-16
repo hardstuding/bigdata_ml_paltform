@@ -61,7 +61,7 @@ spec:
           # local-lite 上验证登录流程,这两行要临时改回
           # KC_HOSTNAME_STRICT=false 那个版本。
           - name: KC_HOSTNAME
-            value: "http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth"
+            value: "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth"
           - name: KC_HOSTNAME_STRICT
             value: "true"
           # 加了固定 KC_HOSTNAME 之后实测抓到第二个问题:argo-workflows/

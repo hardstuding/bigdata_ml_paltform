@@ -171,10 +171,10 @@ configs:
     # 自动转发 80/443 不需要端口,cloud-full 的 ingress-nginx 是 NodePort
     # 32460,不带端口登录跳转回来会 404(完整根因见
     # platform/apps/keycloak.yaml 里 KC_HOSTNAME 那段说明)。
-    url: http://argocd.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}
+    url: {{EXTERNAL_SCHEME}}://argocd.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}
     oidc.config: |
       name: Keycloak
-      issuer: http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform
+      issuer: {{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform
       clientID: argocd
       clientSecret: $oidc.keycloak.clientSecret
       requestedScopes: ["openid", "profile", "email"]

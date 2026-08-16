@@ -104,11 +104,11 @@ spec:
           # 之前"配了这几个 url 就不需要 discovery"这句话是没验证过的
           # 假设,是错的。显式关掉 `oidc.discovery=false` 才是真的跳过
           # 这次启动时的探测。
-          - http-server.authentication.oauth2.issuer=http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform
-          - http-server.authentication.oauth2.auth-url=http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth
-          - http-server.authentication.oauth2.token-url=http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/token
-          - http-server.authentication.oauth2.jwks-url=http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/certs
-          - http-server.authentication.oauth2.userinfo-url=http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/userinfo
+          - http-server.authentication.oauth2.issuer={{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform
+          - http-server.authentication.oauth2.auth-url={{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth
+          - http-server.authentication.oauth2.token-url={{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/token
+          - http-server.authentication.oauth2.jwks-url={{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/certs
+          - http-server.authentication.oauth2.userinfo-url={{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/userinfo
           - http-server.authentication.oauth2.oidc.discovery=false
           - http-server.authentication.oauth2.client-id=trino
           - http-server.authentication.oauth2.client-secret=${ENV:OAUTH2_CLIENT_SECRET}

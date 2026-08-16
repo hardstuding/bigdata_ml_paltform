@@ -1,3 +1,70 @@
+## 2026-08-16 深夜(接续):Superset OAuth 真正端到端验证 + 环境配置渲染机制上线
+
+承接上一节末尾"argo-workflows/trino/superset...这次没有逐个验证到底,
+如实记录不是回避"——这次把 Superset 那一半补上了,而且过程中真发现了
+一个新的、和端口/discovery 完全无关的独立 bug(证明"没验证就不能算数"
+这条要求是对的,不是走过场)。
+
+**1. Superset OAuth 登录:用 curl+cookie jar 走完整流程,第一次跑到最后
+一步真的失败了**——GET `/login/keycloak` → Keycloak 登录页 → 提交
+`admin`/`TestLogin2026Aug` → 拿到授权码回调 `/oauth-authorized/keycloak`
+→ **卡在这一步,被重定向回 `/login/`**,不是预期的落地页。查
+`kubectl logs` 抓到真实报错:
+
+```
+Error returning OAuth user info: Invalid URL 'openid-connect/userinfo':
+No scheme supplied. Perhaps you meant https://openid-connect/userinfo?
+```
+
+根因(读了 flask_appbuilder 的源码确认,不是猜的):`get_oauth_user_info`
+对 provider name 严格等于 `"keycloak"` 有一段写死的分支,不走
+`server_metadata_url` discovery 出来的 `userinfo_endpoint`,而是自己拼
+`oauth_remotes["keycloak"].get("openid-connect/userinfo")`——这是相对
+路径,需要 `remote_app.api_base_url` 做前缀,但我们的 OAUTH_PROVIDERS
+配置只给了 `server_metadata_url`,漏了 `api_base_url`。这是一个和
+之前 4 层端口/discovery 故障完全独立的新 bug,是**这次真正跑通登录
+流程才暴露出来的**,只看配置/只测到拿到授权码这一步不会发现。
+
+修复:补上 `api_base_url`(内部地址、不带端口,和 server_metadata_url
+同一类服务端到服务端调用)。**重新验证,这次真正跑通**:最终页面
+`data-bootstrap` 里拿到 `{"user": {"username": "admin", ...,
+"isAnonymous": false, "loginCount": 1, "roles": {"Admin": [...]}}}`,
+落地 `/superset/welcome/`,是一个真实、完整的已认证会话,不是重定向链
+断在中间。提交见 `apps/definitions/superset.yaml` 相关注释。
+
+**2. 顺带发现并处理了一类 ArgoCD 稳定性问题**(和上面的 SSO bug 无关,
+是部署过程中撞上的):至少两次遇到 Application 的 `.status.operationState`
+卡在一个**过期的**同步操作快照上——即使 Application 的 `.spec`/
+`comparedTo` 已经反映了最新的 git 提交,这个卡住的旧操作仍然在不断
+retry,每次 retry 都用它自己缓存的旧 source 把已经修好的 Deployment
+改回旧版本(实测抓到过一次:我刚把 Superset 的 startupProbe 改到 90 次
+阈值、新 pod 也已经 Ready 了,几分钟后又被这个卡住的旧操作悄悄改回
+60 次阈值,又开始重复此前"pip 装到一半被强杀"的循环)。**处理方式**:
+`kubectl patch application <name> -n argocd --type merge -p
+'{"status":{"operationState":{"phase":"Terminating"}}}'` 终止卡住的
+旧操作,再手动触发一次新的 `.operation.sync`(不能只指望 selfHeal 会
+自动重新触发,实测等了将近一分钟没有自动发生)。这不是这次改动引入的
+新问题,是 ArgoCD 本身已知的一类 flaky 行为(和 kube-prometheus-stack
+Application 长期卡 Unknown 是同一大类),记在这里方便以后遇到同样症状
+时能认出来,不是每次都要重新排查一遍。
+
+**3. 环境配置渲染机制上线**,直接回应 zhenghe 提出的架构要求
+("local、云、生产...通过一份配置就可以拉起...你完全没做好呀")——
+新增 `environments/<env>/config.yaml`(domain_suffix/http_port_suffix/
+https_port_suffix)+ `templates/**`(9 个受这些值影响的文件的模板,
+`{{DOMAIN_SUFFIX}}` 等占位符)+ `scripts/render-environment-config.py
+<env> [--check]`(渲染进真实部署文件,`--check` 防漂移,已接进 CI)。
+对 cloud-full 跑了真实渲染验证:`git diff` 只多出各文件头部的"自动
+生成"说明注释(0 处功能性差异),证明渲染结果和当前已验证工作的部署
+文件语义完全一致。**已知遗留限制**:`argocd-values.yaml` 的
+`global.hostAliases` 段落(local-lite 专用 workaround)简单字符串替换
+表达不了"条件删除",切到其它环境时这段还在,需要人工确认——详见
+`docs/BACKLOG.md` 对应条目。
+
+**仍然没有逐个验证到底的**:`argo-workflows` 的 SSO 登录(用的也是
+discovery 自动模式,和 Trino/Superset 是同一类潜在风险,但目前没有
+真实登录触发过,懒验证)——如实记录,不是回避。
+
 ## 2026-08-16 深夜:cloud-full 上 SSO 登录 404/502 四层真实故障链(用户实测发现)
 
 用户打开 `portal.local-lite.test:32460` 报 404,连续深挖出 4 层叠在一起

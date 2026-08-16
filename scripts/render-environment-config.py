@@ -12,9 +12,16 @@
   templates/platform-bootstrap/X.yaml    ->  platform/bootstrap/X.yaml
   templates/scripts/X.sh                 ->  scripts/X.sh
 
-占位符是 `{{DOMAIN_SUFFIX}}`/`{{HTTP_PORT_SUFFIX}}`/`{{HTTPS_PORT_SUFFIX}}`,
-简单字符串替换,不是完整模板引擎(这个项目的规模不需要 Jinja2 那一整套,
-三个占位符字符串替换就够用,minimal 原则)。
+占位符是 `{{DOMAIN_SUFFIX}}`/`{{HTTP_PORT_SUFFIX}}`/`{{HTTPS_PORT_SUFFIX}}`/
+`{{EXTERNAL_SCHEME}}`,简单字符串替换,不是完整模板引擎(这个项目的规模
+不需要 Jinja2 那一整套,几个占位符字符串替换就够用,minimal 原则)。
+
+`{{EXTERNAL_SCHEME}}` 只用在"浏览器/外部客户端会直接访问"的地址上
+(域名本身,不管带不带端口后缀)——local-lite/cloud-full 是 `http`
+(自签证书内部不受信任,ingress 层就没强制走 TLS),prod 应该是 `https`
+(真实 CA 证书)。`.svc.cluster.local` 这种纯集群内部 Service DNS 不用
+这个占位符,永远写死 `http://`——这类调用根本不经过 ingress,和外部
+访问用的是不是 TLS 无关。
 
 用法:
   python3 scripts/render-environment-config.py cloud-full           # 渲染,写回文件
@@ -51,6 +58,7 @@ def render_text(text: str, config: dict) -> str:
         text.replace("{{DOMAIN_SUFFIX}}", config["domain_suffix"])
         .replace("{{HTTP_PORT_SUFFIX}}", config["http_port_suffix"])
         .replace("{{HTTPS_PORT_SUFFIX}}", config["https_port_suffix"])
+        .replace("{{EXTERNAL_SCHEME}}", config["external_scheme"])
     )
 
 

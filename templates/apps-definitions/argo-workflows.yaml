@@ -51,7 +51,7 @@ spec:
             - sso
           sso:
             enabled: true
-            issuer: "http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform"
+            issuer: "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform"
             clientId:
               name: argo-workflows-oidc-secret
               key: client-id
@@ -65,7 +65,7 @@ spec:
             # 改端口——服务端自己发起的 discovery 请求走集群内部路径,
             # Keycloak 的 KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true 会让它拿到
             # 的 token_endpoint 也不带端口,跟这里保持一致能连通。
-            redirectUrl: "http://argo-workflows.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth2/callback"
+            redirectUrl: "{{EXTERNAL_SCHEME}}://argo-workflows.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth2/callback"
             scopes:
               - openid
               - profile

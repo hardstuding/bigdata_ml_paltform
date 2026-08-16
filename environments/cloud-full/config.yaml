@@ -13,3 +13,4 @@
 domain_suffix: local-lite.test
 http_port_suffix: ":32460"
 https_port_suffix: ":32535"
+external_scheme: http

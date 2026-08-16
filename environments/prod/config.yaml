@@ -9,3 +9,4 @@
 domain_suffix: your-real-domain.example.com
 http_port_suffix: ""
 https_port_suffix: ""
+external_scheme: https

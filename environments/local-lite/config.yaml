@@ -6,3 +6,4 @@
 domain_suffix: local-lite.test
 http_port_suffix: ""
 https_port_suffix: ""
+external_scheme: http

@@ -38,13 +38,13 @@ spec:
             # ②修完之后 Keycloak 的 issuer 带了端口,自动 discovery 校验
             # 不通过 + 集群内部又连不上带端口的外部地址,改成关掉自动
             # discovery,手动分开配置)。
-            oidc_issuer_url = "http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform"
+            oidc_issuer_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform"
             skip_oidc_discovery = true
-            login_url = "http://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth"
-            redeem_url = "http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/token"
-            oidc_jwks_url = "http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/certs"
-            profile_url = "http://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/userinfo"
-            redirect_url = "http://permission-request.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth2/callback"
+            login_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/userinfo"
+            redirect_url = "{{EXTERNAL_SCHEME}}://permission-request.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth2/callback"
             upstreams = [ "http://permission-request-app.permission-request-app.svc.cluster.local:8080/" ]
             email_domains = [ "*" ]
             cookie_secure = false
