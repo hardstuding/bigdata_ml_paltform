@@ -108,7 +108,11 @@ else
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://mirrors.aliyun.com/docker-ce/linux/ubuntu ${VERSION_CODENAME} stable" \
     | tee /etc/apt/sources.list.d/docker.list > /dev/null
   apt-get update -qq
-  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  # socat 一起装:2026-08-16 实测 `kubectl port-forward` 在这台机器上
+  # 反复 "unable to do port forwarding: socat not found"——k3s/kubelet
+  # 的端口转发实现依赖节点上有这个二进制,系统默认不带,不装的话任何
+  # port-forward 调试都用不了(SSH 隧道本身是通的,容易误判成网络问题)。
+  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin socat
 
   mkdir -p /data/docker /etc/docker
   cat > /etc/docker/daemon.json <<'EOF'
