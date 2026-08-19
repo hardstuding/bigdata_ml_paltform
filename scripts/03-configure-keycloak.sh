@@ -340,6 +340,53 @@ else
   echo "已创建 client argo-workflows,密钥写入 argo-workflows/argo-workflows-oidc-secret"
 fi
 
+echo "==> groups 这个 client scope(真实故障,2026-08-19 发现):没有任何一个
+# client 有 groups 这个 claim mapper,realm 也没有配 defaultDefaultClientScopes。
+# 之前 Grafana(ADR-028)/JupyterHub(ADR-025)自称"按 group 收紧已验证"是不
+# 准确的——用真实 curl 端到端登录测试(给 MLflow 补 allowed_groups 之后)才
+# 发现拿到的 id_token 里根本没有 groups 这个字段(用 python3 解 JWT payload
+# 直接确认过,不是猜的),Grafana/JupyterHub 的 allowed_groups/
+# role_attribute_path 大概率从来没有真的按组生效过,只是没人拿真实非
+# platform-team 账号测过登录,没暴露出来。
+#
+# 建一个 realm 级别的 "groups" client scope,挂
+# oidc-group-membership-mapper(claim 名 "groups",群组路径不带前导 /),
+# 设成所有相关 client 的默认 scope(不用每个 app 自己在 scope 参数里额外
+# 请求 "groups",和这几个 client 已经在用的 allowed_groups/
+# role_attribute_path 配置本身不用改)。"
+if kcadm get client-scopes -r platform -q name=groups --fields id 2>/dev/null | grep -q '"id"'; then
+  echo "client scope groups 已存在,跳过创建"
+else
+  kcadm create client-scopes -r platform \
+    -s name=groups -s protocol=openid-connect \
+    -s 'attributes={"include.in.token.scope":"true","display.on.consent.screen":"false"}'
+  echo "已创建 client scope: groups"
+fi
+groups_scope_id=$(kcadm get client-scopes -r platform -q name=groups --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')
+existing_mapper=$(kcadm get "client-scopes/${groups_scope_id}/protocol-mappers/models" -r platform -q name=groups --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+if [ -z "$existing_mapper" ]; then
+  kcadm create "client-scopes/${groups_scope_id}/protocol-mappers/models" -r platform \
+    -s name=groups -s protocol=openid-connect -s protocolMapper=oidc-group-membership-mapper \
+    -s 'config={"full.path":"false","id.token.claim":"true","access.token.claim":"true","userinfo.token.claim":"true","claim.name":"groups"}'
+  echo "已给 groups scope 挂上 group-membership mapper"
+else
+  echo "groups scope 的 mapper 已存在,跳过"
+fi
+
+# 挂到每一个用 allowed_groups/role_attribute_path 做组权限收拢的 client 上
+# (不是全部 12 个 client 都需要——不用 groups 的 client 加了也没坏处,但
+# 只列真正用到的,避免让读代码的人以为每个 client 都依赖这个)。
+for gc in grafana jupyterhub mlflow; do
+  gcid=$(kcadm get clients -r platform -q clientId="$gc" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+  if [ -z "$gcid" ]; then
+    echo "client ${gc} 还不存在,跳过挂 groups scope"
+    continue
+  fi
+  # PUT 到 default-client-scopes/{scopeId} 是幂等的(已经挂了再挂一次不报错)
+  kcadm update "clients/${gcid}/default-client-scopes/${groups_scope_id}" -r platform
+  echo "已给 client ${gc} 挂上 groups 默认 scope"
+done
+
 echo "==> 初始登录用户: ${INITIAL_USER}"
 if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/null | grep -q '"id"'; then
   echo "已存在,跳过(不会重置密码)"
