@@ -47,8 +47,19 @@
        发现**——issuer 校验失败(discovery 文档拿到的 issuer 字段带
        端口,发起请求用的地址不带),读了官方源码确认要用
        `sso.issuerAlias`(对应 `oidc.InsecureIssuerURLContext`)才能
-       两边都满足。现在 SSO 登录本身已验证通过,**但登录后调 API 还是
-       403**(RBAC 层,已单独立项跟踪)
+       两边都满足。**2026-08-19 晚些时候补完:登录后调 API 403 的
+       RBAC 层也修好了**——`server.sso.rbac.enabled: true` 本身不建
+       任何授权资源,读官方源码(`server/auth/gatekeeper.go`)确认
+       还要手动建 ServiceAccount(挂 `workflows.argoproj.io/rbac-rule`
+       注解匹配 `platform-team` 组)+ 长期 `kubernetes.io/service-
+       account-token` 类型 Secret(K8s 1.24+ 不自动建)+ Role/
+       RoleBinding,四个资源都加进了
+       `templates/apps-definitions/argo-workflows.yaml` 的
+       `extraObjects`。另外发现 argo-workflows 这个 client 当时没挂
+       上 groups client scope(第 8 条修的那批,第一版列表也漏了它),
+       一并补进 `scripts/03-configure-keycloak.sh`。真实 curl+cookie-jar
+       验证过:登录 → `GET /api/v1/workflows/argo-workflows` 200 →
+       建一个真实 Workflow → 能查到 → 删除清理。
     8. **Keycloak realm 从建立起就没有任何 client 配过 groups claim
        mapper**——直接解码拿到的 id_token 确认过,admin 明明在
        platform-team 组里,token 里完全没有 groups 字段。这意味着
@@ -78,7 +89,8 @@ Secret 永远补不上、groups scope 从建realm起就没配过)本可以在"�
 配置漂移"的怀疑,而不是假设"Pod Running 就是好的"。
 
 **其它排队里的事**(不阻塞,按 `docs/BACKLOG.md` P1.5/1.6/1.7 的顺序):
-Argo Workflows RBAC(已单独立项)、Kafka 部署、算法链路端到端重新验证。
+Kafka 部署、算法链路端到端重新验证。Argo Workflows RBAC 已于 2026-08-19
+修完并用真实 curl+cookie-jar 登录测试验证过,不再是排队项(见上面第 7 条)。
 
 ## 正在运行的后台任务
 
@@ -93,9 +105,6 @@ Argo Workflows RBAC(已单独立项)、Kafka 部署、算法链路端到端重�
 
 ## 已知的、还没解决的事(不要重新排查一遍)
 
-- **Argo Workflows 登录后调 API 返回 403**——SSO 本身已修好并验证(真实
-  Bearer token、落地 SPA),这是 RBAC 授权层的独立问题,已单独立项跟踪
-  (`server.sso.rbac` 需要的 K8s RBAC 绑定没配)。
 - **idle-shutdown-watchdog 的开机自愈**(2026-08-19 修复,这个脚本本身
   按既定政策不进 git):停机几天后重新开机,看门狗第一次检查会用几天前
   的旧时间戳误判"已空闲超过阈值",机器刚开机 2-3 分钟就被自己关掉。
