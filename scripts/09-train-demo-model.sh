@@ -36,14 +36,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-kubectl port-forward -n mlflow svc/mlflow-mlflow 5000:5000 >> "$LOG_FILE" 2>&1 &
+# 2026-08-19 真实踩坑:本机(macOS)5000 端口默认被系统自带的 AirPlay
+# 接收器(ControlCenter 进程)占用,`kubectl port-forward` 绑定本地
+# 5000 端口会静默失败,后续请求全部打到 AirPlay 的 HTTP 接口上,返回
+# 403(不是超时/连接拒绝这种明显的失败信号,报错看着像是 MLflow 自己
+# 拒绝了请求,容易误判成权限问题——本地转发到 15500,不改集群内部
+# 端口(还是 5000)。
+kubectl port-forward -n mlflow svc/mlflow-mlflow 15500:5000 >> "$LOG_FILE" 2>&1 &
 MLFLOW_PF_PID=$!
 kubectl port-forward -n minio svc/minio 9000:9000 >> "$LOG_FILE" 2>&1 &
 MINIO_PF_PID=$!
 
 echo "等 port-forward 就绪..."
 for i in $(seq 1 15); do
-  if curl -s -o /dev/null "http://localhost:5000/health" && curl -s -o /dev/null "http://localhost:9000/minio/health/live"; then
+  if curl -s -o /dev/null "http://localhost:15500/health" && curl -s -o /dev/null "http://localhost:9000/minio/health/live"; then
     break
   fi
   sleep 1
@@ -60,7 +66,7 @@ python3 scripts/train_demo_model.py 2>&1 | tee -a "$LOG_FILE"
 
 echo
 echo "验证:查 Model Registry 确认真的注册上了(不是只有客户端打印成功)"
-curl -s "http://localhost:5000/api/2.0/mlflow/registered-models/get?name=demo-rf-classifier" | python3 -m json.tool
+curl -s "http://localhost:15500/api/2.0/mlflow/registered-models/get?name=demo-rf-classifier" | python3 -m json.tool
 
 echo
 echo "完成。详细日志: ${LOG_FILE}"

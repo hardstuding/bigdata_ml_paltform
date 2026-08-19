@@ -19,7 +19,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 
-mlflow.set_tracking_uri("http://localhost:5000")
+mlflow.set_tracking_uri("http://localhost:15500")  # 见 scripts/09-train-demo-model.sh 里 5000 端口和 macOS AirPlay 冲突的说明
 mlflow.set_experiment("demo-classification")
 
 X, y = make_classification(n_samples=2000, n_features=20, n_informative=10, random_state=42)
