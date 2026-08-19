@@ -18,6 +18,12 @@
 # 模式,OpenMetadata 后端自己签发的会话 JWT 也要用同一套 JWKS 校验,两段
 # 配置都不能省,见 open-metadata/openmetadata-helm-charts#316 这个已知的
 # 社区坑(publicKeys 漏配会报 SigningKeyNotFoundException)。
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 templates/apps-definitions/openmetadata.yaml +
+# environments/<env>/config.yaml——改动请改模板文件,不要直接改这份
+# 生成结果(下次渲染会被覆盖)。见 environments/cloud-full/config.yaml
+# 顶部说明背景。
+#
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -85,9 +91,9 @@ spec:
               publicKeys:
                 - "http://openmetadata:8585/api/v1/system/config/jwks"
                 - "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
-              authority: "http://keycloak.local-lite.test/auth/realms/platform"
+              authority: "http://keycloak.local-lite.test:32460/auth/realms/platform"
               clientId: "openmetadata"
-              callbackUrl: "http://openmetadata.local-lite.test/callback"
+              callbackUrl: "http://openmetadata.local-lite.test:32460/callback"
               jwtPrincipalClaims:
                 - "email"
                 - "preferred_username"
@@ -103,8 +109,8 @@ spec:
                   secretKey: clientSecret
                 scope: "openid email profile"
                 discoveryUri: "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration"
-                callbackUrl: "http://openmetadata.local-lite.test/callback"
-                serverUrl: "http://openmetadata.local-lite.test"
+                callbackUrl: "http://openmetadata.local-lite.test:32460/callback"
+                serverUrl: "http://openmetadata.local-lite.test:32460"
         extraVolumes:
           - name: search-truststore
             secret:
