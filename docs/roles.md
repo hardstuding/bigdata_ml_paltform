@@ -139,12 +139,13 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 灰度 / A-B | ❌ | KServe 原生 canary 没配置(设计判断见 architecture.md) |
 | 模型审批 / 回滚 | ❌ | 未开始(C 线) |
 
-**结论:**链路呈现"**两头有、中间空**"的形态——最末端的 KServe 部署好了,
-最前端什么都没有。算法工程师今天连第一步(打开一个 notebook)都做不到。
 **结论:**JupyterHub + MLflow 已部署验证,这个角色从"连第一步都做不到"
-变成"能开工"。特征工程(Feast)和训练执行(Argo Workflows)依赖的
-Spark Operator 现在也已部署,理论上应该打通了,但这条链路(notebook →
-特征 → 训练 → MLflow 记录)还没有重新跑一次真实的端到端验证。
+变成"能开工"。**"训练 → MLflow 记录"这一段已经真实验证过**
+(2026-08-19,`scripts/09-train-demo-model.sh`:真实训练一个 sklearn
+模型、accuracy 0.855、注册进 Model Registry、API 查询确认
+status=READY)。但"notebook 里触发 → Feast 特征 → Argo Workflows 编排
+训练"这几段之间的连通还没有重新跑一次真实验证——组件都在,链路本身
+没有整个连起来测过。
 
 ---
 
@@ -183,8 +184,10 @@ Spark Operator 现在也已部署,理论上应该打通了,但这条链路(noteb
      暴露的 bug(client-exists-但-Secret-缺失、groups scope 从来没配过、
      Service 名字写错)本可以在"改配置就重新拉起"这套机制下更早被结构性
      测试捕获,现在只能靠"当天有没有人手动测登录"这种运气发现。
-   - **跑一次真实的算法链路端到端验证**(notebook → Feast 特征 →
-     Argo Workflows 训练 → MLflow 记录)——组件都部署验证过了,但这条
-     完整链路本身还没有重新连起来跑一次。
+   - **Kafka 已部署验证**(2026-08-19,真实建 topic/生产/消费一条消息),
+     大数据开发角色补齐最后一块,但还没接进真实数据管道。
+   - **算法链路"训练→MLflow"这一段已验证**(2026-08-19,真实训练模型+
+     注册进 Model Registry),**"notebook→Feast→Argo Workflows 触发训练"
+     这几段还没有重新连起来跑一次**。
 3. **更新纪律:**任何一次让某个角色多/少一项能力的改动,必须同步改这份
    表。这份表过时了,项目就又回到"不知道自己做到哪了"的状态。

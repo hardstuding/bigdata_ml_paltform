@@ -79,7 +79,7 @@
 **ADR-057 第三批:补上环境抽象的"组件选择"层——现在优先级比之前判断的
 更高,不是更低。**
 
-这次拉起 P1.2/1.3/1.4 全靠人工 `git mv` + 逐个手动排查 Keycloak
+这次拉起 P1.2/1.3/1.4/1.6 全靠人工 `git mv` + 逐个手动排查 Keycloak
 client/Secret/scope 缺口完成的。过程中暴露的好几个 bug(client 已存在但
 Secret 永远补不上、groups scope 从建realm起就没配过)本可以在"改配置就
 重新拉起"这套机制的约束下被更早、更结构性地测试出来,现在只能靠"当天
@@ -88,9 +88,32 @@ Secret 永远补不上、groups scope 从建realm起就没配过)本可以在"�
 做完这一批,以后再拉起/重建任何组件,应该默认带着"这次会不会又是同一类
 配置漂移"的怀疑,而不是假设"Pod Running 就是好的"。
 
-**其它排队里的事**(不阻塞,按 `docs/BACKLOG.md` P1.5/1.6/1.7 的顺序):
-Kafka 部署、算法链路端到端重新验证。Argo Workflows RBAC 已于 2026-08-19
-修完并用真实 curl+cookie-jar 登录测试验证过,不再是排队项(见上面第 7 条)。
+**2026-08-19 又补完的两项**:
+- **Kafka**(P1.6):部署 + 真实建 topic/生产/消费一条消息验证通过。
+  大数据开发角色最后一块拼图补上,但还没接进真实数据管道(没有真实
+  Producer/Consumer 应用)。
+- **算法链路"训练 → MLflow"这一段真实跑通**:`scripts/09-train-demo-model.sh`
+  重新验证,真实训练一个 sklearn 模型(accuracy 0.855)、注册进 Model
+  Registry、API 查询确认 status=READY。过程中顺带修了两个真实 bug:
+  1. 脚本本地端口 5000 和 macOS 自带的 AirPlay 接收器冲突,
+     `kubectl port-forward` 静默绑定失败,所有请求被 AirPlay 的 HTTP
+     接口拦下返回 403(不是超时,容易误判成权限问题)——改用本地 15500。
+  2. **更重要**:早些时候修 MLflow OOMKill 调大内存限制那次改动,
+     部署时"看着"成功了(ArgoCD Synced/Healthy),实际上被 mlflow
+     命名空间的 ResourceQuota(3Gi)卡住——RollingUpdate 需要新旧 pod
+     同时占配额,超了配额新 ReplicaSet 一直 "exceeded quota" 起不来,
+     旧的、没修好的 pod 继续服务流量,**卡了一个多小时没人发现**。
+     手动 scale 旧 ReplicaSet 到 0 腾出配额才推进,并把 mlflow 的部署
+     策略改成 `Recreate`,从根上避免这类"改动看着生效了、实际卡住"的
+     坑再犯——**这是这次会话最值得记住的一类教训:低配额命名空间里,
+     哪怕只改 resources 这种"看起来无害"的字段,也可能让滚动更新
+     悄悄卡死,ArgoCD 的 Synced/Healthy 不能当作"真的生效了"的证据,
+     要对照 ReplicaSet/Pod 的实际状态**。
+  notebook → Feast 特征 → Argo Workflows 训练触发这几段还没有重新连起来
+  验证,见下面"已知的事"。
+
+**排在后面的**(按 `docs/BACKLOG.md` 优先级):算法链路剩余段落
+(notebook→Feast→Argo Workflows 触发训练)的端到端连通验证。
 
 ## 正在运行的后台任务
 
@@ -119,10 +142,19 @@ Kafka 部署、算法链路端到端重新验证。Argo Workflows RBAC 已于 20
 - **cloud-full 上 Keycloak `platform` realm 的 `admin` 密码**是
   `TestLogin2026Aug`,和 `secrets/generated-credentials.txt`(那份是
   local-lite 的)不是一回事。
-- **算法/大数据链路的组件级验证 ≠ 端到端链路验证**:JupyterHub/MLflow/
-  Spark Operator/Feast/Argo Workflows 都已部署验证,但"notebook → Feast
-  特征 → Argo Workflows 训练 → MLflow 记录"这条完整链路本身还没有重新
-  连起来跑一次。
+- **算法链路"训练 → MLflow"这一段已验证,前面几段还没有**:JupyterHub/
+  MLflow/Spark Operator/Feast/Argo Workflows/Kafka 都已部署验证,
+  `scripts/09-train-demo-model.sh` 证明了"训练脚本 → MLflow 记录实验 →
+  Model Registry 注册"这段真实可用,但"notebook 里触发 → Feast 特征
+  →  Argo Workflows 编排训练"这几段之间的连通还没有重新跑一次。
+- **低配额命名空间改 resources 字段要格外小心**:mlflow 命名空间的
+  ResourceQuota 只有 3Gi,RollingUpdate 需要新旧 pod 同时占配额,改大
+  resources 时如果新旧加起来超配额,新 ReplicaSet 会静默卡在
+  "exceeded quota",ArgoCD 显示 Synced/Healthy 但实际流量还在旧 pod
+  上——这次真实卡了一个多小时才发现。mlflow 已经改成 `Recreate` 策略
+  规避,其它低配额命名空间(检查 `platform/resource-quotas/manifests/
+  quotas.yaml`)如果也要改 resources,先算一下新旧加起来会不会超配额,
+  或者一并考虑改成 Recreate。
 
 ## 结束一段工作前必须确认(照着过一遍,不要跳)
 
