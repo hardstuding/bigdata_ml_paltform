@@ -177,6 +177,13 @@ echo "==> superset client"
 # "keycloak",不能改一边不改另一边。
 create_client_if_absent superset '["http://superset.local-lite.test/oauth-authorized/keycloak","http://superset.local-lite.test:32460/oauth-authorized/keycloak"]' superset superset-oidc-secret clientSecret
 
+echo "==> airflow client"
+# 2026-08-19 新增,zhenghe 反馈 Airflow 一直没接 SSO。Airflow 3.x 默认
+# auth_manager 还是 FabAuthManager(和 Superset 同一个 Flask-AppBuilder),
+# 回调路径同样是 /oauth-authorized/<provider name>,provider name 对应
+# apps/definitions/airflow.yaml 里 apiServerConfig 配的 "keycloak"。
+create_client_if_absent airflow '["http://airflow.local-lite.test/oauth-authorized/keycloak","http://airflow.local-lite.test:32460/oauth-authorized/keycloak"]' airflow airflow-oidc-secret clientSecret
+
 echo "==> openmetadata client"
 # 不能直接用 create_client_if_absent——OpenMetadata chart 的
 # oidcConfiguration.clientId 也是 secretRef(不像其他组件那样直接在 values

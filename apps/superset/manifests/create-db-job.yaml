@@ -54,3 +54,14 @@ spec:
                 || psql -h postgres -U postgres -c "CREATE USER superset WITH PASSWORD '${SUPERSET_DB_PASSWORD}';"
               psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='superset'" | grep -q 1 \
                 || psql -h postgres -U postgres -c "CREATE DATABASE superset OWNER superset;"
+              # 2026-08-19 新增:superset 官方示例数据(load_examples)默认走
+              # 一个单独的"examples" SQLAlchemy 连接,chart 不配的话落到 pod
+              # 内本地 SQLite 文件(/app/superset_home/examples.db,没有挂
+              # 任何持久化卷),pod 一重启就清空——仪表盘定义本身在下面这个
+              # superset 库里(持久),但引用的数据表消失,页面报
+              # "no such table"。和 troubleshooting.md 里 Keycloak H2 内存库
+              # 那次是同一类教训:看着 Healthy 不代表数据还在。改成用这同一个
+              # Postgres 实例再建一个库,复用同一个 superset 账号,不用建新
+              # Secret。
+              psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='superset_examples'" | grep -q 1 \
+                || psql -h postgres -U postgres -c "CREATE DATABASE superset_examples OWNER superset;"

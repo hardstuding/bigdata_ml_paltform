@@ -30,6 +30,18 @@ spec:
         env:
           - name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
             value: "False"
+        # 2026-08-19:接 Keycloak SSO(见下面 apiServer.apiServerConfig)要用
+        # 到 OAUTH2_CLIENT_SECRET,顶层 `env:` 这个键的 schema 只认字面量
+        # value(不接受 valueFrom,实测 `scripts/validate-charts.py` 报错
+        # 才发现),chart 单独留了 `extraEnv`(纯模板字符串,不做 schema
+        # 校验)给这类需要引用 Secret 的场景用,和 superset chart 的
+        # extraEnvRaw 是同一个用途。
+        extraEnv: |
+          - name: OAUTH2_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: airflow-oidc-secret
+                key: clientSecret
         postgresql:
           enabled: false
         redis:
@@ -79,6 +91,36 @@ spec:
               memory: 512Mi
             limits:
               memory: 1024Mi
+          # 2026-08-19:接 Keycloak SSO——Airflow 3.x 默认的 auth_manager 还是
+          # FabAuthManager(和 Superset 底层同一个 Flask-AppBuilder),所以走
+          # 的是同一套 webserver_config.py / AUTH_TYPE = AUTH_OAUTH 机制,不是
+          # 什么新东西,直接照抄 apps/definitions/superset.yaml 里 enable_oauth
+          # 那段的结构。这个键在 3.x chart 里叫 apiServerConfig(不是老版本的
+          # webserver.webserverConfig,那个键在这个 chart 版本渲染不出实际
+          # 生效的资源,踩过一次同名字段改名的坑,见上面 apiServer 那段大注释
+          # ——这次直接用官方 values.yaml 里写明的 apiServer.apiServerConfig)。
+          apiServerConfig: |
+            import os
+            from flask_appbuilder.security.manager import AUTH_OAUTH
+            AUTH_TYPE = AUTH_OAUTH
+            OAUTH_PROVIDERS = [
+                {
+                    "name": "keycloak",
+                    "icon": "fa-key",
+                    "token_key": "access_token",
+                    "remote_app": {
+                        "client_id": "airflow",
+                        "client_secret": os.environ.get("OAUTH2_CLIENT_SECRET"),
+                        "client_kwargs": {"scope": "openid profile email"},
+                        "api_base_url": "http://keycloak.local-lite.test/auth/realms/platform/protocol/",
+                        "server_metadata_url": "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration",
+                    },
+                }
+            ]
+            AUTH_ROLE_ADMIN = "Admin"
+            AUTH_ROLE_PUBLIC = "Public"
+            AUTH_USER_REGISTRATION = True
+            AUTH_USER_REGISTRATION_ROLE = "Admin"
         scheduler:
           replicas: 1
           resources:

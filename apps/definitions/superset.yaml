@@ -105,6 +105,17 @@ spec:
             AUTH_ROLE_PUBLIC = "Public"
             AUTH_USER_REGISTRATION = True
             AUTH_USER_REGISTRATION_ROLE = "Admin"
+          examples_db: |
+            # 2026-08-19:load_examples 默认的 examples 连接不配就落到 pod
+            # 本地 SQLite(见 apps/superset/manifests/create-db-job.yaml 的
+            # 说明),没有持久化,pod 一重启示例数据就没了、仪表盘报
+            # "no such table"。改成用 envFromSecret 里已经有的这几个
+            # DB_* 变量(和主 superset 库同一个 Postgres 实例、同一个账号),
+            # 接到 create-db-job.yaml 新建的 superset_examples 这个库上。
+            SQLALCHEMY_EXAMPLES_URI = (
+                f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASS']}@"
+                f"{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/superset_examples"
+            )
         ingress:
           enabled: true
           ingressClassName: nginx
