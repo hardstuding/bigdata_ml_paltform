@@ -88,6 +88,9 @@ spec:
               kubernetes.io/metadata.name: dbt
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: argo-workflows
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: minio
       ports:
         - protocol: TCP
