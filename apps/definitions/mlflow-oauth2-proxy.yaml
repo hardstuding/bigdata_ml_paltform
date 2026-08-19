@@ -38,6 +38,15 @@ spec:
             oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
             profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
             redirect_url = "http://mlflow.local-lite.test:32460/oauth2/callback"
+            # 2026-08-19 真实故障:没显式配 scope 时,oauth2-proxy 二进制自己的
+            # 默认值是 "openid email profile groups"。ADR-019 明确说过 MLflow
+            # 开源版不做按组差异化的权限控制(所有登录过的人权限完全一样),这个
+            # mlflow Keycloak client 也确实没配 groups 这个 client scope——请求一个
+            # client 不认识的 scope,Keycloak 直接在 /auth 这一步就报
+            # invalid_scope 拒绝,登录连 Keycloak 登录页都进不去。这个 bug 从这个
+            # 组件第一次写出来就存在,一直没被抓到是因为 MLflow 长期 park、没有真的
+            # 走过一次登录。显式声明 scope,去掉不需要的 groups。
+            scope = "openid email profile"
             upstreams = [ "http://mlflow.mlflow.svc.cluster.local:5000/" ]
             email_domains = [ "*" ]
             # local-lite 没有 TLS(见 ADR-016),浏览器和 ingress-nginx 之间是
