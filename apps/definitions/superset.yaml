@@ -111,7 +111,14 @@ spec:
           hosts:
             - superset.local-lite.test
         init:
-          loadExamples: false
+          # 2026-08-19:实测确认这些示例数据(birth_names/video_game_sales/
+          # world_health 等)是打包在 apache-superset 这个 pip 包里的
+          # .parquet 文件,`superset load_examples` 不联网、不依赖外部
+          # 数据源,纯本地加载,开着不会引入这个项目一直在提防的"运行时
+          # 联网"问题。用来给刚接触这个平台的人一个开箱即用的可视化demo,
+          # 不影响这个项目自己的 iceberg.demo.orders 那张真实业务 demo 表
+          # (scripts/08-create-demo-data.sh)。
+          loadExamples: true
           resources:
             requests:
               cpu: 200m
