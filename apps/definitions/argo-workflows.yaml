@@ -34,6 +34,33 @@
 # provider.Endpoint() 里的 authorization_endpoint 本来就是
 # frontchannel、固定用带端口的外部地址(和 issuer 字段同一个道理),浏览器
 # 跳转不受这次改动影响。
+#
+# 2026-08-19 SSO 登录成功后调 API 403(RBAC 层,和上面 issuer 问题是两个
+# 独立故障):读了官方源码(server/auth/gatekeeper.go 的 rbacAuthorization/
+# getServiceAccount/authorizationForServiceAccount)才搞清楚
+# server.sso.rbac 的真实机制,不是简单打开一个开关就行——
+#   1. `sso.rbac.enabled: true` 只是让 argo-workflows-server 自己的
+#      ServiceAccount 多一条权限(get/list/watch serviceaccounts、get
+#      secrets),不代表任何登录用户就有权限了。
+#   2. 真正授权靠额外建一个 ServiceAccount,打
+#      `workflows.argoproj.io/rbac-rule` 注解(一段 expr 表达式,能读
+#      id_token 里的 groups/sub/iss),server 收到登录请求后按
+#      `workflows.argoproj.io/rbac-rule-precedence` 从高到低找第一个
+#      规则匹配的 ServiceAccount。
+#   3. 匹配到 ServiceAccount 之后,server 不是用 TokenRequest API 现场
+#      换 token,是去读一个**长期存在**的 `kubernetes.io/service-account-
+#      token` 类型 Secret(K8s 1.24+ 不会给 ServiceAccount 自动建这种
+#      Secret 了,必须手动建,chart 本身不会替你建)。
+#   4. 这个 ServiceAccount 自己要有 Role/RoleBinding 授权 workflows 相关
+#      资源,不然换到 token 也一样 403——chart 只建它自己 server 用的
+#      ClusterRole,不会替任意 SSO 用户建这份。
+# 下面 extraObjects 里的四个资源就是补这一整套:ServiceAccount(挂
+# platform-team 组的匹配规则,对应 admin 用户所在的组——2026-08-19 同一天
+# 修的 Keycloak groups client scope,argo-workflows 这个 client 也要挂,
+# 见 scripts/03-configure-keycloak.sh)、长期 token Secret、Role、
+# RoleBinding。授权范围限定在 argo-workflows 这一个命名空间(和 curl 测试
+# 的 `/api/v1/workflows/argo-workflows` 一致),没有覆盖 cluster 级的
+# clusterworkflowtemplates。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -86,6 +113,8 @@ spec:
               - openid
               - profile
               - email
+            rbac:
+              enabled: true
           ingress:
             enabled: true
             ingressClassName: nginx
@@ -97,6 +126,75 @@ spec:
               memory: 128Mi
             limits:
               memory: 256Mi
+        extraObjects:
+          # platform-team 组(admin 用户所在组)在 argo-workflows
+          # 命名空间的授权——见上面大段注释,server.sso.rbac.enabled
+          # 本身不建这四个资源,chart 不替 SSO 用户建。
+          - apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: argo-workflows-sso-platform-team
+              namespace: argo-workflows
+              annotations:
+                workflows.argoproj.io/rbac-rule: "'platform-team' in groups"
+                workflows.argoproj.io/rbac-rule-precedence: "1"
+          - apiVersion: v1
+            kind: Secret
+            metadata:
+              name: argo-workflows-sso-platform-team.service-account-token
+              namespace: argo-workflows
+              annotations:
+                kubernetes.io/service-account.name: argo-workflows-sso-platform-team
+            type: kubernetes.io/service-account-token
+          - apiVersion: rbac.authorization.k8s.io/v1
+            kind: Role
+            metadata:
+              name: argo-workflows-sso-platform-team
+              namespace: argo-workflows
+            rules:
+              - apiGroups:
+                  - argoproj.io
+                resources:
+                  - workflows
+                  - workflows/finalizers
+                  - workflowtemplates
+                  - cronworkflows
+                  - cronworkflows/finalizers
+                  - workfloweventbindings
+                  - workflowtasksets
+                  - workflowtaskresults
+                verbs:
+                  - get
+                  - list
+                  - watch
+                  - create
+                  - update
+                  - patch
+                  - delete
+              - apiGroups:
+                  - ""
+                resources:
+                  - pods
+                  - pods/log
+                  - configmaps
+                  - events
+                verbs:
+                  - get
+                  - list
+                  - watch
+          - apiVersion: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            metadata:
+              name: argo-workflows-sso-platform-team
+              namespace: argo-workflows
+            subjects:
+              - kind: ServiceAccount
+                name: argo-workflows-sso-platform-team
+                namespace: argo-workflows
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: Role
+              name: argo-workflows-sso-platform-team
   destination:
     server: https://kubernetes.default.svc
     namespace: argo-workflows
