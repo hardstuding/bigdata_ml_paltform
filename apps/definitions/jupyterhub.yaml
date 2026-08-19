@@ -24,6 +24,16 @@
 # platform/coredns-custom/ 的自定义 DNS zone(集群内全局生效,不用每个
 # chart 单独配 hostAliases)解析 keycloak.local-lite.test。
 #
+# 2026-08-19 补:cloud-full 是 NodePort(32460),浏览器打的
+# authorize_url/oauth_callback_url 必须带端口(不带端口本来就连不上,
+# 和 8-16 那批组件的第一层坑一样)。token_url/userdata_url 保持不带
+# 端口——上面 2026-08-11 那次"单一 issuer"的结论是在 Keycloak 还是
+# KC_HOSTNAME_STRICT=false 时代 debug 出来的,2026-08-16 已经换成
+# KC_HOSTNAME_STRICT=true + 固定 issuer + KC_HOSTNAME_BACKCHANNEL_
+# DYNAMIC=true(和 Trino/Grafana/oauth2-proxy 现在用的是同一套),
+# 理论上内部无端口地址现在也能通过 issuer 校验——但这是本次新做的
+# 判断,没有真实登录验证过,先按这个部署,登录测试如果又踩中旧的
+# issuer 不匹配,再回退成三个 URL 都用外部带端口地址。
 # db 用 chart 默认的 sqlite-pvc,不接共享 Postgres——hub 的状态(谁登录过、
 # 谁的 server 在跑)不是别的组件需要联动的数据,没有理由为了这个单独接一次
 # Postgres,和当初给 Keycloak/Trino 接 Postgres(数据会被其他东西依赖,或者
@@ -75,7 +85,7 @@ spec:
                 - platform-team
             GenericOAuthenticator:
               client_id: jupyterhub
-              authorize_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/auth"
+              authorize_url: "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
               token_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
               userdata_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
               login_service: "Keycloak"
@@ -84,7 +94,7 @@ spec:
                 - "openid"
                 - "profile"
                 - "email"
-              oauth_callback_url: "http://jupyterhub.local-lite.test/hub/oauth_callback"
+              oauth_callback_url: "http://jupyterhub.local-lite.test:32460/hub/oauth_callback"
           extraEnv:
             OAUTH_CLIENT_SECRET:
               valueFrom:

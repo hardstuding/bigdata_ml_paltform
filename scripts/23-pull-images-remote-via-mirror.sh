@@ -59,6 +59,18 @@ while IFS= read -r img; do
     ghcr.io/*)
       mirror="ghcr.m.daocloud.io/${img#ghcr.io/}"
       ;;
+    docker.getcollate.io/*)
+      # 2026-08-19 真实发现:docker.getcollate.io 只是 scarf.sh 包装的下载
+      # 统计域名,realm challenge 里的 WWW-Authenticate 指向
+      # auth.docker.io/registry.docker.io——本质就是 docker.io 上的
+      # openmetadata/server 这个仓库,不是独立注册中心。直接从这台机器连
+      # docker.getcollate.io 本身可达(TCP/TLS 握手正常),但它转发到的
+      # registry-1.docker.io 在这片网络里会超时,和裸 docker.io 镜像
+      # 一样卡死,只是报错信息里域名不一样容易被误判成"没有覆盖"。验证
+      # 过 daocloud 镜像站拉到的 digest 和直连 registry-1.docker.io 拿到
+      # 的官方 manifest digest 完全一致(sha256:997d666b...),不是假设。
+      mirror="docker.m.daocloud.io/${img#docker.getcollate.io/}"
+      ;;
     nvcr.io/*|ecr-public.aws.com/*|local/*)
       echo "[$N/$TOTAL] 这个镜像源镜像站不覆盖,跳过(走 scripts/22 老路径): ${img}"
       SKIPPED_NO_MIRROR=$((SKIPPED_NO_MIRROR + 1))

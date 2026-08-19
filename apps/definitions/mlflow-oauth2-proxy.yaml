@@ -31,8 +31,13 @@ spec:
           existingSecret: oauth2-proxy-secret
           configFile: |
             provider = "oidc"
-            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
-            redirect_url = "http://mlflow.local-lite.test/oauth2/callback"
+            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            skip_oidc_discovery = true
+            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
+            redirect_url = "http://mlflow.local-lite.test:32460/oauth2/callback"
             upstreams = [ "http://mlflow.mlflow.svc.cluster.local:5000/" ]
             email_domains = [ "*" ]
             # local-lite 没有 TLS(见 ADR-016),浏览器和 ingress-nginx 之间是
