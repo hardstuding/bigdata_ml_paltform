@@ -76,6 +76,23 @@
 
 ## 下一步唯一动作
 
+**2026-08-19 晚些时候补充:ADR-058 第一批(platform_sdk + 统一开发镜像)
+已实现并端到端验证,详见 ADR-058 全文,这里只记结论**——`platform_sdk`
+(`platform-sdk/`)+ 统一镜像(`apps/platform-image/`)已经让 JupyterHub
+notebook 开箱即用 `query()`(连 Trino)/`mlflow_setup()`(连 MLflow),
+两个都在真实 notebook pod 里验证过成功;`submit_job()` 本身也端到端
+验证成功(建 Workflow→pod 里跑→查 Trino→记 MLflow,全部 Succeeded),
+但**只在不受限制的环境**(本机 kubeconfig / CI)里验证通过——直接从
+notebook pod 里调 `submit_job()` 被 chart 默认的 singleuser
+NetworkPolicy 挡住连 K8s API server,根因没查清,已知限制记在
+`docs/BACKLOG.md` 2.6。过程中还顺带发现并修好一个这条 NetworkPolicy
+本身挡掉 Trino/MLflow 的问题(默认 `privateIPs: false`,notebook 连不上
+任何集群内部服务,这个已经修好并验证)。
+
+下一步是 ADR-057 第三批(见下),或者继续把 ADR-058 剩下的部分(job.yaml
+脚手架已有,submit-job skill 还没写)做完——两条都不阻塞对方,谁先做
+看你的判断。
+
 **ADR-057 第三批:补上环境抽象的"组件选择"层——现在优先级比之前判断的
 更高,不是更低。**
 

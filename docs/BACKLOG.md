@@ -136,6 +136,32 @@ template 变更后重跑,否则回退到 chart 的坏默认值(本次会话就�
 环境配置渲染防漂移、3 个 Flask 应用的测试)。原评审 P1-3 清单里更大的
 扩展(镜像构建 —— 见 2.1、集成测试)还没做。
 
+### 2.6 notebook 里直接调 `submit_job()` 被 singleuser NetworkPolicy 挡住
+
+2026-08-19(ADR-058 第一批验证)发现:`platform_sdk.submit_job()` 这个
+函数本身完全正确——从不受限制的环境(本机 kubeconfig)调用端到端成功过
+(建 ConfigMap→建 Workflow→pod 里跑成功→查 Trino→记 MLflow,全部
+Succeeded)。但**直接从 JupyterHub 的 notebook pod 里调这个函数**会被
+chart 默认的 `singleuser` NetworkPolicy 挡住连 K8s API server——试过
+ipBlock 指向节点 IP(172.22.9.16,配 443 和 6443 两个端口)、指向 API
+server 的 ClusterIP(10.43.0.1,配 /32 和 /16 两种 CIDR),**全部还是
+ConnectionRefused**,没有查清根因。K8s API server 在 k3s 里不是普通
+pod(是 k3s 进程自己在节点上起的,`kubectl get endpoints kubernetes
+-n default` 能看到 Endpoints 指向的是节点 IP 不是 pod IP)——
+namespaceSelector/podSelector 这两种 NetworkPolicy 选择器天然匹配不到,
+必须用 ipBlock,但 ipBlock 也没通,不排除是这台 k3s 内置 netpol 控制器
+(kube-router)对这类流量的已知限制,需要上节点直接查 iptables/ipset
+才能查清根因,当时判断这个排查成本(云主机按小时计费)不该继续投入。
+
+**影响范围窄**:只影响"直接从 notebook pod 里调 submit_job()"这一种
+使用方式,`query()`/`mlflow_setup()` 这两个更常用的函数都已经在
+notebook pod 里验证过完全正常。
+
+**当前权宜做法**:用 `platform-submit job.yaml` 从终端/CI 这类不受这条
+NetworkPolicy 限制的环境提交,不是从 notebook 里直接调。真要修,下次
+有专门时间时,从 SSH 到节点、直接查 kube-router 生成的 iptables/ipset
+规则开始查,不要重复这次试过的几种 ipBlock 组合。
+
 ---
 
 ## P3:打磨已有角色能力(不需要新组件,是体验问题)
