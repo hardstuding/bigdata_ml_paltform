@@ -18,7 +18,11 @@ AWS_SECRET_ACCESS_KEY 是 boto3/MLflow S3 客户端的标准变量。这样同�
 
 依赖(见同目录 apps/argo-workflows-training-image/Dockerfile,已经打进
 训练用的容器镜像,不是运行时现装):
-    mlflow-skinny scikit-learn boto3
+    mlflow-skinny scikit-learn pandas boto3
+2026-08-19 真实踩坑:pandas 是 mlflow.sklearn.log_model() 内部隐式
+依赖(推断模型输入 schema 要用),mlflow-skinny 不会自动带上,
+本机手动跑因为 anaconda 环境本来就有 pandas 才没暴露出来——第一次
+在干净的容器镜像里跑这个脚本才真的踩到 ModuleNotFoundError。
 """
 import os
 

@@ -9,7 +9,7 @@
 # (ADR-021)是同一个"人走 SSO、服务到服务走别的路"思路,但更简单。
 #
 # 依赖(本机 Python 环境,不在这个项目的 image-cache 里管理):
-#   pip install mlflow-skinny scikit-learn skops boto3
+#   pip install mlflow-skinny scikit-learn pandas skops boto3
 #
 # 前置条件:MLflow 和 MinIO 都在正常运行(MLflow 默认收在
 # pending-definitions/,先用 `./scripts/local-lite-toggle-heavy.sh on` 拉
