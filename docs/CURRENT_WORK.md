@@ -133,10 +133,45 @@ Secret 永远补不上、groups scope 从建realm起就没配过)本可以在"�
   `docker load` 用上,不用再连一次网现场构建"——两条路径都留了,不是
   只顾一头。
 
-**排在后面的**(按 `docs/BACKLOG.md` 优先级):"notebook 里触发训练"和
-"Argo Workflows 编排训练"这两段是真正的空白,不是"没重新验证"——从没
-真正实现过,训练一直是人直接跑脚本。真要做需要新写一个
-WorkflowTemplate,是新开发工作,不是这次"重新验证已有能力"的范围。
+**2026-08-19 晚些时候:"Argo Workflows 编排训练"这段空白补上了**——参考了
+`/Users/zhenghe/my_work/ysb/algo`(zhenghe 真实生产团队的项目)里
+DolphinScheduler + notebook + papermill 的既有模式,评估之后**没有照抄**:
+那边团队日常在 notebook 里交互式开发,notebook 是原生工作产物;这个平台
+自己的 notebook 交互式开发体验还是明确记录在案的差距(`docs/usage-guide.md`
+"交互式开发/Notebook"一节——没有自动连 Trino、没有自动带凭据),在这个
+体验成熟之前把 notebook 当生产流水线执行单元是本末倒置。改成沿用这个项目
+已有的 `apps/spark-iceberg-demo` 模式:纯 Python 脚本(ConfigMap 挂载)+
+专门构建的依赖镜像,复用 `scripts/train_demo_model.py`(改成完全靠环境
+变量配置,`scripts/09-train-demo-model.sh` 手动跑和 WorkflowTemplate 跑
+是同一份代码,只是 `MLFLOW_TRACKING_URI`/`MLFLOW_S3_ENDPOINT_URL` 的值
+不同)。见 `apps/argo-workflows-training-image/` 和
+`apps/definitions/argo-training-workflow-template.yaml`。
+
+真实提交 Workflow 端到端验证过(不只是部署),过程中挖出 4 个真实 bug:
+1. `mlflow-skinny` 不带 pandas(`mlflow.sklearn.log_model()` 内部隐式
+   依赖做 schema 推断),本机 anaconda 环境凑巧有 pandas 一直没暴露,
+   干净容器里第一次跑才报 `ModuleNotFoundError`。
+2. `platform/network-policies/manifests/minio.yaml` 的 MinIO 消费者
+   白名单漏了 `argo-workflows` 命名空间(和之前 feast/dbt 踩的是同一类
+   坑,第四次复现),训练成功但上传模型 artifact 时
+   `EndpointConnectionError`。**这次改动本身还踩了一次坑**:第一次提交
+   只加了说明注释、漏加了实际的 namespaceSelector 条目,ArgoCD 显示
+   Synced 但活对象没变——再次印证"Synced 状态不能当证据,要直接查活
+   资源"。
+3. WorkflowTemplate 没显式指定 `serviceAccountName`,落到 `default` SA,
+   没权限创建 `workflowtaskresults`,训练本身成功但 Workflow 整体判定
+   Error。
+4. 改成指定 `serviceAccountName: argo-workflow` 后又报 SA 不存在——
+   chart 自己建了对应的 Role/RoleBinding,但没建这个 ServiceAccount
+   本身,补建了这一个最小对象(没改 chart values,没加权限规则)。
+
+最终验证:`train-demo-model-rmndq` 这个 Workflow Succeeded,MLflow
+Model Registry 查询确认 `demo-rf-classifier` version 3、
+`status: READY`,run_id 和 Workflow pod 日志里打印的一致。
+
+目前只有训练这一步(没有特征工程/评估这类多步骤 DAG,模板结构已经为
+以后扩展准备好),也没有"notebook 里触发"这条腿——这两个仍然是真实的
+未做项,记在 `docs/BACKLOG.md`。
 
 ## 正在运行的后台任务
 

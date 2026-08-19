@@ -132,7 +132,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 |---|---|---|
 | **交互式开发(Notebook)** | 🟡 | JupyterHub 已部署并真实登录验证通过(2026-08-19,SSO 登录成功跳转 `/hub/spawn`)。但仍然没有"打开就自动连好 Trino、自动带自己权限"的体验——要自己装 client、自己填连接串(`docs/usage-guide.md` 已如实记录这个差距,这次部署没有改变它) |
 | 特征工程 | ✅ | Feast 全链路真实重新验证(2026-08-19):Iceberg → Spark 离线读取 → feast apply → materialize → Redis 在线存储 → Feature Server 在线查询,Alice/Bob 的 region/product/amount 都查出正确值。过程中修了两个真实 bug(见下面"当前最高性价比"那段),不只是组件都在 |
-| 训练执行 | 🟡 | Argo Workflows 已部署;但 Spark 训练依赖没部署的 Spark Operator |
+| 训练执行 | ✅ | **Argo Workflows 编排训练已实现并真实验证**(2026-08-19,`apps/argo-workflows-training-image/`)——不是照抄参考项目 ysb/algo 的 notebook+papermill 模式,评估后改用纯 Python 脚本 + 专门镜像,复用 `scripts/train_demo_model.py`。真实提交 Workflow 跑通,Model Registry 查询确认 version READY。目前只有训练一步,没有 Spark 特征工程步骤 |
 | **实验跟踪 / 模型注册** | ✅ | MLflow 已部署并真实登录验证通过(2026-08-19,含按组授权)。部署时修了两个真实 bug:内存限制太小导致启动 36 秒内 OOMKill、oauth2-proxy 配置的后端 Service 名字写错(chart 生成的真实名字是 `mlflow-mlflow` 不是 `mlflow`) |
 | 模型部署 | ✅ | KServe 已部署(CRD + ServingRuntime),V2 协议推理验证过(ADR-027) |
 | 推理可观测 | 🟡 | Grafana 能看到基础指标,没有面向模型的监控(延迟/漂移/调用量) |
@@ -144,11 +144,11 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 (2026-08-19,`scripts/09-train-demo-model.sh`:真实训练一个 sklearn
 模型、accuracy 0.855、注册进 Model Registry、API 查询确认
 status=READY)。**Feast 特征这一段也重新验证过**(2026-08-19,全链路
-真实跑通,见上面"特征工程"一行)。剩下没有连起来的是"notebook 里
-触发训练"和"Argo Workflows 编排训练"这两段——前者需要真实浏览器
-交互,后者目前**没有任何 WorkflowTemplate 定义**,这不是"没重新验证",
-是从没真正实现过,训练一直是靠人直接跑脚本(`scripts/09-train-demo-
-model.sh`),没有真的接入 Argo Workflows 做编排。
+真实跑通,见上面"特征工程"一行)。**"Argo Workflows 编排训练"这段
+之前的空白也已经补上**(2026-08-19 晚些时候,见上面"训练执行"一行,
+设计取舍详见 `docs/CURRENT_WORK.md`)。剩下没有连起来的只有"notebook
+里触发训练"——需要真实浏览器交互验证,还没做,以及多步骤 DAG(特征
+工程→训练→评估,现在只有训练一步)。
 
 ---
 
@@ -192,9 +192,13 @@ model.sh`),没有真的接入 Argo Workflows 做编排。
    - **算法链路"训练→MLflow"+"Feast 特征"这两段都已验证**(2026-08-19,
      真实训练模型注册进 Model Registry;Feast 全链路 Iceberg→Spark→
      Redis→在线查询真实跑通,过程中修了 DAG 默认暂停、本地构建镜像在
-     远程节点拉不到这两个真实 bug)。**"notebook 里触发"和"Argo
-     Workflows 编排训练"这两段是真正的空白**,不是"没验证",是从没
-     实现过——训练现在是人直接跑脚本,没有接入 Argo Workflows 做编排,
-     真要做需要新写一个 WorkflowTemplate,是一块新开发工作,不是验证。
+     远程节点拉不到这两个真实 bug)。**"Argo Workflows 编排训练"这段
+     空白也已经补上**(2026-08-19 晚些时候,新写了 WorkflowTemplate,
+     不是照抄 ysb/algo 的 notebook+papermill,过程中修了 4 个真实 bug:
+     mlflow-skinny 缺 pandas、MinIO NetworkPolicy 漏了 argo-workflows
+     命名空间、WorkflowTemplate 没指定 serviceAccountName、chart 建了
+     RoleBinding 但没建对应 ServiceAccount)。剩下真正的空白是"notebook
+     里触发训练"(需要真实浏览器交互验证)和多步骤 DAG(现在只有训练
+     一步,没有特征工程/评估)。
 3. **更新纪律:**任何一次让某个角色多/少一项能力的改动,必须同步改这份
    表。这份表过时了,项目就又回到"不知道自己做到哪了"的状态。

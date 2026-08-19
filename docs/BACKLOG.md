@@ -71,9 +71,16 @@ Spark Operator/SeaTunnel/Spark History Server 已部署验证,Kafka 还没有
 
 ### 1.7 算法链路端到端重新验证
 
-JupyterHub/MLflow/Spark Operator/Feast/Argo Workflows 都已部署验证,
-但"notebook → Feast 特征 → Argo Workflows 训练 → MLflow 记录"这条完整
-链路本身还没有重新连起来跑一次——各组件是分别验证的,不是这条链路本身。
+JupyterHub/MLflow/Spark Operator/Feast/Argo Workflows 都已部署验证。
+**2026-08-19 晚些时候:"Argo Workflows 编排训练"本身已经真正实现并
+端到端验证**(不只是组件部署,是真的写了 WorkflowTemplate、提交跑通、
+Model Registry 查询确认 READY——见 `docs/CURRENT_WORK.md`、
+`apps/argo-workflows-training-image/`)。但"notebook 里触发训练"
+(在 JupyterHub 里点一下就能拉起这个 Workflow,不是 `kubectl create`)
+和"notebook → Feast 特征 → Argo Workflows 训练 → MLflow 记录"这条完整
+链路串成一次真实调用,仍然是真实空白——现在每一段是分别验证的,不是
+连起来的一条链路,也没有多步骤 DAG(特征工程→训练→评估,现在
+WorkflowTemplate 只有训练一步)。
 
 ---
 
