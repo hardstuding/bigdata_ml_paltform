@@ -180,9 +180,12 @@ create_client_if_absent superset '["http://superset.local-lite.test/oauth-author
 echo "==> airflow client"
 # 2026-08-19 新增,zhenghe 反馈 Airflow 一直没接 SSO。Airflow 3.x 默认
 # auth_manager 还是 FabAuthManager(和 Superset 同一个 Flask-AppBuilder),
-# 回调路径同样是 /oauth-authorized/<provider name>,provider name 对应
-# apps/definitions/airflow.yaml 里 apiServerConfig 配的 "keycloak"。
-create_client_if_absent airflow '["http://airflow.local-lite.test/oauth-authorized/keycloak","http://airflow.local-lite.test:32460/oauth-authorized/keycloak"]' airflow airflow-oidc-secret clientSecret
+# 回调路径同样是 /oauth-authorized/<provider name>——但 Airflow 3.x 的
+# api-server 是 FastAPI 套壳,FAB 这个 Flask 子应用整个被挂在 `/auth` 这个
+# 前缀下(源码 airflow/api_fastapi/app.py 里 `app.mount("/auth", ...)`),
+# Superset 没有这层挂载,直接照抄 superset 那行的 redirect_uris 漏了这个
+# 前缀,实测 Keycloak 报 "Invalid parameter: redirect_uri" 才发现。
+create_client_if_absent airflow '["http://airflow.local-lite.test/auth/oauth-authorized/keycloak","http://airflow.local-lite.test:32460/auth/oauth-authorized/keycloak"]' airflow airflow-oidc-secret clientSecret
 
 echo "==> openmetadata client"
 # 不能直接用 create_client_if_absent——OpenMetadata chart 的
