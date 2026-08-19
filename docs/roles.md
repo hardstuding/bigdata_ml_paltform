@@ -33,9 +33,9 @@ realm 从来没有 groups claim mapper、镜像拉取超时、内存 OOM 等)—
 "能开工",数据分析师的"找数据"卡点解除。**
 
 Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路跑通,
-不只是 Pod Running);Argo Workflows 的 SSO 登录本身已修好并验证,但登录后调用 API
-仍是 403(RBAC 授权层的独立问题,见下面"运维/平台工程"表格);管理角色
-仍未开始。
+不只是 Pod Running)。**Argo Workflows 的 SSO+RBAC 也已修好并真实验证**
+(登录 → 列 workflow → 建一个真实 workflow → 能查到,curl+cookie-jar
+测试通过,详见下面"运维/平台工程"表格);管理角色仍未开始。
 
 | 角色 | 能独立完成日常工作? | 主要卡点 |
 |---|---|---|
@@ -67,7 +67,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 排障知识 | 🟡 | `docs/operations/troubleshooting.md` 742 行、内容扎实,但是**一篇长文不是 Runbook**——没有按"症状 → 定位 → 处置"组织,出事时不好检索 |
 | 统一服务目录 / 黄金链路告警 | ❌ | D 线产品主线,未开始 |
 | 容量 / 成本看板 | ❌ | 未开始 |
-| Argo Workflows 授权 | ❌ | **2026-08-19 新发现**:SSO 登录本身已修好(之前 CrashLoopBackOff 2 天多没人发现),但登录后调用 API 返回 403"not allowed"——`server.sso.rbac` 需要的 K8s RBAC 绑定没配。已单独立项跟踪,不阻塞其它角色 |
+| Argo Workflows 授权 | ✅ | **2026-08-19 已修复并验证**:之前 CrashLoopBackOff 2 天多没人发现(issuer/issuerAlias),修好登录后又发现登录成功但调 API 403——`server.sso.rbac.enabled` 不会自动建授权资源,读官方源码(`gatekeeper.go`)确认要手动建 ServiceAccount(挂 rbac-rule 注解)+ 长期 token Secret + Role/RoleBinding,四个都补上了。真实 curl+cookie-jar 验证:登录→列 workflow→建一个真实 workflow→能查到→删除清理 |
 | idle-shutdown-watchdog 开机自愈 | ✅ | **2026-08-19 修复**:停机几天后重新开机,看门狗第一次检查会用几天前的旧时间戳误判"已空闲超过阈值"立刻自动关机——机器刚开机 2-3 分钟就被自己关掉,来不及做任何事。已加开机时重置状态的机制(这个脚本本身按既定政策不进 git,细节记在 `docs/journal/2026-08.md`） |
 
 **结论:**这个角色是目前完成度最高的,这次又补上两个真实发现的问题
@@ -183,8 +183,6 @@ Spark Operator 现在也已部署,理论上应该打通了,但这条链路(noteb
      暴露的 bug(client-exists-但-Secret-缺失、groups scope 从来没配过、
      Service 名字写错)本可以在"改配置就重新拉起"这套机制下更早被结构性
      测试捕获,现在只能靠"当天有没有人手动测登录"这种运气发现。
-   - **Argo Workflows RBAC**(已单独立项,见 task 记录)——登录能成功,
-     调用 API 还是 403。
    - **跑一次真实的算法链路端到端验证**(notebook → Feast 特征 →
      Argo Workflows 训练 → MLflow 记录)——组件都部署验证过了,但这条
      完整链路本身还没有重新连起来跑一次。
