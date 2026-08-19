@@ -79,6 +79,32 @@ create_client_if_absent() {
   if [ -n "$existing" ]; then
     echo "client ${client_id} 已存在,只同步 redirectUris,不轮换密钥"
     kcadm update "clients/${existing}" -r platform -s "redirectUris=${redirect_uris}"
+    # 2026-08-19 真实故障(jupyterhub/spark-history-server 都撞到过):
+    # 这个分支原来到这里就直接 return,从不检查 k8s Secret 是否真的存在。
+    # 如果第一次跑这个脚本时命名空间还不存在(见下面那个分支),client 会
+    # 在 Keycloak 里建成功,但 k8s Secret 永远没补上——因为下次重跑,
+    # client 已经"存在"了,直接走的是这个分支,根本到不了下面创建 Secret
+    # 的代码。真实症状:CreateContainerConfigError,`secret "xxx-oidc-
+    # secret" not found`,而且不会自愈,除非手动发现。
+    # 补救:client 已存在但 Secret 缺失时,先尝试直接读现有 client secret
+    # 的明文(Keycloak Admin API 的 GET .../client-secret 本来就会返回
+    # 明文,不需要轮换);读不到才退化成重新生成一个新的。命名空间还没
+    # 建好就先跳过,和下面的分支保持一致的容错方式。
+    if kubectl get ns "$secret_ns" >/dev/null 2>&1 && ! kubectl -n "$secret_ns" get secret "$secret_name" >/dev/null 2>&1; then
+      echo "  !! client 已存在但 ${secret_ns}/${secret_name} 缺失,补一次(会轮换 client secret)"
+      local rotated
+      rotated=$(kcadm get "clients/${existing}/client-secret" -r platform 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("value",""))' 2>/dev/null || true)
+      if [ -z "$rotated" ]; then
+        rotated=$(kcadm create "clients/${existing}/client-secret" -r platform -i 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("value",""))' 2>/dev/null || true)
+      fi
+      if [ -n "$rotated" ]; then
+        kubectl -n "$secret_ns" create secret generic "$secret_name" --from-literal="${secret_key}=${rotated}" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        echo "  已补上 ${secret_ns}/${secret_name}(client secret 已轮换,依赖它的组件需要重启才能生效)"
+      else
+        echo "  !! 补 Secret 失败(拿不到 client secret 明文),需要人工排查"
+      fi
+    fi
     return
   fi
   # 命名空间还不存在(组件还 park 着没同步过,和 00-generate-secrets.sh
