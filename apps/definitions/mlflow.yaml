@@ -81,6 +81,21 @@ spec:
             memory: 1024Mi
           limits:
             memory: 2560Mi
+        # 2026-08-19 真实故障:mlflow 命名空间的 ResourceQuota(见
+        # platform/resource-quotas/manifests/quotas.yaml)限死
+        # limits.memory 3Gi。这个 Deployment 默认走 RollingUpdate,滚动
+        # 更新期间需要同时给旧 pod(旧的 resources 值)和新 pod 一起留出
+        # quota 空间,只要新旧两份限制加起来超过 3Gi(哪怕新值本身完全
+        # 在 quota 之内),新 ReplicaSet 就会一直卡在 "0/1 replicas
+        # created"、报 "exceeded quota"——表面看着像 ArgoCD/kubectl 卡住
+        # 了没同步,其实是 Deployment controller 自己在等一个永远等不到
+        # 的调度窗口,不会自愈,得手动把旧 ReplicaSet scale 到 0 腾出
+        # 配额才能推进。这次改内存限制(1536Mi→2560Mi)真实踩过一次,
+        # 卡了超过一小时没人发现。单副本、非 HA 关键的组件,改成
+        # Recreate 策略(先杀旧 pod 再建新的,不需要新旧同时占配额)
+        # 更合适,接受几秒到几十秒的短暂不可用换掉这整类问题。
+        deploymentStrategy:
+          type: Recreate
   destination:
     server: https://kubernetes.default.svc
     namespace: mlflow
