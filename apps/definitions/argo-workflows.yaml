@@ -6,12 +6,34 @@
 #
 # 官方 argo-helm 仓库(和 ArgoCD 自己用的是同一个 repoURL,argoproj 官方
 # 维护)。SSO 用 server.sso(不是 server.authModes: [server]/[client] 那两种
-# 更简单但没有真实身份的模式):这个和 ArgoCD 自己的内置 OIDC 是同一种设计
-# ——只有一个 issuer 字段,服务端自己发起 OIDC discovery/token 交换也用它,
-# 不像 Grafana/JupyterHub 那样能把"浏览器跳转用的地址"和"后端自己发请求
-# 用的地址"分开配(见 ADR-025)。好在 keycloak.local-lite.test 已经在
-# platform/coredns-custom/ 的自定义 DNS zone 里(当初是给 ArgoCD/Trino 配的,
-# 见 ADR-016/017),这里直接复用,不需要再加什么。
+# 更简单但没有真实身份的模式)。
+#
+# 2026-08-19 真实故障(argo-workflows-server 启动就 CrashLoopBackOff,
+# 2 天多没人发现,直到这次角色能力盘点才追出来):日志报 "oidc: issuer
+# did not match the issuer returned by provider, expected 'X' got 'Y'"。
+# 读了 argo-workflows 官方源码
+# (server/auth/sso/sso.go newSso 函数)才搞清楚真正的机制,不是靠猜的:
+# `oidc.NewProvider(ctx, c.Issuer)` 会真的去请求
+# "{c.Issuer}/.well-known/openid-configuration",然后校验返回文档里的
+# "issuer" 字段是否**逐字节等于** c.Issuer 这个字符串。Keycloak 的
+# discovery 文档里 "issuer" 字段是 KC_HOSTNAME 固定值(带端口,不会像
+# token_endpoint 那样根据请求方式动态变化,这条在 Trino 那次修复时已经
+# 验证清楚——见 platform/apps/keycloak.yaml 的说明)。之前这里 issuer 配的
+# 是不带端口的内部地址,能连通(discovery 请求本身走内部路径没问题),但
+# 拿回来的文档里 issuer 字段是带端口的外部值,两者对不上,`NewProvider`
+# 直接拒绝,进程根本起不来。
+#
+# 解法是 chart 暴露的 `sso.issuerAlias` 字段,对应源码里的
+# `oidc.InsecureIssuerURLContext(ctx, c.IssuerAlias)`——这个 go-oidc 库
+# 函数的实际语义(读源码确认,库自己的注释也写了是给"discovery 文档里的
+# issuer 字段和真正拿去请求 discovery 的地址不一致"这种场景用的)是:
+# **拿 issuerAlias 去比对文档里的 issuer 字段,不是拿 c.Issuer 比对**。
+# 所以现在这份配置是:issuer(下面这行)留不带端口的内部地址,只用来
+# 发起 discovery 请求;issuerAlias 填带端口的外部固定值,拿去跟文档里的
+# issuer 字段比对——两个字段各司其职,不是随便填一个"备用地址"。
+# provider.Endpoint() 里的 authorization_endpoint 本来就是
+# frontchannel、固定用带端口的外部地址(和 issuer 字段同一个道理),浏览器
+# 跳转不受这次改动影响。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -52,19 +74,13 @@ spec:
           sso:
             enabled: true
             issuer: "http://keycloak.local-lite.test/auth/realms/platform"
+            issuerAlias: "http://keycloak.local-lite.test:32460/auth/realms/platform"
             clientId:
               name: argo-workflows-oidc-secret
               key: client-id
             clientSecret:
               name: argo-workflows-oidc-secret
               key: client-secret
-            # 2026-08-16 cloud-full 真实故障:local-lite 靠 colima 自动转发
-            # 80/443 不需要端口,cloud-full 的 ingress-nginx 是 NodePort
-            # 32460,不带端口登录跳转回来会 404(完整根因见
-            # platform/apps/keycloak.yaml 的 KC_HOSTNAME 说明)。issuer 不用
-            # 改端口——服务端自己发起的 discovery 请求走集群内部路径,
-            # Keycloak 的 KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true 会让它拿到
-            # 的 token_endpoint 也不带端口,跟这里保持一致能连通。
             redirectUrl: "http://argo-workflows.local-lite.test:32460/oauth2/callback"
             scopes:
               - openid
