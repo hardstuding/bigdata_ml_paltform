@@ -1,0 +1,49 @@
+# platform_sdk.submit_job() 要从"调用它的那个 pod"(JupyterHub 的
+# singleuser pod)往 argo-workflows 命名空间创建 ConfigMap 和 Workflow
+# 对象。JupyterHub chart 默认不给 singleuser pod 挂任何有意义权限的
+# ServiceAccount(`singleuser.serviceAccountName` 默认是空,落到 jupyterhub
+# 命名空间的 default SA),这里补一个专用的、跨命名空间授权最小权限。
+#
+# 命名空间隔离:ServiceAccount 建在 jupyterhub 命名空间(和 singleuser pod
+# 同一个命名空间),Role/RoleBinding 建在 argo-workflows 命名空间——这是
+# K8s 标准的跨命名空间授权模式(RoleBinding 的 subject 允许引用另一个
+# 命名空间的 ServiceAccount),不是变通写法。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-sdk-submitter
+  namespace: jupyterhub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-sdk-submitter
+  namespace: argo-workflows
+rules:
+  # 建/查/改脚本 ConfigMap(submit_job 每次提交都会 create-or-replace 一个)。
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update"]
+  # 建 Workflow、查状态。不给 delete——清理策略应该走平台统一的 GC,不该
+  # 让每个提交者都有权删别人的作业。
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows"]
+    verbs: ["get", "list", "create"]
+  # job_status/job_logs 要能看 pod 和读日志。
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-sdk-submitter
+  namespace: argo-workflows
+subjects:
+  - kind: ServiceAccount
+    name: platform-sdk-submitter
+    namespace: jupyterhub
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-sdk-submitter

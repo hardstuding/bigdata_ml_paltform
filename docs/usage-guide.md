@@ -70,34 +70,35 @@ groups.yaml`/`memberships.csv`)决定你能用哪些工具、审批链路怎么�
 `http://superset.local-lite.test`,数据源接的就是 Trino,建看板前先确认
 自己对要用的表有权限(上面"查表权限"那节)。
 
-## 交互式开发 / Notebook:现状是缺口,不是已经打通
+## 交互式开发 / Notebook
 
-这是目前平台里**明确存在差距**的一块,如实说清楚现状:
+JupyterHub 已部署(2026-08-19 un-park 并真实 SSO 登录验证过,见
+`apps/definitions/jupyterhub.yaml`),按组分配访问权限
+(`docs/decisions/025-jupyterhub-sso.md`)。
 
-- JupyterHub 之前部署验证过(接了 Keycloak SSO,按组分配访问权限,见
-  `docs/decisions/025-jupyterhub-sso.md`),但**现在是 park 状态,没有在
-  跑**——`apps/definitions/` 里没有它,定义在
-  `environments/cloud-full/pending-definitions/jupyterhub.yaml`。要用需要
-  先 un-park(参考 `README.md`/`docs/operations/tuning.md` 里 park/unpark
-  的操作方式),这台机器的资源余量要先确认够不够,不建议在 Trino 已经
-  在跑、资源偏紧的时候顺手再拉起来。
-- 即使 un-park 之后,现在也**没有"打开 notebook 就自动连好 Trino/带着
-  你自己权限"这种一键体验**——用户需要自己在 notebook 里装 Trino 的
-  Python client(比如 `trino` 这个包)、自己填连接串和账号密码。对照
-  用户提到的"字节 Dolado"/"火山引擎"那类平台(一键生成开发环境、自动
-  带凭据、和数据目录打通),这个平台目前是没有的,这是一个真实、还没
-  设计的产品差距,不是"已经很接近了只是细节没做"。
-- 训练模型用的 notebook 环境(如果要接 MLflow 实验跟踪),同样需要
-  自己在 notebook 里装包,参考 `scripts/09-train-demo-model.sh` 里怎么
-  用 MLflow client——这个脚本是在本机 Python 环境里跑的示范,不是在
-  JupyterHub 里跑的,两者环境不完全一样,仅供参考连接方式。
+**"打开 notebook 自动连好 Trino/MLflow"这个曾经记录在案的缺口已经补上**
+(见 [ADR-058](decisions/058-lightweight-developer-experience.md)):
+notebook 用的是平台统一镜像,已经带了 `platform_sdk`,不用自己装
+Trino/MLflow client、不用自己填连接串:
 
-如果这块是接下来要重点补的方向,值得先想清楚几个问题再动手(不是现在
-就有答案):notebook 里怎么免密拿到"当前登录用户"对应的 Trino 凭据(不能
-明文存密码)、要不要预置连接模板/starter notebook、和 OpenMetadata 目录
-打通到什么程度(比如"在目录里点一张表,能直接生成一段可用的查询代码"这种
-体验)。这些没有定论,记在这里是为了下次讨论有个起点,不代表已经决定
-怎么做。
+```python
+from platform_sdk import query, mlflow_setup
+
+df = query("select * from iceberg.demo.orders limit 10")
+
+mlflow = mlflow_setup("my-experiment")
+with mlflow.start_run():
+    mlflow.log_metric("acc", 0.9)
+```
+
+Trino 的账号密码仍然要通过环境变量提供(`PLATFORM_TRINO_USER`/
+`PLATFORM_TRINO_PASSWORD`)——**这条明确没做**:notebook 里怎么免密拿到
+"当前登录用户"对应的 Trino 凭据,还是每个用户自己在 profile 里配一份
+服务账号凭据,这件事没有定论,现阶段用的是显式环境变量。
+
+要把本地脚本提交到集群跑(训练任务这类),用 `submit_job()`,或者写一份
+`job.yaml` 配 `platform-submit job.yaml`——参考 `examples/hello-job/`,
+细节见 ADR-058 和(实现完成后补的)`platform-sdk/README.md`。
 
 ## 遇到问题去哪查
 

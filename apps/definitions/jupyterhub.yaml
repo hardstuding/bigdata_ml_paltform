@@ -112,6 +112,21 @@ spec:
             limits:
               memory: 512Mi
         singleuser:
+          # 2026-08-19(ADR-058):从"用户自己按需装包"改成用平台统一镜像
+          # (apps/platform-image/),里面已经带了 platform_sdk + Trino/
+          # MLflow/scikit-learn/pandas 客户端。这就是"打开 notebook 自动
+          # 连好 Trino"这个体验缺口(docs/usage-guide.md 记录过)的解法。
+          # 本地构建镜像,pullPolicy 必须是 IfNotPresent(和这个项目其它
+          # 自建镜像同一个坑:kubelet 会尝试联网拉一个不存在的远程镜像,
+          # 直接 ErrImagePull)。
+          image:
+            name: local/platform-runtime
+            tag: "0.1.0"
+            pullPolicy: IfNotPresent
+          # platform_sdk 的 submit_job() 要能往 argo-workflows 命名空间建
+          # ConfigMap/Workflow,见
+          # apps/platform-image/manifests/submitter-rbac.yaml。
+          serviceAccountName: platform-sdk-submitter
           memory:
             # 这两个字段最终传进 KubeSpawner 自己的 mem_guarantee/mem_limit
             # traitlet(ByteSpecification),只认 K/M/G/T(十进制)后缀,不认
@@ -127,10 +142,9 @@ spec:
             guarantee: 0.1
           storage:
             capacity: 2Gi
-          # 训练 demo 用的 scikit-learn/mlflow 这些包默认镜像不带,和
-          # scripts/09-train-demo-model.sh 在本机 Python 环境里手动 pip
-          # install 是同一个道理——用户在 notebook 里自己按需装,不为了
-          # 这个单独 build 一份自定义镜像。
+          # 2026-08-19 更正:上面这条"用户自己按需装"的旧注释已经不成立
+          # (见上面 image 那段)——scikit-learn/mlflow 这些包现在打进了
+          # 统一镜像。这里只保留 startTimeout 本身。
           startTimeout: 300
         # 数分/算法工程师开着 notebook 一段时间不用是常态,不显式配的话就是
         # 依赖 chart 默认值(cull.enabled: true, timeout: 3600),这次改成

@@ -1,0 +1,28 @@
+# platform_sdk 的提交权限(见 apps/platform-image/manifests/submitter-rbac.yaml
+# 的完整说明)。裸 manifest,不是 helm chart,和
+# apps/definitions/argo-training-workflow-template.yaml 同一个模式——
+# 三个资源各自在自己的 metadata.namespace 里声明了目标命名空间,这里的
+# destination.namespace 只是 ArgoCD 要求必填的占位,不影响资源实际落地
+# 的位置。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-sdk-submitter-rbac
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/platform-image/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-workflows
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -12,3 +12,8 @@ image-cache-amd64/
 __pycache__/
 *.pyc
 scripts/24-install-idle-shutdown-watchdog.sh
+
+# ADR-058 platform_sdk 打包产物,本地构建/测试留下的,不进 git
+platform-sdk/*.egg-info/
+platform-sdk/.pytest_cache/
+platform-sdk/build/

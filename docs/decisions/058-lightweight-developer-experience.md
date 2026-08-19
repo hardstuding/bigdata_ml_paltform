@@ -119,6 +119,46 @@ algo 那套的地基是"大家共用服务器上同一批 conda 环境"。在 K8
    Workflow / CronWorkflow。等价于 algo 里 `$EXECUTENOTEBOOK` +
    `pydolphinscheduler` 那层。
 
+#### 关于 Hera(Argo 官方 Python SDK):第二批用,第一批不用
+
+2026-08-19 zhenghe 追问"有没有更好的开发管理方案",重新核实了一轮
+现成方案,结论记在这里,避免以后重复调研:
+
+`hera`(argoproj-labs 维护,当前 7.1.0)是 Argo Workflows 的 Python SDK,
+**v7.0.0 的 release notes 明确写了 "Update models for Argo Workflows 4.0
+compatibility"**,本平台部署的是 Argo Workflows v4.0.8(chart
+`argo-workflows` 1.0.24 的 appVersion,已核实),版本是对得上的。
+
+**但第一批不引入它。** 第一批的用户接口是 10 行的 `job.yaml`(声明式),
+`submit_job()` 要做的只是把它翻译成一份 Workflow manifest——大约 60 行
+模板代码,不依赖任何第三方 SDK,也就不会被 Argo 版本升级牵动。
+
+**Hera 真正的价值在多步骤 Python DAG 编排**,那正是 algo 里
+`pydolphinscheduler` 的 `Workflow`/`Shell`/`>>` 那套的直接对应物。
+等做到"特征工程 → 训练 → 评估"这类多步骤 DAG 时(ADR-058 实施顺序的
+第 2 批之后),**既定选择就是 Hera,不要自己造 DAG 拼装逻辑**——这条
+先写在这里,避免到时候重新纠结一遍。
+
+#### 关于 Metaflow:现在不用,但记下触发条件
+
+`metaflow`(Netflix,当前 2.19.38)的定位和本 ADR 高度重合:本地 Python
+优先、一个 flag 扩到 K8s、而且能编译成 Argo Workflows。**现在不采用**,
+理由是三条硬成本:要额外跑 metadata service + datastore 才能超出纯本地
+模式(违反"太重");强制把代码组织成 `FlowSpec` class(对用户的侵入比
+"写个普通 .py + job.yaml"大得多);自带的 artifact/版本追踪和已经部署
+并验证过的 MLflow 大面积重叠。
+
+**触发条件写清楚**:如果薄 SDK 用一段时间后,"重跑/断点续跑/并行
+fanout"这类需求反复出现,那就是 Metaflow 该上场的信号。它是"下一档",
+不是"更好",不要因为它功能多就提前上。
+
+#### 明确排除的方案
+
+Flyte / Kubeflow Pipelines / Dagster / Prefect——都自带一整套控制面
+(自己的 admin/scheduler/console),直接违反"减少二开、避免不好维护和
+升级"这条硬约束,而且本平台已经有 Airflow + Argo Workflows 两个调度器,
+再引入第三个是负价值。
+
 用户 notebook 第一行 `from platform_sdk import trino` 就补掉了
 usage-guide 记录的那个缺口——**那个"产品差距"的解法是一个函数,不是
 一个平台**。
@@ -153,6 +193,15 @@ mlflow / feast / pandas / scikit-learn)。**JupyterHub 的 singleuser pod
 `apps/argo-workflows-training-image/`、`apps/superset-image/`),包括
 已经踩平的 PyPI 限速(阿里云 mirror)和离线缓存(`image-cache-amd64/`)
 两个坑,不是从零开始。
+
+**这个镜像会继承 `docs/BACKLOG.md` P2.1 那条债,如实写明不假装没有**:
+现在没有 CI 镜像构建、没有 registry,三个自建镜像都是人工在云主机上
+`docker build` + `docker save` 进 `image-cache-amd64/`。第一批**沿用
+这个已有模式**,不先去建 registry + GitHub Actions + digest 固定那一整套
+——那是 P2.1 的独立工作,先做会把本 ADR 拖很长。代价是:镜像的可复现性
+依赖人工执行,和 P2.1 描述的问题完全一样。等 P2.1 真正做的时候,这个
+镜像应该是第一批接进 CI 构建的对象之一(它比那 3 个自建 Flask 应用更
+适合当试点,因为它没有源码塞 ConfigMap 那层耦合)。
 
 多环境(类似 algo 的 21 个 conda env)用 JupyterHub chart 原生的
 `singleuser.profileList` 暴露成登录时的下拉选择——**chart 自带能力,

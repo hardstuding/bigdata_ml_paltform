@@ -1,0 +1,6 @@
+# job.yaml 的字段和 platform_sdk.submit.submit_job() 的参数一一对应,
+# 没有另一套 schema 要学。只有 name/script 是必填的,其它都有默认值。
+name: hello-job
+script: job.py
+# image、cpu、memory、env、namespace、service_account 都不填,用 SDK 默认值
+# (统一镜像 local/platform-runtime:0.1.0、200m/512Mi、argo-workflows 命名空间)。

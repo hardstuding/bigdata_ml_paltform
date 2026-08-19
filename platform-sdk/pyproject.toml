@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "platform-sdk"
+version = "0.1.0"
+description = "这个数据+AI平台的薄客户端:连接封装 + 作业提交,见 docs/decisions/058"
+requires-python = ">=3.10"
+
+# 依赖在这里用宽松下界,不写死版本——**精确版本固定在镜像的 Dockerfile 里**
+# (apps/platform-image/Dockerfile)。理由:这是一个库,写死版本会和使用方
+# 的其它依赖打架;而镜像是最终交付物,那里才需要可复现的精确版本。这是
+# Python 打包的通行做法,不是这个项目自己发明的例外。
+dependencies = [
+    "trino>=0.330",
+    "mlflow-skinny>=3.14",
+    "boto3>=1.35",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# submit 功能要往集群里创建 Argo Workflow 对象才需要 kubernetes 客户端。
+# 只想在 notebook 里查数的人不用装这个,少一个重依赖。
+submit = ["kubernetes>=31.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+platform-submit = "platform_sdk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["platform_sdk*"]
