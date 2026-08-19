@@ -25,17 +25,29 @@
 
 ## P1:解锁角色能力(投入产出比最高,先做这一批)
 
-依据 [`docs/roles.md`](roles.md):平台今天只对运维完整、对分析师大体
-可用,大数据开发和算法工程师是**结构性缺失**。这一批的目标是让每个角色
-至少能开工。
+依据 [`docs/roles.md`](roles.md)。**1.2/1.3/1.4 已于 2026-08-19 完成**
+(OpenMetadata / JupyterHub+MLflow / Spark Operator+SeaTunnel+Spark
+History Server 全部部署并逐个真实登录验证过,不是只看 Pod Running)。
+过程中发现并修复了 8 个真实 bug——这些组件长期 park、从没真的走过一次
+登录,配置错误一直没暴露:SSO 端口/scope/upstream Service 名字写错
+(mlflow-oauth2-proxy 配的 Service 名根本不存在)、Argo Workflows
+issuer 不匹配导致 CrashLoopBackOff 两天多没人发现、Keycloak realm 从
+建立起就没配过 groups claim mapper(意味着 Grafana/JupyterHub 的按组
+授权可能从来没真的生效过,这次一并修了)、OpenMetadata 镜像走自定义
+域名代理导致 ImagePullBackOff、MLflow 内存限制太小 36 秒内 OOMKill、
+Spark History Server 缺 S3A 连接器 jar。详见 `docs/journal/2026-08.md`
+和对应 commit。
 
-### 1.1 环境抽象补上"组件选择"层 —— 一个动作解锁三个角色
+### 1.1 环境抽象补上"组件选择"层 —— 现在优先级更高了,不是更低了
 
-**这是下一步唯一动作**(见 `CURRENT_WORK.md`)。cloud-full 上 8 个组件
-没启用,不是资源不够(16 vCPU / 64 GiB),是"哪些组件在哪个环境启用"
-至今靠人工在 `apps/definitions/` 和
-`environments/cloud-full/pending-definitions/` 之间 `git mv`——这个机制
-是 2026-08-08 为 6GB 的 colima 本机设计的,搬到云上没有重新评估过。
+这次拉起 P1.2/1.3/1.4 全靠人工 `git mv` + 逐个手动排查 Keycloak
+client/Secret/scope 缺口完成,过程中暴露的好几个 bug(client 已存在但
+Secret 缺失、groups scope 从来没配过)本可以在"改配置就重新拉起"这套
+机制的约束下被更早、更结构性地测试捕获,现在只能靠"当天有没有人手动
+测登录"这种运气发现。cloud-full 是 16 vCPU / 64 GiB,不是资源不够,是
+"哪些组件在哪个环境启用"至今靠人工在 `apps/definitions/` 和
+`environments/cloud-full/pending-definitions/` 之间 `git mv`——这个
+机制是 2026-08-08 为 6GB 的 colima 本机设计的,搬到云上没有重新评估过。
 
 要做的:让"启用哪些组件"变成 `environments/<env>/config.yaml` 里的声明,
 和已有的 `scripts/render-environment-config.py` 机制衔接(不是再造一个
@@ -44,29 +56,24 @@
 同一层还缺"规格分档"(副本数/resources/持久化按环境取值),可以一起做,
 优先级低于组件选择。
 
-### 1.2 部署 OpenMetadata —— 解锁分析师"找数据"+ 治理"资产盘点"
+### 1.5 Argo Workflows RBAC(2026-08-19 新发现,已单独立项跟踪)
 
-分析师链路**第一步就断了**:不知道有哪些表。同时它还卡住 ADR-046 那个
-"浏览目录勾选表"的申请体验(没有它就退化回手打完整表名)、以及治理角色
-的数据资产盘点。**一个组件同时解锁三处**,是单项性价比最高的。
+SSO 登录本身已修好(之前 CrashLoopBackOff 两天多没人发现,issuer/
+issuerAlias 配置问题),真实登录测试确认能成功拿到 Bearer token、
+落地 SPA。但登录后调用 workflows API 返回 403 "not allowed"——
+`server.sso.rbac` 需要的 K8s RBAC 绑定没配。不阻塞其它角色。
 
-组件本身验证过(ADR-015,2026-08-13 连 CNPG 验证通过),等 1.1 做完
-应该是改配置就能起。
+### 1.6 Kafka 部署 —— 大数据开发角色补齐最后一块
 
-### 1.3 部署 JupyterHub + MLflow —— 算法工程师从"零"到"能开工"
+Spark Operator/SeaTunnel/Spark History Server 已部署验证,Kafka 还没有
+(它目前零真实消费者,见 ADR-056 对引入顺序的判断,之前排在这几个之后
+是故意的)。
 
-今天算法角色连第一步(打开 notebook)都做不到,唯一部署好的 KServe 是
-流程最末端。这两个是最小解锁组合(ADR-025 / ADR-019 都验证过)。
+### 1.7 算法链路端到端重新验证
 
-注意:拉起来只是"能开工",**不等于体验成立**——`docs/usage-guide.md`
-如实记录了"没有打开 notebook 就自动连好 Trino、自动带自己权限"这个
-真实产品差距,那属于 P4 的 A 线。
-
-### 1.4 部署 Spark Operator + SeaTunnel —— 大数据开发从"零"到"能开工"
-
-Airflow(调度器)已经在跑,但它要调度的引擎全部没部署。这两个都单独
-验证通过过(ADR-036 / ADR-037)。Kafka 可以稍后(它目前零真实消费者,
-见 ADR-056 对引入顺序的判断)。
+JupyterHub/MLflow/Spark Operator/Feast/Argo Workflows 都已部署验证,
+但"notebook → Feast 特征 → Argo Workflows 训练 → MLflow 记录"这条完整
+链路本身还没有重新连起来跑一次——各组件是分别验证的,不是这条链路本身。
 
 ---
 
