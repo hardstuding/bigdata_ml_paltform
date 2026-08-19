@@ -404,8 +404,11 @@ fi
 
 # 挂到每一个用 allowed_groups/role_attribute_path 做组权限收拢的 client 上
 # (不是全部 12 个 client 都需要——不用 groups 的 client 加了也没坏处,但
-# 只列真正用到的,避免让读代码的人以为每个 client 都依赖这个)。
-for gc in grafana jupyterhub mlflow; do
+# 只列真正用到的,避免让读代码的人以为每个 client 都依赖这个)。2026-08-19
+# 补 spark-history-server:第一版漏掉了它,登录测试时才发现它也配了
+# allowed_groups(和 mlflow 同一份文件家族写出来的,一开始 grep 检查
+# allowed_groups 用法列表时漏看了一处)。
+for gc in grafana jupyterhub mlflow spark-history-server; do
   gcid=$(kcadm get clients -r platform -q clientId="$gc" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -z "$gcid" ]; then
     echo "client ${gc} 还不存在,跳过挂 groups scope"
