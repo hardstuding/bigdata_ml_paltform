@@ -30,6 +30,15 @@ metadata:
   namespace: argo-workflows
 spec:
   entrypoint: train
+  # 2026-08-19 真实踩坑:没显式指定这个字段,Workflow pod 会落到
+  # argo-workflows 命名空间的 default ServiceAccount 上,这个 SA 没有
+  # 权限创建 workflowtaskresults(报 "forbidden"),训练本身跑成功了
+  # (accuracy/模型都已经写进 MLflow)但 Workflow 整体还是判定 Error。
+  # Helm chart(argo-workflows-workflow-controller)本来就建好了一个专门
+  # 有这个权限的 argo-workflow ServiceAccount(见对应的 Role/RoleBinding,
+  # 是这个项目更早一次"Argo Workflows RBAC 修复"里加的),用它就行,不用
+  # 自己再建一套 RBAC。
+  serviceAccountName: argo-workflow
   # 2026-08-19:目前只有一步。真要复现 ysb/algo 那种多步骤 DAG(特征
   # 工程 -> 训练 -> 结果落库),在这个 templates 列表下加更多步骤、用
   # dependencies 字段串起来就行,这个模板的结构本身已经是为多步骤准备
