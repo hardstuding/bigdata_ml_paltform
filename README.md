@@ -197,13 +197,16 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 
 ## 文档地图
 
+- **想知道"这个平台现在到底能用来干什么" → [`docs/roles.md`](docs/roles.md)** —— 五个角色(分析师/大数据开发/算法/运维/管理)× 完整工作链路 × 每一环今天的真实状态。**这是"我们做到哪了"的唯一权威入口**,衡量标准是"某个岗位能不能独立完成一件真实工作",不是"部署了哪些组件"(见 [ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))
 - **接手这个项目的 AI/人类,先看 [`CLAUDE.md`](CLAUDE.md) 和 [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md)**——协作规则和"现在唯一的主线任务是什么、下一步做什么",不用依赖对话记忆或者猜
 - **实际使用这套平台,先打开 `http://portal.local-lite.test`**(ADR-047)—— 统一门户,现在有哪些工具、分别是干什么的、点哪里进去,一个页面看完;各工具共用同一个 Keycloak SSO,登录一次到处能用,不用重复输密码
 - [`docs/usage-guide.md`](docs/usage-guide.md) —— 给数据分析师/算法工程师看的日常使用指南(Trino 怎么连、怎么申请表权限、Superset/建表工具怎么用、notebook 交互式开发现在的真实差距),不是运维文档
 - [`docs/BACKLOG.md`](docs/BACKLOG.md) —— 记下来但先不做的想法,按优先级排,不打断当前主线
 - [`docs/architecture.md`](docs/architecture.md) —— 架构总览、分层设计、组件清单、路线图(Phase 0-4)、还没定的设计决策
-- [`docs/decisions/`](docs/decisions/) —— ADR,每个非显而易见的技术选择,包含理由、踩过的坑、后续更正(是不是验证过、验证到什么程度都写在里面,不是"我们决定这么做"就完了)
+- [`docs/decisions/README.md`](docs/decisions/README.md) —— **ADR 主题索引**(57 份,按平台底座/湖仓/SSO/权限治理/可观测性等分组,带验证状态)
+- [`docs/decisions/`](docs/decisions/) —— ADR 原文,每个非显而易见的技术选择,包含理由、踩过的坑、后续更正(是不是验证过、验证到什么程度都写在里面,不是"我们决定这么做"就完了)
 - [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md) —— 真实踩过的坑,排障时先查这里
+- [`docs/journal/`](docs/journal/) —— 按月归档的排障与验证日志(2026-08-19 从 `CURRENT_WORK.md` 拆出来的,那份文件只留当前状态)
 - [`docs/operations/upgrade.md`](docs/operations/upgrade.md) —— 当前版本清单 + 升级流程
 - [`docs/operations/backup.md`](docs/operations/backup.md) —— 备份策略
 - [`docs/operations/tuning.md`](docs/operations/tuning.md) —— 哪些参数预期要按自己情况调,调哪个文件
@@ -214,4 +217,20 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 
 ## 当前状态
 
-Phase 0(平台底座)、Phase 1(湖仓核心)、Phase 2(数据工程:SeaTunnel → Iceberg → Airflow 调度 → Superset 看板)、Phase 3(AI/ML:JupyterHub/Argo Workflows/MLflow/KServe)核心链路均已验证;这台本机资源有限,验证过的组件按需收在 `pending-definitions/`,不是常驻全开。Kafka 单独验证过健康,还没接进端到端数据管道。企业级权限管理(组织架构同步、按组分角色)已落地,可插拔基础设施(Postgres/对象存储都已经推广到多个组件,见 ADR-030)持续推进中,细粒度数据权限(Trino 行列级)还没开始。共享 Postgres 已迁移到 CloudNativePG operator 管理(ADR-038),NetworkPolicy 推广到核心命名空间(ADR-035),每日自动备份 + 恢复演练验证过(ADR-033),Alertmanager 已打开(ADR-034),队列资源管理(ResourceQuota/LimitRange/PriorityClass)已上线并验证过(ADR-041)。"从零拉起整套服务"这条路径 2026-08-13 真的从空集群完整跑通过一次,不只是写在文档里(ADR-039)。企业级治理需求(表权限分级审批、血缘、建表规范等)已完整归档待规划(ADR-040)。完整的、持续更新的状态见 [`docs/architecture.md`](docs/architecture.md) 的路线图表格——这里不重复维护一份会过时的清单。
+**权威来源是 [`docs/roles.md`](docs/roles.md)**——这里不再维护第二份会
+过时的进度清单(2026-08-19 起,见
+[ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))。
+
+一句话现状:**平台对运维角色基本完整,对数据分析师大体可用(卡在"找数据"
+这一步,OpenMetadata 未部署),对大数据开发和算法工程师是结构性缺失
+(它们依赖的 Spark Operator / SeaTunnel / JupyterHub / MLflow 都还没在
+cloud-full 上启用),管理角色的驾驶舱尚未开始。**
+
+底座部分已经比较扎实:GitOps 单一变更入口、从空集群一键拉起(真的推倒
+重建跑通过,ADR-039)、企业级权限治理全链路(分级审批/到期回收/权限交接,
+ADR-044/045/050)、Trino 细粒度访问控制已正式生效(ADR-051)、指标+日志+
+告警+每日备份(含恢复演练)都在。
+
+主要债务(见 [`docs/BACKLOG.md`](docs/BACKLOG.md) P1/P2):环境抽象只做了
+"取值"层,"哪些组件在哪个环境启用"仍靠人工挪目录;没有镜像构建流程,
+8 个地方在容器启动时现装 Python 依赖。

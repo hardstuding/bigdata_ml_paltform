@@ -1,401 +1,281 @@
 # Backlog
 
-新想法/顺手发现的问题,默认进这里,不自动打断 `docs/CURRENT_WORK.md`
-里的当前主线。这份文件只做索引和优先级排序,不重复描述已经在别处写清楚
-的内容——每一项都指向权威来源(ADR/architecture.md),不在这里复制一遍。
+新想法/顺手发现的问题,默认进这里,不自动打断
+[`docs/CURRENT_WORK.md`](CURRENT_WORK.md) 里的当前主线。这份文件只做索引
+和优先级排序,不重复描述已经在别处写清楚的内容——每一项都指向权威来源
+(ADR / architecture.md),不在这里复制一遍。
+
+**排序依据(2026-08-19 起,见 [ADR-057](decisions/057-architecture-review-2026-08-19.md)):
+按"阻塞哪个角色的哪条能力"排,不按"还有哪个组件没接"排。**
+判断某件事该排多前,先看 [`docs/roles.md`](roles.md) 的角色能力表。
+
+> 2026-08-19 重排说明:此前的 P1.5/P1.6/P1.7 不是优先级,是不同日期追加
+> 的批次(带小数的层级本身就是"一直在追加、没有重排过"的证据)。这次
+> 按角色影响重新排了序,已完成的条目收敛到底部"已完成(存档)",避免
+> 一份 400 行的清单里一半是划掉的东西。
+
+---
 
 ## P0(会阻断当前主线的,才有资格排这里)
 
 当前没有。如果出现真实的数据风险/持续计费异常/安全问题,加在这里,
 并在 `docs/CURRENT_WORK.md` 里注明"CURRENT 被 P0 阻断,原因是……"。
 
-## P1(cloud-full 部署收尾之后,下一段专门时间做)
+---
 
-排序和理由见
-[ADR-055](decisions/055-external-review-response-2026-08-15.md#后续明确排期不是无限期搁置)
-"后续"一节,这里只列条目:
+## P1:解锁角色能力(投入产出比最高,先做这一批)
 
-1. ~~破坏性操作防护补全~~——**2026-08-16 已完成**(见
-   `docs/CURRENT_WORK.md` 对应记录 + `docs/operations/incidents.md`):
-   `scripts/confirm-destructive-kubectl.sh` 补上了 namespace 允许清单
-   (动态从 ArgoCD Application 现查)+ 受保护 namespace 二次确认 +
-   Postgres 备份新鲜度检查,4 组拒绝路径全部验证通过。评审建议的"完整
-   统一 guard 框架"这个更大的版本仍然没做,按 ADR-055 的决定是"除非真的
-   反复出现同一种误用模式才做",不算这次的验收范围。
-2a. ~~Airflow DAG 源文件和 ConfigMap 之间没有同步/漂移检测机制~~——
-    **2026-08-16 已做完**:新增 `scripts/sync-airflow-dags-configmap.py`
-    (和 `scripts/sync-app-configmaps.py` 同一个模式,`--check` 模式已接进
-    `.github/workflows/validate.yml`)。第一次跑起来就抓到一个真实的、
-    这次才发现的漂移——不是之前记录的那次(`dbt_demo.py` 之前手动改成
-    一致过),是一次新的分叉:源文件的 `DBT_IMAGE` 丢了 image digest pin
-    (`python:3.12-slim` 而不是带 `@sha256:...` 的完整引用),线上实际
-    部署的 ConfigMap 是对的、源文件是错的——**先对比过线上真实内容再动
-    手**,确认这不是"用源文件覆盖 ConfigMap 就完事"这么简单(那样会把
-    正确的线上配置换成错的),而是先修好源文件缺的 pin,再从修好的源文件
-    重新生成 ConfigMap,最后核对"去掉注释后代码完全一致"确认没有改变
-    线上任何实际行为,才提交推送。
-2. 三个自建 Flask 工具补测试(依赖锁定已经在任务 #13 做完,见上面
-   P1.6"Python 依赖锁定"那条;**单一源码问题 2026-08-16 已解决**——
-   新增 `scripts/sync-app-configmaps.py`,`src/app.py` 是唯一源码真相,
-   ConfigMap 里的 app.py 从它自动生成,`--check` 模式可以接进 CI 防止
-   漂移,已经实测验证过能正确检测+修复漂移。3 个 app-configmap.yaml
-   顶部注释也改成指向这个脚本。**补测试进度**:`platform-portal`(11 个测试)和
-   `table-registration-app`(29 个测试,覆盖 parse_columns/
-   parse_table_fqn 校验逻辑——含 SQL 注入类输入、/submit 路由 Trino/
-   OpenMetadata 失败/跳过/成功四种状态组合)都已经做完,全部通过。
-   过程中顺带发现本机没装 `trino` 这个包,用之前任务#13 锁定的版本
-   (`trino==0.338.0`)装上了。`permission-request-app`(1388行,三个里最大最复杂)这次也补了测试,
-   但**如实说明覆盖范围不是全部**:测的是 `build_approval_steps`/
-   `get_manager_chain`/`load_employees`/`is_approver` 这一组"按 ADR-040
-   规则算出谁要审批"的核心逻辑(20 个测试全过,专门覆盖了 app.py 注释里
-   提到的那个真实修过的"L2/L3 重复审批人"bug,作为回归测试锁住),
-   `/request`/`/table-access/*` 这些路由的完整状态机(approve/reject/
-   escalation/transfer/audit/external-callback)**2026-08-16 已补上**:
-   新增 32 个测试(总共 52 个,全部通过),用 Flask `test_client` 走真实
-   路由,不是直接调内部函数——覆盖组权限申请的 approve/reject、表访问
-   多级审批链的完整走查(L1 全部批完才解锁 L2、越级审批被 409 拦下、
-   任意一级拒绝导致整体拒绝+其余步骤 skipped)、外部 OA 回调的 token
-   校验+状态流转、升级检查(提醒 vs 真正换人审两条阈值线都测了)、权限
-   交接、审计页权限拦截。**如实说明覆盖范围仍不是全部**:GIT_TOKEN 在
-   测试环境里始终不配置,所以 `apply_to_git`/`apply_grant_to_git`/
-   `reclaim_expired`/`transfer` 里真正执行 git clone/push 的分支,以及
-   `dispatch_step` 里真实 POST 到外部 OA webhook 的这条网络路径,都只
-   测到了"没配置/mock 掉时优雅降级",没有测到真实 subprocess/网络调用
-   本身——这是更进一步的独立工作,需要搭一个临时本地 git 仓库或者更细的
-   mock,这次没做。3 个 app 现在都有了扎实的测试覆盖,不再是"起点"这个
-   量级了)
-3. ~~环境 overlay 重构~~——**2026-08-16 已实现第一版**,直接回应 zhenghe
-   的明确要求("local、云、生产等,通过一份配置就可以拉起不同的服务...
-   你完全没做好呀")。机制:`environments/<env>/config.yaml`(目前
-   `domain_suffix`/`http_port_suffix`/`https_port_suffix` 三个变量)+
-   `templates/**`(9 个受环境值影响的文件的模板版本,`{{DOMAIN_SUFFIX}}`
-   等占位符)+ `scripts/render-environment-config.py <env> [--check]`
-   (把模板渲染进 `apps/definitions/`、`platform/apps/`、
-   `platform/bootstrap/`、`scripts/` 对应的真实部署文件,`--check` 模式
-   防漂移,已接进 CI)。**验证方式**:对 cloud-full 跑了一次真实渲染,
-   `git diff` 只多出各文件头部的"自动生成"说明注释(57 insertions, 0
-   deletions),证明渲染结果和当前已验证工作的部署文件语义完全一致,不是
-   臆想出来"应该等价"。zhenghe 后续切 local-lite/新建 prod,理论上只需要
-   `python3 scripts/render-environment-config.py <env>` 一条命令——但这句
-   "理论上"还没有真的针对 local-lite/prod 跑过一次渲染+部署验证,下次真
-   在这两个环境上操作时要先确认。**已知遗留限制**(诚实记录,不是隐藏
-   债务):① `templates/platform-bootstrap/argocd-values.yaml` 里
-   `global.hostAliases` 那段是 local-lite 专用的结构性 workaround(原文件
-   注释就写了"cloud-full/prod 用真实 DNS 后这段要删掉"),简单字符串替换
-   机制表达不了"整段删除"这种条件逻辑,现在渲染到其它环境时这段还在,
-   需要人工确认/删除,不是自动的;② 覆盖范围只是"曾经因为环境差异改错过
-   的 9 个文件",不是系统性扫描过全仓库、保证没有遗漏的第 10 个硬编码点
-   ——2026-08-16 记录过的 colima 代理地址硬编码(见本条历史记录)属于
-   另一类问题(网络可达性探测,不是域名/端口),不在这套机制覆盖范围内,
-   仍要靠"再出现就发现"的方式暴露。
-4. 扩大 CI(见 ADR-055 引用的原评审 P1-3 完整清单)——**2026-08-16 迈出
-   第一步**:`.github/workflows/validate.yml` 新增 `test-flask-apps`
-   job,把 3 个自建 Flask 工具刚补的测试(60 个,见上面"三个自建 Flask
-   工具补测试"那条)接进 CI,外加 `sync-app-configmaps.py --check` 防止
-   ConfigMap 和 src/app.py 漂移。本地模拟过 CI 里的每一步命令,全部
-   通过。原评审 P1-3 清单里其它更大的 CI 扩展(比如镜像构建/集成测试)
-   还没做,这只是"测试写了就要接进 CI 让它自动跑"这一小步。
-5. ~~Trino OPA 真正切换生效~~——**2026-08-16 已上线**(zhenghe 在场,见
-   ADR-051"2026-08-16 正式上线"一节)。access-control.name=opa 已生效,
-   服务账号白名单审计过、grants-sync 修好、真实查询验证过(未授权拒绝/
-   授权放行/Superset 数据源不受影响)。过程中顺带修了 2 个真实 bug:
-   opa-grants-sync 硬编码 colima 代理地址导致 cloud-full 上一直失败、
-   ArgoCD ignoreDifferences 需要配 RespectIgnoreDifferences 才能在真正
-   sync 时也生效(不只是比较逻辑)。
-6. ~~iam-sync/opa-grants-sync 这两个 CronJob 在 cloud-full 上暂时被
-   suspend~~——**2026-08-16 都已修复并验证,不再是延后项**。
-   `opa-grants-sync`:硬编码的 colima 专用代理地址在 cloud-full 上连不上,
-   改成运行时探测。`iam-sync` 比想象中更深一层:除了同样的代理硬编码,
-   fetch-kubectl 这个 initContainer 原来靠裸 curl 下 dl.k8s.io 上
-   59MB 的 kubectl 二进制,实测这条路径本身限速到约 50kB/s(和 PyPI
-   CDN 那次是同一类"小文件测连通性很快、大文件才暴露真实带宽瓶颈"的
-   坑),改成 apt 装 mirrors.aliyun.com 镜像的 pkgs.k8s.io 官方仓库
-   (动态取当前 stable 分支的 major.minor,不是写死版本号)。两个都用
-   `kubectl create job --from=cronjob/...` 手动触发过真实运行:
-   `iam-sync` 真的克隆了仓库、连上 Keycloak、同步了 roles/groups;
-   `opa-grants-sync` 真的把 grants.csv 同步进了 OPA(见 ADR-051"2026-08-16
-   正式上线"一节)。
-7. ~~镜像缓存 digest 校验~~——**2026-08-16 已经做出来了**,不再是延后项:
-   `scripts/verify-image-digests.sh`,原因是这次 cloud-full 部署过程中
-   真实靠这套核实逻辑抓到过 9 个国内镜像站(daocloud)内容和官方不一致
-   的镜像(详见 `docs/CURRENT_WORK.md` 对应记录),不是纸面价值。**已知
-   限制**:一次性对 60+ 个镜像跑会撞上 Docker Hub 匿名拉取限流,出现过
-   同一个镜像两次查到不同"官方 digest"的自相矛盾结果,脚本注释里已经
-   记录清楚,现在更适合"抽查重点镜像"而不是"无脑跑全量清单当结论"。
+依据 [`docs/roles.md`](roles.md):平台今天只对运维完整、对分析师大体
+可用,大数据开发和算法工程师是**结构性缺失**。这一批的目标是让每个角色
+至少能开工。
 
-8. ~~`alloy`/`loki`/`kube-prometheus-stack` 这 3 个 ArgoCD Application 的
-   Sync Status 长期卡在 `Unknown`~~——**2026-08-16:2/3 已修好,第 3 个
-   挖到了更深一层、目前改不了的限制**。根因不只一层:
-   `controller.repo.server.timeout.seconds`(controller 等 repo-server
-   这次 RPC 调用的耐心,默认 60 秒)只是第一层,调到 180 秒之后
-   `alloy`/`loki` 稳定 `Synced/Healthy` 了。`kube-prometheus-stack`
-   这个 chart 更大,卡在更里面一层:repo-server 自己执行
-   `helm pull` 子进程时,**Helm 自身的 HTTP 客户端有一个约 120 秒的硬
-   超时**(实测日志:`context deadline exceeded (Client.Timeout or
-   context cancellation while reading body)`),这个不是 ArgoCD 的
-   `ARGOCD_EXEC_TIMEOUT`(已经调到 180 秒)能覆盖的——两层超时管的是
-   不同东西,Helm 那层目前没找到官方支持的覆盖方式。`platform/
-   bootstrap/argocd-values.yaml` 里的这两处调整都已经提交(对
-   `alloy`/`loki` 是真实、验证过的修复,对 `kube-prometheus-stack`
-   是"抬高了上限但个别情况下网络慢到连 120 秒都不够"),不再需要重新
-   诊断根因,如果还想继续往下修,方向是给这个 Helm 仓库配
-   一个可达性更好的镜像源(和 apt/pip 镜像源同一个思路)——两层超时都已经
-   调大过,再往上调收益递减(要么再等更久,要么就是真的需要换一条网络
-   路径),不影响当前验收范围(底层组件本身健康,`kube-prometheus-stack`
-   的 Sync Status 显示 `Unknown` 纯粹是这一层比较逻辑的展示问题)。
+### 1.1 环境抽象补上"组件选择"层 —— 一个动作解锁三个角色
 
-9. 公网域名+TLS 接入,环境驱动配置化:2026-08-16 用户明确提出的方向——
-   "域名这个还是走配置化生效就好,比如目前配置 test,起来就是可临时访问
-   的;未来配置 prod 等,就强制需要配置一个域名"。背景是当时想给
-   cloud-full 挂一个统一域名+TLS(所有服务挂同一域名下,SSO 回跳一次
-   登录全部生效)方便当天验证,但域名注册后中国大陆服务器强制要 ICP 备案
-   (1-20+ 工作日,不是当天能过),所以用户当场决定"域名当天用不了就先走
-   测试路线",本轮没有再回头处理这条,只是把当时的架构判断先记下来,
-   不代表现在就要动手实现:
-   - `test`/类似临时环境:允许没有真实域名,继续用当前的
-     NodePort(32460/32535)/`/etc/hosts` 这种"能跑但不是生产形态"的
-     临时访问方式(不因为缺域名就挡住日常验证)。
-   - `prod`(以及可能的 `cloud-full` 长期形态):应该**强制**要求配置一个
-     真实域名(+ TLS 证书),没配就不允许当作生产就绪状态对待——不是
-     "建议配",是校验层面的硬要求。
-   - 具体怎么落地成"改一个配置值就切换"(哪个变量、哪层去读、
-     ingress-nginx/cert-manager 怎么按环境分叉),这次没有设计,只是记录
-     方向,真正要做时需要单独展开成一个 ADR,包括域名注册+ICP 备案本身
-     (需要用户亲自处理身份核验,不是 Claude 能代办的部分)。
+**这是下一步唯一动作**(见 `CURRENT_WORK.md`)。cloud-full 上 8 个组件
+没启用,不是资源不够(16 vCPU / 64 GiB),是"哪些组件在哪个环境启用"
+至今靠人工在 `apps/definitions/` 和
+`environments/cloud-full/pending-definitions/` 之间 `git mv`——这个机制
+是 2026-08-08 为 6GB 的 colima 本机设计的,搬到云上没有重新评估过。
 
-## P1.5(确认必要,但还没设计——不是"按需可选")
+要做的:让"启用哪些组件"变成 `environments/<env>/config.yaml` 里的声明,
+和已有的 `scripts/render-environment-config.py` 机制衔接(不是再造一个
+新脚本),`pending-definitions/` 这个靠目录位置表达启用状态的机制退役。
 
-- **Flink**:2026-08-15 用户明确说"作为新的大数据平台有它的必要性"——
-  从 `docs/architecture.md` 路线图里"Phase 4 按需"这种偏可选的定位,
-  改成"确认要做,还没排期设计"。目前项目里唯一沾边的是
-  [ADR-011](decisions/011-seatunnel-not-airbyte.md)提到 SeaTunnel
-  "支持跑在 Flink 上做真正的低延迟流式同步",但实际部署用的是 SeaTunnel
-  自带的 Zeta 引擎,没有真的接 Flink。**2026-08-16 设计已经做完**,见
-  [ADR-056](decisions/056-flink-role-design.md):结论是 Flink 应该定位
-  成"流式计算引擎"(实时聚合/join/特征计算),不做"数据搬运"(那是
-  SeaTunnel + 未来的 Kafka Connect+Iceberg Sink Connector 该干的事);
-  引入顺序上,Kafka 现在零真实消费者、Kafka Connect+Iceberg Sink
-  Connector 这条 ADR-011 设计好的轻量路径也从没搭过,这两步应该先于
-  Flink。**这份 ADR 只是设计,没有部署任何东西**,不在当前 CURRENT
-  (cloud-full 部署上线)范围内实现。
+同一层还缺"规格分档"(副本数/resources/持久化按环境取值),可以一起做,
+优先级低于组件选择。
 
-- **Spark 4.x 评估**:2026-08-15 外部(Codex)review 指出仓库固定用
-  Spark 3.5.9(SparkApplication/History Server/Feast 自建镜像里的
-  PySpark 都是这个版本,`iceberg-spark-runtime-3.5_2.12:1.10.0`),而
-  Spark 官方发布线已经到 4.x(4.0.4/4.1.3/4.2.0,已核实 `spark.apache.
-  org/downloads.html` 属实)。核实过 Codex 提出的具体理由后,结论是
-  "方向对,但支撑这个方向的一条关键理由是错的":
-  - 属实:Spark 4.x 默认 Scala 2.13(2.12 被移除)、Java 17 起步、
-    `iceberg-spark-runtime-4.0_2.13`/`4.1_2.13` 确实已经在 Maven
-    Central 发布(1.10.0)。3.5.9 本身不是废弃版本(2026-07 的维护版
-    补丁),但确实是旧的大版本线,值得评估升级。
-  - **不属实**(Codex 原话暗示"升级 Spark 4 可能就不用锁 Hive 3.1.3
-    了"):专门查证过,Spark 4.0 的 SPARK-45265"Support Hive 4.0
-    metastore"是 Spark 自己内置 Hive 客户端(HiveExternalCatalog)的
-    改动,不是 Iceberg 自己的 Hive Catalog 客户端。真实证据
-    apache/iceberg#13572:有人在 Spark 4.0.0 +
-    `iceberg-spark-runtime-4.0` 上连 Hive 4.0.1 metastore,报的还是
-    同一个 `Invalid method name: 'get_table'`——升级 Spark 大版本本身
-    不能解开 Hive 3.1.3 这个限制,已经把这条更正记进
-    `apps/hive-metastore/manifests/deployment.yaml` 的注释里,避免
-    以后重新踩这个误判。
-  - 涉及的联动变化(Java 11→17、Scala 2.12→2.13、Iceberg runtime、
-    Hadoop/S3A 依赖、PySpark/Feast/History Server/Airflow 作业版本对齐、
-    ANSI SQL 默认开启的行为差异)确认属实,升级不是改个版本号那么简单,
-    值得做成独立的、不影响现有 3.5.9 基线的 PoC(Spark 4.1.3 + Java 17 +
-    Scala 2.13 + Iceberg 1.11.0,不是抢先上 4.2.0——**已核实**
-    `iceberg-spark-runtime-4.2_2.13` 在 Maven Central 上不存在,不是"还没
-    找到证据",是真的没发布,4.2.0 现在没法用来跑 Iceberg,不是保守选择,
-    是硬约束)。不在当前 CURRENT(cloud-full 部署上线)范围内做,cloud-full
-    收尾之后再排期,local-lite 继续用 3.5.9 当已验证基线。
-  - **2026-08-15 本地已经做过一轮轻量 PoC 验证**(纯 `docker run`,没碰
-    colima 里的 k3s/MinIO/Hive Metastore,验证完已清理干净):
-    `apache/spark:4.1.3-python3`(Scala 2.13.17 / Java 21 Temurin,这台
-    Mac arm64 原生跑)+ `iceberg-spark-runtime-4.1_2.13:1.11.0` 建表/
-    INSERT/MERGE INTO/snapshots 元数据表查询全部成功;额外验证了 S3A 链路
-    (真实起了一个临时 MinIO 容器,不是纸面推演):Spark 4.1.3 镜像自带
-    `hadoop-client-api/runtime` 是 **3.4.2**(不是项目现在 3.5.9 用的
-    3.3.4),对应 `hadoop-aws:3.4.2` 的依赖是 `software.amazon.awssdk:bundle`
-    (AWS SDK **v2**,不再是 3.3.4 那条线用的 SDK v1)——这意味着升级到
-    Spark 4 之后,Spark 这边的 S3 SDK 会和 Trino(已经是 SDK v2)对齐,
-    消除现在两边 SDK 版本不一致的情况。用这组版本(`hadoop-aws:3.4.2`)对
-    真实 MinIO 做了读/写/追加写验证,全部成功。**特意没有用
-    `hadoop-aws:3.5.0`**(Maven Central 上真实最新版)——因为它要匹配的是
-    镜像自带的 hadoop-client 版本(3.4.2),不是"哪个最新用哪个",装
-    3.5.0 大概率复现这个项目已经真实踩过一次的
-    `ClassNotFoundException`(class file 版本不匹配)那类坑,同样的道理
-    也适用于以后任何"依赖库版本要不要跟着升到最新"的判断。
-    完整 PoC(History Server、Feast、Airflow 作业、Hive Metastore 4.2 并行
-    验证等)仍然排在 cloud-full 收尾之后,这次只是先确认基础可行性。
+### 1.2 部署 OpenMetadata —— 解锁分析师"找数据"+ 治理"资产盘点"
 
-## P1.6(2026-08-15 外部 Codex 审计——已逐条核实,PostgreSQL/Kafka/Trino/Redis/KServe runtime 部分)
+分析师链路**第一步就断了**:不知道有哪些表。同时它还卡住 ADR-046 那个
+"浏览目录勾选表"的申请体验(没有它就退化回手打完整表名)、以及治理角色
+的数据资产盘点。**一个组件同时解锁三处**,是单项性价比最高的。
 
-原始建议保留在 `docs/claude-improvement-recommendations-2026-08-15.md`。
-**2026-08-15 已经逐条上官方发布页/Maven Central/GitHub 核实**(不是照抄
-Codex 的表格),结论:Codex 给的具体版本号和技术判断**基本全部属实**,
-没有编造或过时到失真的地方,唯一比 Codex 原话更严重的是 Redis 这条。
+组件本身验证过(ADR-015,2026-08-13 连 CNPG 验证通过),等 1.1 做完
+应该是改配置就能起。
 
-- **PostgreSQL**:16.6 → 官方最新 minor 是 **16.15**(Codex 说 16.14,
-  方向对、数字已经又推进了一个补丁版,来源:postgresql.org/support/
-  versioning)。CloudNativePG operator 对新版本的支持面这次没查,升级前
-  要先确认。
-- **Kafka**:4.3.0 → **4.3.1 真实存在**,官方发布公告确认修了约 15 个
-  问题,核心是 Kafka Streams RocksDB 原生内存泄漏,对应真实 JIRA
-  **KAFKA-20616**/**KAFKA-20688**(来源:kafka.apache.org 官方 4.3.1
-  发布公告)。Codex 这条完全准确。
-- **Trino**:480 → **483**(来源:trino.io/download.html)。Codex 准确。
-- **Redis**:项目里 `redis:7-alpine` 是浮动 tag,镜像缓存里另外出现过
-  `redis:8.6.4-alpine`。核实到的官方最新稳定版是 **8.4.5**
-  (2026-07-23,来源:redis.io 官方 8.4 分支 RELEASENOTES)——**这是一次
-  安全发布**,修了一个 `RESTORE` 命令恢复 stream 消费组时的
-  use-after-free,**可导致远程代码执行(RCE)**,还有 RedisBloom/TDigest
-  的越界写。**比 Codex 原话("先锁定具体补丁版本")更紧急**,这是真实的
-  安全修复,不只是"该锁版本了"。
+### 1.3 部署 JupyterHub + MLflow —— 算法工程师从"零"到"能开工"
 
-  **`8.6.4-alpine` 那个疑点已经查清楚,而且发现了一个比 RCE 更值得优先
-  处理的问题**:那个版本号根本不是这个项目自己引用的——顺着
-  `scripts/list-project-images.py` 的扫描逻辑逐个 chart 排查,来源是
-  **ArgoCD 自己的 Helm chart(`argo-cd`)自带的内置 Redis 依赖**(ArgoCD
-  用它做缓存),和 Feast 那个 `redis:7-alpine` 是完全不同的两个 Redis
-  实例,不存在版本号"对不上"这回事。但顺着这条查下去,在 argo-cd chart
-  的 `values.yaml` 里发现一条官方注释:`# Do not use 7.4.0 <= v < 8.0.0,
-  otherwise you are no longer using an open source version of Redis`
-  ——Redis 在这个版本区间被 Redis Ltd 换成了限制性更强的许可证
-  (RSALv2/SSPLv1),8.0 之后才又变回开源(AGPLv3,"Redis Open
-  Source")。**实测确认这个项目 Feast 用的 `redis:7-alpine`(浮动 tag)
-  现在解析到的真实版本是 `7.4.10`**(`docker run --rm redis:7-alpine
-  redis-server --version` 实测),**正好落在这个非开源许可证区间里**——
-  不只是"版本旧该打安全补丁",是现在跑着的 Redis 镜像本身可能已经不是
-  开源许可证了,优先级应该在 RCE 修复之上。好消息是解法是同一个动作:
-  直接升到 8.x(核实过的 8.4.5)既修了 RCE,也回到了开源许可证,不需要
-  分两步。
-- **KServe ServingRuntime(TF Serving 2.6.2/Triton 23.05/TorchServe
-  0.9.0)**:**精确核实**——这三个版本号就是 KServe v0.19.0 官方
-  `config/runtimes/kustomization.yaml` 自己写死的(来源:
-  raw.githubusercontent.com/kserve/kserve/v0.19.0/config/runtimes/
-  kustomization.yaml),不是这个项目装的时候选旧了。同一份文件里还发现
-  `sklearnserver`/`xgbserver`/`pmmlserver`/`paddleserver`/`lgbserver`/
-  `predictiveserver`/`huggingfaceserver`(+`-gpu`)这 8 个 runtime 官方
-  自己用的就是字面 `latest`/`latest-gpu`——Codex"官方默认里混着
-  latest"这条完全准确,而且更精确的做法是:各个单独 runtime YAML 用的
-  是 kustomize 占位符 `:replace`,真正版本号是在 `kustomization.yaml`
-  的 `images` 转换表里替换进去的,升级思路应该是**整体替换这份
-  images 转换表**,不是逐个改单独 YAML。
-- **暂时保留,不算落后**(沿用 Codex 原判断,这次没有单独复核):
-  SeaTunnel/MLflow/OpenMetadata/OPA/KServe 控制面/Spark Operator/
-  ArgoCD/Argo Workflows/Grafana 系/Keycloak/cert-manager,Airflow 3.2.2
-  (3.3.0 是功能性升级,不是安全修复,不紧急)。
-- **这几条已经全部处理完,不再是"还没核实"**:Triton 23.05→**26.07-py3**
-  (2026-08-16 核实并升级,`apps/kserve-runtimes/manifests/
-  kustomization.yaml`,匿名拉取不需要 NGC 账号/API key,`-py3` 是通用
-  tag、CPU 也能跑);KServe 官方 `images` 转换表(7 个 latest 全部固定
-  版本+digest)已经在任务 #13 做完,见上面 KServe ServingRuntime 那条;
-  Python 依赖锁定(Flask/dbt 等 5 处)也已经在任务 #13 做完,见上面
-  Python 依赖锁定那条。TF Serving(2.6.2)/TorchServe(0.9.0)/mlserver
-  runtime 矩阵设计(要不要精简/换掉某些推理框架)仍然是故意没做的更大
-  设计判断,留在 P1。
+今天算法角色连第一步(打开 notebook)都做不到,唯一部署好的 KServe 是
+流程最末端。这两个是最小解锁组合(ADR-025 / ADR-019 都验证过)。
 
-**2026-08-15 已执行的低风险升级(任务 #13)**:
-- PostgreSQL 16.6→16.15:8 处引用(`apps/{openmetadata,keycloak-db-init,
-  postgres-backup,mlflow,hive-metastore,superset,airflow}` 的
-  create-db-job/cronjob + `apps/postgres/manifests/cluster.yaml` 的
-  CNPG `imageName`)全部改完,Docker Hub/ghcr.io 两个 tag 都实测确认
-  存在。
-- ~~Trino 480→483~~——**2026-08-16 已回退到 480**:`helm template` 渲染
-  diff 只能比出"改了一行 tag",测不出运行时行为差异。真正在 cloud-full
-  上拉起来才发现 483 对 `http-server.http.port` 收紧了配置校验,chart
-  自己无条件生成这行属性(`configmap-coordinator.yaml` 模板里写死,不受
-  `http.enabled` 控制),我们关了 `http-server.http.enabled`(只用
-  OAuth2+HTTPS)之后这个"未使用的属性"在 483 上直接报错拒绝启动,480
-  上不报错。已改回 chart 默认的 480,不再单独覆盖 tag。**教训**:纯
-  manifest diff 比对不足以验证跨版本兼容性,以后这类覆盖要么真的拉起来
-  跑一遍,要么去读官方 changelog 确认有没有校验行为变化,不能只信
-  render 结果一致。
-- Feast Redis:`apps/feast/manifests/redis.yaml` 从浮动的 `redis:7-alpine`
-  改成固定 `redis:8.4.5-alpine`(同时解决 RCE 安全修复和许可证问题两件
-  事)。
-- **Kafka 4.3.0 没有升级,是刻意决定不是遗漏**:Strimzi operator 当前是
-  1.1.0(也是目前最新发布版),它的 `kafka-versions.yaml` 支持列表里只有
-  4.3.0,还没收录 4.3.1,升上去 Strimzi 会直接拒绝这个 CR。已经在
-  `apps/kafka/manifests/kafka-cluster.yaml` 里加注释说明,等 Strimzi 出
-  支持 4.3.1 的新版本再跟上。
-- **KServe ServingRuntime**:7 个官方浮动 `latest`/`latest-gpu` 全部固定
-  ——vendor 到新建的 `apps/kserve-runtimes/manifests/`(不再实时
-  `kubectl apply -k` 官方 GitHub,那种写法不可重现),统一改成
-  `v0.19.0`(和 kserve-resources 控制面版本对齐,不是抢先用刚发布的
-  v0.20.0)+ Docker Hub 实测查到的 digest。`scripts/10-install-kserve-
-  serving-runtimes.sh` 和 `scripts/list-project-images.py` 都同步改成读
-  本地 vendor 的内容,`kubectl kustomize` 渲染验证过。tensorflow-serving/
-  mlserver/tritonserver/torchserve 这几个本来就有显式版本号的没有改动
-  ——是否该换掉这几个推理框架是更大的"支持哪些引擎"设计判断,不在这次
-  "只固定 latest"范围内。
-- **Python 依赖锁定**:5 个自建 Flask/dbt 场景(`platform-portal`/
-  `permission-request-app`/`table-registration-app`/`iam-sync`/
-  Airflow 里的 dbt DAG)全部从不锁版本的 `pip install flask requests`
-  这类,改成显式版本号(PyPI 实测确认存在:flask==3.1.3、
-  requests==2.34.2、pyyaml==6.0.3、trino==0.338.0、dbt-core==1.10.23、
-  dbt-trino==1.10.3、boto3==1.43.72)。dbt-core 特意没有跟到 PyPI 最新的
-  1.12.2——dbt-trino 适配器目前只发布到 1.10.3,虽然它声明的依赖范围
-  技术上兼容 1.12.x,但没有证据表明真的测试过,保守选同一条 1.10.x 线。
-  所有 5 处 `python:3.12-slim` 基础镜像也顺手固定了 digest(Docker Hub
-  实测查到的 amd64 digest)。这轮改的是"显式固定版本"这个最小范围,
-  没有触碰"要不要建 requirements.lock/uv.lock + CI 构建镜像"这个更大的
-  架构改动(那是 P1 里"三个自建 Flask 工具补测试/锁依赖"的范围)。
+注意:拉起来只是"能开工",**不等于体验成立**——`docs/usage-guide.md`
+如实记录了"没有打开 notebook 就自动连好 Trino、自动带自己权限"这个
+真实产品差距,那属于 P4 的 A 线。
 
-下一次真正做这轮审计时,第一步应该是先修好 Codex 提到的"版本审计脚本自己
-因为本机没装 PyYAML 直接跑不起来"这个问题(如果这个项目已经有一个自动
-版本清单脚本的话,需要先找到是哪个、确认它现在能不能跑),不是凭这次的
-文字建议直接改版本号。
+### 1.4 部署 Spark Operator + SeaTunnel —— 大数据开发从"零"到"能开工"
 
-## P1.7(2026-08-16 用户明确提出:项目瘦身审计,开源仓库不该带没用的东西)
+Airflow(调度器)已经在跑,但它要调度的引擎全部没部署。这两个都单独
+验证通过过(ADR-036 / ADR-037)。Kafka 可以稍后(它目前零真实消费者,
+见 ADR-056 对引入顺序的判断)。
 
-zhenghe 原话:"现在我怀疑项目臃肿,最后还需要瘦身,作为开源项目,里面
-很多应该是没有用的"——排在"先把服务都拉起来 → 各角色功能补齐"之后
-("整理一下"那一步),不是现在就动手,但要正式记下来,不能又像
-ADR-040 那次一样丢了。
+---
 
-审计范围(这次只记方向,不代表已经调查过):
-- **demo/验证脚本是不是还都有价值**:`scripts/08/09/11/13/15/18/19` 这类
-  端到端 demo 脚本,写的时候是为了验证链路,现在链路都验证过了,要不要
-  精简/合并、还是保留作为"新接手的人验证环境用"的固定资产,需要逐个
-  判断,不是默认都留着。
-- **试错留下的死代码/废弃方案痕迹**:比如 ADR 里记录过"试过 A 方案不行
-  改成 B"的情况,代码里是不是还留着 A 方案的残留配置/注释,该清的清。
-- **历史踩坑记录该不该继续散在代码注释里**:这次 SSO 四层故障链这类
-  详细记录,现在是直接写在 `apps/definitions/*.yaml` 的行内注释里,
-  篇幅很长——短期内这样查起来方便,但长期会不会让 manifest 文件本身
-  变得难读,要不要挪一部分到 `docs/operations/troubleshooting.md`
-  这类专门的地方,manifest 里只留一行指路,值得重新评估。
-- **environments/cloud-full/pending-definitions/ 里堆的组件**:哪些是
-  "以后真的会用”、哪些是"当时验证完就没人再看过”,分开处理。
+## P2:交付方式的可靠性(角色能开工之后,立刻做这一批)
 
-## P2(5 条产品主线——分析师/开发/算法/运维/管理岗的完整体验)
+ADR-057 认定的结构性债务。不做的话,上面 P1 拉起来的东西会以同样脆弱的
+方式继续堆叠。
 
-完整方案见 `docs/architecture.md`"Phase 4 之后"一节和原始评审
-`docs/claude-improvement-recommendations-2026-08-15.md`。排序:
-可靠底座(即上面 P1)→ 统一项目模型 → 分析师黄金路径 → 大数据开发
-黄金路径 → 算法黄金路径 → 运维控制面+管理驾驶舱 → 新引擎评估
-(ClickHouse 等)。**这五条现在都还没开始**,不要误以为在做。
+### 2.1 引入镜像构建流程,停止用运行时 `pip install`(最大的一条)
 
-- **Stackable(Spark/Trino/Hive 统一 Operator 平台)——2026-08-15 Codex
-  新提出,这个项目目前完全没评估过**:值得找时间单独做一次 PoC(非生产
-  环境、对比现有 Helm/Operator 方案的部署/升级/故障恢复成本、通过统一
-  的计算引擎适配层调用、保留绕开它直接用官方 Operator 的能力),不是
-  现在就迁移任何现有组件。已知代价:版本支持明显滞后社区发布(比如
-  当前 Spark 长期支持线停在 3.5.8),CRD/Operator/镜像会形成中等到较高
-  程度的平台绑定。详细判断见 `docs/architecture.md`"Phase 4 之后"一节
-  2026-08-15 补充部分。
+全仓库只有 1 个 Dockerfile,CI 没有任何镜像构建,而 **8 个地方在容器
+启动时现装 Python 依赖**。仅 2026-08-16 一晚就因此产生四次真实故障
+(Superset 被 SIGKILL 循环、platform-portal 卡 pip 导致流量一直走旧 pod、
+换镜像源导致 `ModuleNotFoundError`、同一 manifest 不同时间部署得到不同
+运行时)。离线/内网环境根本装不起来,这对"能原样上生产"是硬伤。
+
+范围按收益排序:3 个自建 Flask 应用(同时受"启动慢/不可复现/ConfigMap
+塞源码"三个问题影响)→ iam-sync → Superset 这类官方 chart 的
+bootstrapScript(改动面最大,最后处理)。
+
+配套:依赖锁定(lock 文件)、GitHub Actions 构建推 registry、manifest
+引用带 digest 的镜像。**明确不做**:不引入 Kaniko/Tekton 这类集群内
+构建体系,对单人维护的项目过重。
+
+做完这一条,`sync-app-configmaps.py` 这类"源码塞 ConfigMap"的脚本可以
+退役,顺带消解下面 2.2。
+
+### 2.2 "生成式单一源码"脚本的增殖
+
+现在有 3 个脚本在实现同一个模式(`sync-app-configmaps.py` /
+`sync-airflow-dags-configmap.py` / `render-environment-config.py`)。
+各自都对、都接了 CI,但这个模式一直增殖本身就是"缺一个构建步骤"的症状。
+2.1 做完后重新评估哪些可以退役,不要单独动手。
+
+### 2.3 Trino livenessProbe 的人工补丁要么固化要么消除
+
+`scripts/07-fix-trino-liveness-probe.sh` 必须在**每次** Trino pod
+template 变更后重跑,否则回退到 chart 的坏默认值(本次会话就重跑了 3 次)。
+这不是 GitOps,是"GitOps 加一个没人会记得的手工步骤"。可选解法:ArgoCD
+的 postSync hook、或者给上游 chart 提 issue/PR。
+
+### 2.4 三个自建 Flask 工具的测试补完
+
+**主体已完成**(2026-08-16,60 个测试接进 CI)。剩余缺口如实记录:
+`GIT_TOKEN` 在测试环境始终不配置,所以真正执行 git clone/push 的分支
+(`apply_to_git`/`apply_grant_to_git`/`reclaim_expired`/`transfer`)和
+真实 POST 到外部 OA webhook 的网络路径,只测到"没配置时优雅降级",没有
+测到真实调用本身。要补需要搭临时本地 git 仓库或更细的 mock。
+
+### 2.5 扩大 CI
+
+**已迈出几步**(chart 渲染校验、DAG 单一源码、app ConfigMap 单一源码、
+环境配置渲染防漂移、3 个 Flask 应用的测试)。原评审 P1-3 清单里更大的
+扩展(镜像构建 —— 见 2.1、集成测试)还没做。
+
+---
+
+## P3:打磨已有角色能力(不需要新组件,是体验问题)
+
+- **告警送不到人**:Alertmanager 已开、规则生效、抓到过真实问题,但
+  **没有配任何外部通知渠道**,现在只能"打开界面查"。邮件/企微/Slack 的
+  配置模板已预留在 `platform/apps/kube-prometheus-stack.yaml` 注释里,
+  需要真实凭据才能激活(**这一步需要 zhenghe 提供,不是 Claude 能自己
+  造的**)。
+- **排障知识 Runbook 化**:`docs/operations/troubleshooting.md` 742 行、
+  内容扎实,但一篇长文不是 Runbook——没有按"症状 → 定位 → 处置"组织,
+  出事时不好检索。
+- **Superset 汉化**:zhenghe 2026-08-16 提出,自己说了"不急"。Superset
+  原生带中文语言包(`LANGUAGES`/`babel`),预期加几行 configOverrides
+  就够,真做时先确认 6.1.0 的中文翻译完整度。
+- **dbt 接 Airflow 编排 + OpenMetadata 摄入**:ADR-053 的最小骨架能跑
+  `dbt build`,但没接 Cosmos(需要改 Airflow scheduler/dagProcessor 的
+  Python 运行时)、没接 OpenMetadata dbt 连接器,等于"能手动跑 dbt",
+  不是分析师的生产工具。
+- **公网域名 + TLS 接入**:zhenghe 2026-08-16 明确的方向——"域名走配置化
+  生效,配置 test 起来就是可临时访问的;未来配置 prod,就强制需要配置
+  一个域名"。`test` 类环境允许没有真实域名(继续 NodePort + `/etc/hosts`);
+  `prod` 应**强制**要求真实域名 + TLS,是校验层面的硬要求,不是建议。
+  scheme(http/https)的配置化 2026-08-16 已经做完(`external_scheme`),
+  剩下的是域名注册 + ICP 备案(中国大陆服务器强制,1-20+ 工作日,
+  **需要 zhenghe 亲自做身份核验**)和 ingress-nginx/cert-manager 按环境
+  分叉的设计,真正做时单独出一份 ADR。
+
+---
+
+## P4:五条面向角色的产品主线(长期,都还没开始)
+
+完整方案见 `docs/architecture.md` "Phase 4 之后"一节和原始评审
+`docs/claude-improvement-recommendations-2026-08-15.md`。**这五条现在都
+还没有开始实现**,不要误以为在做。
+
+- **A. 统一开发工作台**:项目模型 → SQL/Notebook 黄金路径 → 作业模板
+  + CI/CD → 训练黄金路径。原则是"先做薄控制面,复用成熟组件,不重新
+  自研查询引擎/调度器"。
+- **B. 数据资产与治理闭环**:权限真正执行(✅ 已完成,ADR-051)+ 审计
+  闭环 → 数据契约/质量规则 → 端到端血缘 + 变更影响分析 → 敏感字段行列级
+  策略(OPA 原生支持,没配置)。
+- **C. 完整 MLOps**:标准镜像 + 可复现训练 → 模型审批/灰度/回滚 → 推理
+  可观测性 → 特征漂移监控。
+- **D. 统一运维控制面**:服务目录 + 黄金链路告警 → 统一 Runbook → 容量/
+  成本看板 → 多节点故障/备份恢复/升级回滚演练。
+- **E. 管理驾驶舱**:不新建数据源,汇总现有系统指标;第一版只回答"平台
+  健不健康、谁在用、资源花在哪、数据资产覆盖率、权限风险、模型健康度"。
+
+排序建议(评审原文,已认可):可靠底座 → 统一项目模型 → 分析师黄金路径
+→ 大数据开发黄金路径 → 算法黄金路径 → 运维控制面 + 管理驾驶舱(从前三条
+产生的真实指标构建,不先造空看板)。
+
+### 确认要做、还没设计的引擎/组件
+
+- **Flink**:2026-08-15 zhenghe 明确"作为新的大数据平台有它的必要性",
+  从"Phase 4 按需"改成"确认要做"。**设计已完成**([ADR-056](decisions/056-flink-role-design.md)):
+  定位成"流式计算引擎"(实时聚合/join/特征计算),不做"数据搬运"。
+  引入顺序上 Kafka 现在零真实消费者、Kafka Connect + Iceberg Sink
+  这条轻量路径也没搭过,这两步应先于 Flink。**只是设计,没部署任何东西。**
+- **Spark 4.x 评估**:仓库固定 Spark 3.5.9,官方已到 4.x。核实结论
+  "方向对,但 Codex 支撑这个方向的一条关键理由是错的"(Spark 4.0 的
+  SPARK-45265 是 Spark 内置 Hive 客户端支持 Hive 4.0 metastore,和我们
+  独立部署的 Hive Metastore 版本锁定不是一回事,升 Spark 4 并不能解除
+  那个锁定)。3.5.9 不是废弃版本,但确实是旧的大版本线。升级要一起动
+  Scala 2.13 / Java 17 / `iceberg-spark-runtime-4.x_2.13`。
+- **KServe runtime 矩阵设计**:TF Serving(2.6.2)/ TorchServe(0.9.0)
+  要不要精简或换掉,是故意没做的更大设计判断,不是遗漏(7 个浮动
+  `latest` 的固定版本 + digest 已经在 2026-08-15 做完)。
+- **Stackable(Spark/Trino/Hive 统一 Operator 平台)**:2026-08-15 Codex
+  新提出,**目前完全没评估过**。值得单独做 PoC(非生产、对比部署/升级/
+  故障恢复成本、保留绕开它直接用官方 Operator 的能力),**不迁移任何
+  现有组件**。已知代价:版本支持明显滞后社区(Spark 长期支持线停在
+  3.5.8),CRD/Operator/镜像形成中等到较高的平台绑定。
+
+---
+
+## P5:项目瘦身审计(zhenghe 2026-08-16 明确提出)
+
+原话:"现在我怀疑项目臃肿,最后还需要瘦身,作为开源项目,里面很多应该
+是没有用的。"排在这里不是因为不重要,是因为**在 P1/P2 落地之前做瘦身,
+会把还没定型的东西提前删掉**——等交付方式稳定了再审计更准。
+
+审计范围:
+
+- **demo/验证脚本是不是还都有价值**:`scripts/08/09/11/13/15/18/19`
+  这类,哪些是"证明平台能力的可复现示例"(该留),哪些是"当时验证完
+  就没用了"(该删)。
+- **`scripts/` 的编号约定已经撑不住**:51 个文件,00-26 带编号(但执行
+  顺序其实由 `bootstrap-all.sh` 负责)+ 24 个没编号,混着部署步骤/演示/
+  本机便利工具/云主机生命周期/临时补丁五类东西。
+- **试错留下的死代码/废弃方案痕迹**。
+- **历史踩坑记录该不该继续散在代码注释里**:像 SSO 四层故障链这种,
+  manifest 注释里现在动辄二三十行。对维护者有用,但对第一次读的人是
+  噪音——考虑保留结论、细节移到 ADR/journal。
+- **`environments/cloud-full/pending-definitions/`**:P1.1 做完之后这个
+  目录应该整个消失,届时一并清理。
+
+---
 
 ## 曾经提出、明确决定不做/暂缓的
 
 - **需求追踪矩阵**(`docs/requirements.md`,给每条用户需求分配 ID 逐条
-  验收):评审建议里的一项,认可其价值,但补建这个矩阵需要回溯梳理
-  ~50 篇 ADR 的历史内容,工作量本身就是一个独立任务,不现在做。如果
-  以后真的再发生一次"某条需求被忘了"的事故,优先级要重新评估。
+  追踪):讨论过,判断是对当前规模过重的流程负担,ADR + BACKLOG + roles.md
+  已经覆盖"决策留痕"和"待办不丢"这两个真实需求。
 - **自建 `scripts/task-runner.sh`**(start/status/logs/stop/resume 的
-  长任务管理框架):评估后判断这个项目目前是单 Claude 会话操作,Bash
-  工具自带的后台任务追踪+完成通知机制已经够用,重新建一套平行机制是
-  多余的封装,不做。
+  后台任务管理器):当前后台任务的规模用不上,`nohup` + 日志文件够用。
 - **正式的多工作流并行调度表**(workstream ID/资源预算/依赖表):当前
-  实际工作模式主要是单线操作,没有真的同时跑多个独立 sub-agent,先不
-  建这套机制,等真的出现"经常需要精细协调 3+ 个并行工作流"的场景再说。
+  是单人 + 单个 CURRENT 的工作方式,不需要这一层。
+- **PostHog 或同类产品分析工具**:算法层面的 A-B 实验应该落在 KServe
+  canary + 现有 MLflow/湖仓链路,不是消费端产品分析工具。见
+  `docs/architecture.md` "还没定的事"里 2026-08-11 那条。
+- **Backstage / Kubeflow 整套部署**:只借鉴实体模型/能力划分,不部署
+  整套 UI。见 ADR-028/032 和 architecture.md 的判断。
+- **Ranger**:官方不维护 Helm chart,不满足"只用官方支持的部署方式"
+  门槛;改用 OPA(已上线,ADR-051)。
+
+---
+
+## 已完成(存档,按完成时间倒序)
+
+保留一行索引,细节在对应 ADR / `docs/journal/`。
+
+- **环境配置渲染机制 + `external_scheme`**(2026-08-16/19):
+  `environments/<env>/config.yaml` + `templates/` +
+  `render-environment-config.py`,域名/端口/协议三类环境差异值单一源码,
+  `--check` 接进 CI。**只覆盖"取值"这一层**,组件选择和规格分档见 P1.1。
+- **cloud-full SSO 全链路修复**(2026-08-16):四层故障链(redirect_url
+  丢端口 → Keycloak hostname 推断丢端口 → issuer/backchannel 前后端地址
+  冲突 → nginx 响应头缓冲区太小),外加 Superset 的 FAB keycloak provider
+  需要显式 `api_base_url`。全部用 curl + cookie jar 端到端验证过真实登录。
+  详见 `docs/journal/2026-08.md`。
+- **Trino OPA 细粒度访问控制正式上线**(2026-08-16,ADR-051)。
+- **破坏性操作防护补全**(2026-08-16):`confirm-destructive-kubectl.sh`
+  + namespace 允许清单,背景见 `docs/operations/incidents.md`。
+- **镜像缓存 digest 校验**(2026-08-16):`verify-image-digests.sh`。
+- **iam-sync / opa-grants-sync 在 cloud-full 上修复并恢复**(2026-08-16)。
+- **`alloy`/`loki`/`kube-prometheus-stack` 的 ArgoCD 同步超时**
+  (2026-08-16):`controller.repo.server.timeout.seconds: 180`。
+- **一键部署 `scripts/bootstrap-all.sh`**(2026-08-16):14 步幂等,
+  真实跑通过。
+- **版本审计与升级**(2026-08-15/16):PostgreSQL 16.6→16.15;Feast Redis
+  `7-alpine`(浮动、且落在 Redis 非开源许可证区间 7.4.x)→ 固定 8.4.5
+  (同时修 RESTORE 命令的 use-after-free RCE 和许可证问题);Triton
+  23.05→26.07-py3;KServe 7 个浮动 `latest` 全部固定版本 + digest;
+  Python 依赖锁定 5 处。**刻意没升的**:Kafka 4.3.0→4.3.1(Strimzi 1.1.0
+  的 `kafka-versions.yaml` 还没收录 4.3.1,升上去会被拒绝);Trino
+  480→483(483 对 `http-server.http.port` 收紧校验,和我们关闭 HTTP
+  监听器的配置冲突,拉过 chart 源码确认根因,483 无 CVE 动机,不值得为
+  版本号打开一个明文内部端点——见 `apps/definitions/trino.yaml` 注释)。
+- **Airflow DAG 单一源码校验**(2026-08-16):`sync-airflow-dags-configmap.py`。
+- **权限治理全链路**:分级审批(ADR-044)、可插拔审批后端 + 通知 + 超时
+  升级 + 权限交接(ADR-045)、到期自动回收(ADR-050)、浏览目录申请
+  (ADR-046,**体验依赖 OpenMetadata**,见 P1.2)。
+- **CloudNativePG 迁移**(2026-08-13,ADR-038/039):含真实数据迁移、
+  切流量,老实例已下线。真正的多副本 HA 要等 prod 多节点。
+- **推倒重建验证**(2026-08-13,ADR-039):从空集群完整跑通一次。

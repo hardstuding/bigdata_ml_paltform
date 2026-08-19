@@ -12,9 +12,13 @@
 1. 这份 `CLAUDE.md`
 2. [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) —— 现在唯一的主线
    任务是什么、下一步做什么、有没有还在跑的后台任务
-3. 当前主线涉及的环境状态文档(比如
+3. [`docs/roles.md`](docs/roles.md) —— 五个角色今天各自真的能做什么。
+   **这是"我们做到哪了"的唯一权威入口**,衡量标准是"某个岗位能不能
+   独立完成一件真实工作",不是"部署了哪些组件"。判断某件事该不该做、
+   该排多前,依据是它解锁哪个角色的哪条能力(见 ADR-057)
+4. 当前主线涉及的环境状态文档(比如
    [`environments/cloud-full/STATUS.md`](environments/cloud-full/STATUS.md))
-4. 主线直接引用的 ADR
+5. 主线直接引用的 ADR(索引:[`docs/decisions/README.md`](docs/decisions/README.md))
 
 不要只信聊天记录/会话摘要——`git status`、活的集群资源状态、这几份文档,
 比任何"上一轮说了什么"的回忆更权威。怀疑某段内容"是不是说过又丢了",
