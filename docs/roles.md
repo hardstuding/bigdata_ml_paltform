@@ -131,7 +131,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 环节 | 状态 | 说明 |
 |---|---|---|
 | **交互式开发(Notebook)** | 🟡 | JupyterHub 已部署并真实登录验证通过(2026-08-19,SSO 登录成功跳转 `/hub/spawn`)。但仍然没有"打开就自动连好 Trino、自动带自己权限"的体验——要自己装 client、自己填连接串(`docs/usage-guide.md` 已如实记录这个差距,这次部署没有改变它) |
-| 特征工程 | 🟡 | Feast 已部署,离线(Spark 读 Iceberg)/ 在线(Redis)打通过(ADR-042)。但**离线特征依赖 Spark Operator,而它没部署** |
+| 特征工程 | ✅ | Feast 全链路真实重新验证(2026-08-19):Iceberg → Spark 离线读取 → feast apply → materialize → Redis 在线存储 → Feature Server 在线查询,Alice/Bob 的 region/product/amount 都查出正确值。过程中修了两个真实 bug(见下面"当前最高性价比"那段),不只是组件都在 |
 | 训练执行 | 🟡 | Argo Workflows 已部署;但 Spark 训练依赖没部署的 Spark Operator |
 | **实验跟踪 / 模型注册** | ✅ | MLflow 已部署并真实登录验证通过(2026-08-19,含按组授权)。部署时修了两个真实 bug:内存限制太小导致启动 36 秒内 OOMKill、oauth2-proxy 配置的后端 Service 名字写错(chart 生成的真实名字是 `mlflow-mlflow` 不是 `mlflow`) |
 | 模型部署 | ✅ | KServe 已部署(CRD + ServingRuntime),V2 协议推理验证过(ADR-027) |
@@ -143,9 +143,12 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 变成"能开工"。**"训练 → MLflow 记录"这一段已经真实验证过**
 (2026-08-19,`scripts/09-train-demo-model.sh`:真实训练一个 sklearn
 模型、accuracy 0.855、注册进 Model Registry、API 查询确认
-status=READY)。但"notebook 里触发 → Feast 特征 → Argo Workflows 编排
-训练"这几段之间的连通还没有重新跑一次真实验证——组件都在,链路本身
-没有整个连起来测过。
+status=READY)。**Feast 特征这一段也重新验证过**(2026-08-19,全链路
+真实跑通,见上面"特征工程"一行)。剩下没有连起来的是"notebook 里
+触发训练"和"Argo Workflows 编排训练"这两段——前者需要真实浏览器
+交互,后者目前**没有任何 WorkflowTemplate 定义**,这不是"没重新验证",
+是从没真正实现过,训练一直是靠人直接跑脚本(`scripts/09-train-demo-
+model.sh`),没有真的接入 Argo Workflows 做编排。
 
 ---
 
@@ -186,8 +189,12 @@ status=READY)。但"notebook 里触发 → Feast 特征 → Argo Workflows 编�
      测试捕获,现在只能靠"当天有没有人手动测登录"这种运气发现。
    - **Kafka 已部署验证**(2026-08-19,真实建 topic/生产/消费一条消息),
      大数据开发角色补齐最后一块,但还没接进真实数据管道。
-   - **算法链路"训练→MLflow"这一段已验证**(2026-08-19,真实训练模型+
-     注册进 Model Registry),**"notebook→Feast→Argo Workflows 触发训练"
-     这几段还没有重新连起来跑一次**。
+   - **算法链路"训练→MLflow"+"Feast 特征"这两段都已验证**(2026-08-19,
+     真实训练模型注册进 Model Registry;Feast 全链路 Iceberg→Spark→
+     Redis→在线查询真实跑通,过程中修了 DAG 默认暂停、本地构建镜像在
+     远程节点拉不到这两个真实 bug)。**"notebook 里触发"和"Argo
+     Workflows 编排训练"这两段是真正的空白**,不是"没验证",是从没
+     实现过——训练现在是人直接跑脚本,没有接入 Argo Workflows 做编排,
+     真要做需要新写一个 WorkflowTemplate,是一块新开发工作,不是验证。
 3. **更新纪律:**任何一次让某个角色多/少一项能力的改动,必须同步改这份
    表。这份表过时了,项目就又回到"不知道自己做到哪了"的状态。

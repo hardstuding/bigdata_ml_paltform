@@ -88,7 +88,7 @@ Secret 永远补不上、groups scope 从建realm起就没配过)本可以在"�
 做完这一批,以后再拉起/重建任何组件,应该默认带着"这次会不会又是同一类
 配置漂移"的怀疑,而不是假设"Pod Running 就是好的"。
 
-**2026-08-19 又补完的两项**:
+**2026-08-19 又补完的三项**:
 - **Kafka**(P1.6):部署 + 真实建 topic/生产/消费一条消息验证通过。
   大数据开发角色最后一块拼图补上,但还没接进真实数据管道(没有真实
   Producer/Consumer 应用)。
@@ -109,11 +109,34 @@ Secret 永远补不上、groups scope 从建realm起就没配过)本可以在"�
      哪怕只改 resources 这种"看起来无害"的字段,也可能让滚动更新
      悄悄卡死,ArgoCD 的 Synced/Healthy 不能当作"真的生效了"的证据,
      要对照 ReplicaSet/Pod 的实际状态**。
-  notebook → Feast 特征 → Argo Workflows 训练触发这几段还没有重新连起来
-  验证,见下面"已知的事"。
+- **Feast 特征链路也重新验证通过**:Iceberg → Spark 离线读取 → feast
+  apply → materialize → Redis 在线存储 → Feature Server 在线查询,
+  Alice/Bob 的 region/product/amount 全部查出正确值。过程中修了两个
+  真实 bug:①`feast_materialize` 这个 DAG 默认是暂停状态(Airflow 新
+  DAG 的默认行为),`scripts/19-feast-feature-pipeline.sh` 之前没有
+  在触发前先取消暂停,手动触发的 DagRun 会一直卡在 queued,已经补上
+  `airflow dags unpause` 这一步;②`feast-feature-server` 用的
+  `local/feast-feature-server:0.65.0-spark` 是本地构建镜像,cloud-full
+  这台远程节点上从没构建过,`ErrImageNeverPull`(这是本次会话早前已知、
+  接受的差距,这次真正解决了)。直接在 cloud-full 这台 x86_64 节点上
+  用官方 Dockerfile 现场 `docker build`——过程中又踩中一次真实的 PyPI
+  带宽限速(装 317.9MB 的 pyspark,直连官方源实测约 39KB/s、要 2 个多
+  小时,换阿里云 PyPI 镜像后约 1.6MB/s,40 倍提速,几分钟装完,已经把
+  这个 mirror 参数写进仓库的 Dockerfile,是 git 里的,任何人往后重新
+  构建都会用这条路径,不是这次的临时救急)。构建产物也 `docker save`
+  导出进了这台 Mac 本地的 `image-cache-amd64/`(**这个目录整个在
+  .gitignore 里,是本机本地缓存,不进 git**——manifest.txt 也是本地的,
+  真要给一台离线的生产节点用,需要人工把这个目录整个传过去,不是 clone
+  仓库就自动带上)。呼应"生产环境可能没有网络"这条顾虑:git 里的
+  Dockerfile 修复保证"有网络的话,重新构建又快又不踩限速的坑";这份
+  本地缓存保证"完全没有网络的话,把这个目录拷过去也能直接
+  `docker load` 用上,不用再连一次网现场构建"——两条路径都留了,不是
+  只顾一头。
 
-**排在后面的**(按 `docs/BACKLOG.md` 优先级):算法链路剩余段落
-(notebook→Feast→Argo Workflows 触发训练)的端到端连通验证。
+**排在后面的**(按 `docs/BACKLOG.md` 优先级):"notebook 里触发训练"和
+"Argo Workflows 编排训练"这两段是真正的空白,不是"没重新验证"——从没
+真正实现过,训练一直是人直接跑脚本。真要做需要新写一个
+WorkflowTemplate,是新开发工作,不是这次"重新验证已有能力"的范围。
 
 ## 正在运行的后台任务
 
@@ -142,11 +165,12 @@ Secret 永远补不上、groups scope 从建realm起就没配过)本可以在"�
 - **cloud-full 上 Keycloak `platform` realm 的 `admin` 密码**是
   `TestLogin2026Aug`,和 `secrets/generated-credentials.txt`(那份是
   local-lite 的)不是一回事。
-- **算法链路"训练 → MLflow"这一段已验证,前面几段还没有**:JupyterHub/
-  MLflow/Spark Operator/Feast/Argo Workflows/Kafka 都已部署验证,
-  `scripts/09-train-demo-model.sh` 证明了"训练脚本 → MLflow 记录实验 →
-  Model Registry 注册"这段真实可用,但"notebook 里触发 → Feast 特征
-  →  Argo Workflows 编排训练"这几段之间的连通还没有重新跑一次。
+- **算法链路"训练 → MLflow"和"Feast 特征"都已验证,"notebook 触发"和
+  "Argo Workflows 编排训练"是真空白**:JupyterHub/MLflow/Spark
+  Operator/Feast/Argo Workflows/Kafka 都已部署验证,
+  `scripts/09-train-demo-model.sh` 和 `scripts/19-feast-feature-pipeline.sh`
+  分别证明了这两段真实可用。剩下两段不是"没重新验证"而是从没实现过,
+  见上面"下一步唯一动作"里的说明。
 - **低配额命名空间改 resources 字段要格外小心**:mlflow 命名空间的
   ResourceQuota 只有 3Gi,RollingUpdate 需要新旧 pod 同时占配额,改大
   resources 时如果新旧加起来超配额,新 ReplicaSet 会静默卡在

@@ -27,6 +27,17 @@ kubectl -n airflow get deploy airflow-scheduler >/dev/null 2>&1 || {
   exit 1
 }
 
+# 2026-08-19 真实踩坑:新 DAG 在 Airflow 里默认是暂停状态
+# (dags_are_paused_at_creation 的默认值),这个脚本之前没取消暂停就直接
+# trigger——DagRun 会正常创建(状态 queued),但调度器根本不会处理暂停
+# DAG 的任务,DagRun 会一直卡在 queued 不动,不报错也不超时,很容易
+# 误判成"卡住了/权限问题",实际上只是没取消暂停。每次跑都无条件
+# unpause(幂等,已经取消过再调一次不会报错),不依赖"这次环境是不是
+# 已经手动 unpause 过"这种不确定的前置状态。
+log "==> 确认 DAG 没有被暂停(新建的 DAG 默认暂停,手动 trigger 的 DagRun 会卡在 queued)"
+kubectl -n airflow exec deploy/airflow-scheduler -c scheduler -- \
+  airflow dags unpause feast_materialize 2>&1 | tee -a "$LOG_FILE"
+
 log "==> 清掉今天的历史记录,触发一次干净的 DAG Run"
 TODAY="$(date -u +%F)"
 kubectl -n airflow exec deploy/airflow-scheduler -c scheduler -- \
