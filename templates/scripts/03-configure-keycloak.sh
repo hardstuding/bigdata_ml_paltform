@@ -354,16 +354,45 @@ echo "==> groups 这个 client scope(真实故障,2026-08-19 发现):没有任�
 # 设成所有相关 client 的默认 scope(不用每个 app 自己在 scope 参数里额外
 # 请求 "groups",和这几个 client 已经在用的 allowed_groups/
 # role_attribute_path 配置本身不用改)。"
-if kcadm get client-scopes -r platform -q name=groups --fields id 2>/dev/null | grep -q '"id"'; then
-  echo "client scope groups 已存在,跳过创建"
-else
+# 2026-08-19 真实踩坑:client-scopes 这个 list 接口的 `-q name=` 过滤器
+# 不生效(实测确认——不是文档写的那种支持按名字查询的接口,`kcadm get
+# client-scopes -q name=groups` 会把完整未过滤列表原样返回,`-q` 被静默
+# 忽略),用它判断"是否已存在"会拿到列表第一项的 id(这次真实拿到的是
+# "roles" 这个内置 scope 的 id),导致误判"已存在"、创建步骤被跳过,
+# 后面全部操作都是在挂错的 scope 上,不会报错但完全没有效果。改成拉
+# 完整列表用 python3 按 name 字段精确匹配,不依赖这个接口的过滤能力。
+groups_scope_id=$(kcadm get client-scopes -r platform 2>/dev/null | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for s in data:
+    if s["name"] == "groups":
+        print(s["id"])
+        break
+' || true)
+if [ -z "$groups_scope_id" ]; then
   kcadm create client-scopes -r platform \
     -s name=groups -s protocol=openid-connect \
     -s 'attributes={"include.in.token.scope":"true","display.on.consent.screen":"false"}'
   echo "已创建 client scope: groups"
+  groups_scope_id=$(kcadm get client-scopes -r platform 2>/dev/null | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for s in data:
+    if s["name"] == "groups":
+        print(s["id"])
+        break
+')
+else
+  echo "client scope groups 已存在(id=${groups_scope_id}),跳过创建"
 fi
-groups_scope_id=$(kcadm get client-scopes -r platform -q name=groups --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"')
-existing_mapper=$(kcadm get "client-scopes/${groups_scope_id}/protocol-mappers/models" -r platform -q name=groups --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+existing_mapper=$(kcadm get "client-scopes/${groups_scope_id}/protocol-mappers/models" -r platform 2>/dev/null | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for m in data:
+    if m["name"] == "groups":
+        print(m["id"])
+        break
+' || true)
 if [ -z "$existing_mapper" ]; then
   kcadm create "client-scopes/${groups_scope_id}/protocol-mappers/models" -r platform \
     -s name=groups -s protocol=openid-connect -s protocolMapper=oidc-group-membership-mapper \
