@@ -740,3 +740,47 @@
   时机踩早了——再等几十秒到一分钟,重新 `kubectl rollout restart` 一次
   就好。用 `kubectl exec ... -- ls -la <挂载路径>` 检查是文件还是目录,
   是最快的确认方式,不用去猜是不是代码/配置写错了。
+
+### OpenMetadata SSO 登录报 "Account already exists. Please contact administrator."——不是配置问题,是数据库里一条半损坏的用户记录
+
+- **现象**:`apps/definitions/openmetadata.yaml` 里 Keycloak OIDC 配置
+  从最初部署起就是对的(`authentication.provider: custom-oidc`,`
+  jwtPrincipalClaims: [email, preferred_username, sub]`),但用 Keycloak
+  的 `admin` 账号登录 OpenMetadata,页面报 "Account already exists.
+  Please contact administrator.",换一个全新的 Keycloak 用户名登录完全
+  正常。
+- **排查过程中一个容易踩的坑**:重试登录时看着换了浏览器操作,但只要
+  Keycloak 自己的 SSO session cookie(或者 OpenMetadata 自己的服务端
+  session)还活着,点"重新登录"实际上是在复用旧 session,不会真的重新
+  走一遍 OIDC 授权流程,会看到看似矛盾的结果(比如报另一个
+  "Session not active"/"invalid_grant" 错误)。要排查这类问题,必须先
+  显式访问 Keycloak 的 `/protocol/openid-connect/logout` **和**
+  OpenMetadata 自己的 `/logout`,两边都清干净,再重新走一遍完整登录,
+  不能只清浏览器 cookie(有的 session cookie 是 `HttpOnly`,JS `document.
+  cookie` 清不掉)。
+- **原因**:直接查 Postgres 的 `user_entity` 表(`SELECT json FROM
+  user_entity WHERE name='admin'`)发现这条记录的 `authenticationMechanism`
+  是空的,`updatedAt` 精确对应到某次早先的、不走正常浏览器 OIDC 流程的
+  交互(比如直接拿 token 调 API 做验证测试)——这类操作会触发 OpenMetadata
+  的用户自动创建/更新逻辑,但走的不是完整的 OIDC code flow,留下一条
+  "创建了但没有正常关联认证方式"的半成品用户记录。之后任何人用同一个
+  用户名(这里是 `admin`)走正常 OIDC 登录,OpenMetadata 发现这个用户名
+  已经存在但认证方式对不上,判定为"身份冲突",拒绝登录——这是它自己的
+  防呆机制,不是 bug,但触发条件是这条脏数据,不是配置本身有问题。
+  `entity_relationship` 表里确认这条记录没有被任何其它实体引用
+  (`fromid`/`toid` 查询 0 条),证明它只是一条孤立的半成品,不是承载了
+  真实数据的账号。
+- **处理**:直接从 `user_entity` 表删掉这条记录(先确认
+  `entity_relationship` 里没有引用,再删,别对着一个可能有真实数据挂在
+  上面的账号做这个操作),然后完整走一遍登出+重新登录,OpenMetadata
+  会用干净的状态重新创建这个用户,`isAdmin: true` 正确、`email` 和
+  Keycloak 里的 claim 完全对上。全程没有改任何 `apps/definitions/
+  openmetadata.yaml` 里的配置——这是数据层面的一次性清理,不是需要同步
+  进"一键部署"代码的修复,真正全新的部署从第一次登录起就不会有这条脏
+  数据,不会重现这个问题。
+- **教训**:验证 SSO/OIDC 集成时,只用真实浏览器走完整的 code flow 测试
+  (这个项目已经建立的 curl+cookie-jar 或者真实浏览器测试habit是对的),
+  避免用"直接拿 token 调 API"这类走捷径的验证方式碰触用户身份这一层——
+  这类捷径可能会在应用自己的用户表里留下不完整的记录,虽然不影响当时
+  测试本身"看起来通过",但会在后续正常登录时以完全不相关的报错形式
+  冒出来,排查成本比老老实实走一遍完整浏览器流程高得多。

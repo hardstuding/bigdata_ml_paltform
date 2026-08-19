@@ -209,6 +209,21 @@ superset.yaml`、`apps/superset/manifests/create-db-job.yaml`、
 `scripts/03-configure-keycloak.sh` 都已经改成声明式/脚本化,不是手动改了
 一下集群就完事——下次从空环境重新部署也会带上这些修复,不需要重新踩一遍。
 
+**第四个:OpenMetadata SSO 登录报 "Account already exists"**。zhenghe 当场
+指出不应该接受"换个账号绕过去"这种处理方式(原话:"如果一开始给
+openmetadata 适配好 keycloak,应该不会出现你现在这个问题……因为人员是会
+流动的,所以确实需要一个 admin 的管理员账号"),追问之后确认他说得对
+——真正原因是 Postgres `user_entity` 表里有一条半损坏的 `admin` 用户记录
+(`authenticationMechanism` 是空的),是之前某次不走完整浏览器 OIDC 流程
+的验证方式(直接拿 token 测 API)留下的,不是 `apps/definitions/
+openmetadata.yaml` 里的配置问题。删掉这条脏数据、走一遍完整登出+重新
+登录后,`admin` 账号本身干净登录成功,`isAdmin: true` 正确。**这是数据
+层面的一次性清理,不是配置 bug,不需要改任何"一键部署"代码**——真正
+全新的部署从第一次登录起就是干净的,不会重现。详见
+`docs/operations/troubleshooting.md`。教训记在同一份文档:验证 SSO 时
+只用真实浏览器走完整流程,不要用"直接拿 token 调 API"这类捷径碰用户
+身份这一层,会留下不完整的记录,后续才用一个不相关的错误冒出来。
+
 ## 正在运行的后台任务
 
 **没有。**
