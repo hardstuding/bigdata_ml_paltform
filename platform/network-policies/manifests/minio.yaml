@@ -19,6 +19,13 @@
 #     catalog.json 上传到 MinIO——和上面 feast 那条是完全一样的坑,同样是
 #     cloud-full 第一次真正端到端跑通 dbt_demo 才实测到
 #     `EndpointConnectionError`/`Connection refused` 才发现漏了这条。
+#   - argo-workflows(2026-08-19 新增,第一次接入 Argo Workflows 编排训练
+#     那次):训练 pod 要把模型 artifact 存进 MinIO,和上面 feast/dbt 是
+#     完全一样的坑——同一晚跑第一个训练 workflow 才实测到
+#     `EndpointConnectionError` 才发现漏了这条,这条 NetworkPolicy 是
+#     "新命名空间要用 MinIO,必须记得同步加这里"这类问题的第四次复现,
+#     以后新增任何要连 MinIO 的组件,第一时间就该想到检查这份列表,不用
+#     再重新排查一遍。
 #   - minio(同命名空间自己)——2026-08-13 推倒重建测试实测踩到的坑:
 #     minio 官方 chart 的 buckets(见 apps/definitions/minio.yaml 的
 #     `buckets:` 字段)是靠一个 Helm post-install hook Job(`minio-post-job`,
