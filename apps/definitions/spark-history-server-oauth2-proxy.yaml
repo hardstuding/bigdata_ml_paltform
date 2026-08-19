@@ -19,8 +19,13 @@ spec:
           existingSecret: oauth2-proxy-secret
           configFile: |
             provider = "oidc"
-            oidc_issuer_url = "http://keycloak.local-lite.test/auth/realms/platform"
-            redirect_url = "http://spark-history.local-lite.test/oauth2/callback"
+            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            skip_oidc_discovery = true
+            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
+            redirect_url = "http://spark-history.local-lite.test:32460/oauth2/callback"
             upstreams = [ "http://spark-history-server.spark-operator.svc.cluster.local:18080/" ]
             email_domains = [ "*" ]
             # 和 mlflow-oauth2-proxy 同样的原因:local-lite 没有 TLS,浏览器
