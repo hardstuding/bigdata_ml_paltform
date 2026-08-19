@@ -123,6 +123,55 @@ spec:
             name: local/platform-runtime
             tag: "0.1.0"
             pullPolicy: IfNotPresent
+          # 2026-08-19 真实踩坑(镜像/RBAC 都配好之后,platform_sdk.query()
+          # 报 ConnectionRefused,一开始怀疑是 Trino/MLflow 本身没起来,
+          # 排查发现两边真实服务都健康、连它们自己也没问题,问题出在调用方
+          # 这一侧):chart 默认给 singleuser pod 挂了一条 NetworkPolicy
+          # (`singleuser.networkPolicy`,z2jh 的既定安全姿态——notebook 允许
+          # 出公网但不许碰集群内部 IP,防止 notebook 变成打内网的跳板),
+          # 默认的 `egressAllowRules.privateIPs` 是 false。Trino/MLflow 的
+          # ClusterIP 都是私网段,被这条规则原样挡掉,不联网也报
+          # ConnectionRefused(不是 DNS 失败、不是超时,容易误判成对端服务
+          # 本身的问题)。和 platform/network-policies/manifests/minio.yaml
+          # 里"新命名空间要连 MinIO 必须显式加白名单"是同一个设计思路——这里
+          # 反过来,是"新的调用方要出站,必须显式放行目标"。不整体打开
+          # privateIPs(那会让这条防跳板的策略形同虚设),按命名空间精确放行。
+          networkPolicy:
+            egress:
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: trino
+                ports:
+                  - port: 8443
+                    protocol: TCP
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: mlflow
+                ports:
+                  - port: 5000
+                    protocol: TCP
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: minio
+                ports:
+                  - port: 9000
+                    protocol: TCP
+              # submit_job() 用 kubernetes 客户端建 ConfigMap/Workflow 对象,
+              # 走的是 K8s API server 本身(Service `kubernetes` 在 default
+              # 命名空间,`kubectl get svc kubernetes -n default` 实测确认
+              # 是 10.43.0.1:443),不是直接连 argo-workflows 命名空间里的
+              # 某个 pod——一开始想当然写成 argo-workflows 命名空间,核实
+              # 之后改对。
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: default
+                ports:
+                  - port: 443
+                    protocol: TCP
           # platform_sdk 的 submit_job() 要能往 argo-workflows 命名空间建
           # ConfigMap/Workflow,见
           # apps/platform-image/manifests/submitter-rbac.yaml。

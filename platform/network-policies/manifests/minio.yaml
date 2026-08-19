@@ -26,6 +26,12 @@
 #     "新命名空间要用 MinIO,必须记得同步加这里"这类问题的第四次复现,
 #     以后新增任何要连 MinIO 的组件,第一时间就该想到检查这份列表,不用
 #     再重新排查一遍。
+#   - jupyterhub(2026-08-19 新增,ADR-058 platform_sdk 第一批验证):
+#     notebook 里 `mlflow_setup()` 记录实验/上传模型 artifact 会连 MinIO,
+#     第五次复现同一类坑——这次吸取教训,提交前直接查过这份列表确认漏了
+#     才加,不是等实测报错才发现(虽然同一晚验证 singleuser 自己的出站
+#     NetworkPolicy 时确实先踩了一次 ConnectionRefused,但那次是
+#     singleuser 出站策略的问题,和这份 MinIO 入站白名单是两个独立的坑)。
 #   - minio(同命名空间自己)——2026-08-13 推倒重建测试实测踩到的坑:
 #     minio 官方 chart 的 buckets(见 apps/definitions/minio.yaml 的
 #     `buckets:` 字段)是靠一个 Helm post-install hook Job(`minio-post-job`,
@@ -89,6 +95,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: argo-workflows
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: jupyterhub
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: minio
