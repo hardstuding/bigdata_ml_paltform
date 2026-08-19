@@ -173,6 +173,42 @@ Model Registry 查询确认 `demo-rf-classifier` version 3、
 以后扩展准备好),也没有"notebook 里触发"这条腿——这两个仍然是真实的
 未做项,记在 `docs/BACKLOG.md`。
 
+**2026-08-19 当晚,重开 cloud-full 云主机给 zhenghe 现场看效果时,又发现并
+修好三个真实问题**(不是主动排查出来的,是他实际点开页面才暴露的):
+1. **给错密码**:一开始把 Keycloak 自己控制台(master realm)的 admin
+   密码当成了 platform realm 里给各应用 SSO 用的账号——两个刚好都叫
+   admin,是完全不同的账号。已经把 platform realm 的 admin 密码重置成
+   已验证能用的值,记在本机 `secrets/generated-credentials.txt`(不进
+   git)。
+2. **Superset 官方示例数据存在临时 SQLite 里,pod 重启就丢**——
+   `SQLALCHEMY_EXAMPLES_URI` 不配的话默认落到 pod 内本地文件
+   `/app/superset_home/examples.db`,没挂任何持久化卷。仪表盘定义本身在
+   Postgres(持久),但引用的数据表跟着 SQLite 一起消失,页面报
+   "no such table"——和 troubleshooting.md 里 Keycloak H2 内存库那次是
+   同一类教训。改成在已有的外部 Postgres 实例上新建一个
+   `superset_examples` 库(复用同一个 superset 账号),已经验证真实数据
+   落在 Postgres 里(`SELECT count(*)` 确认 FCC/birth_names 等表有数据)。
+3. **Airflow 接入 Keycloak SSO(之前从未做过,这次是真正新增能力,不是
+   修复)**,过程中连续踩了 3 个真实坑,顺着修完才端到端 curl+cookie-jar
+   验证通过(登录→拿到 session→`/api/v2/dags` 返回 200 不是 401):
+   - `config: fab: proxy_fix_x_port` 这种写法不生效(和上面
+     `AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE` 那条
+     是同一类坑:chart 的 `config:` 合并只认预置在模板里的固定键),改用
+     `AIRFLOW__FAB__PROXY_FIX_X_PORT` 环境变量。
+   - OAuth 回调 `redirect_uri` 丢端口:Airflow 默认信任
+     `X-Forwarded-Port`(FAB 的 ProxyFix),但 ingress-nginx 在 NodePort
+     场景下转发的这个 header 反映它自己的内部端口,不是外部实际访问的
+     32460,把这一项端口信任关掉,让 Werkzeug 直接用 Host 头本身
+     (nginx 原样转发,是对的)。
+   - Keycloak client 的 redirectUris 照抄 Superset 那条时漏了 `/auth`
+     前缀——Airflow 3.x 的 api-server 是 FastAPI 套壳,FAB 这个 Flask
+     子应用整个挂在 `/auth` 前缀下,Superset 没有这层挂载。
+
+这三个问题在 `apps/definitions/airflow.yaml`、`apps/definitions/
+superset.yaml`、`apps/superset/manifests/create-db-job.yaml`、
+`scripts/03-configure-keycloak.sh` 都已经改成声明式/脚本化,不是手动改了
+一下集群就完事——下次从空环境重新部署也会带上这些修复,不需要重新踩一遍。
+
 ## 正在运行的后台任务
 
 **没有。**
