@@ -14,6 +14,19 @@
 # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY 用环境变量而不是塞进
 # SPARK_HISTORY_OPTS 字符串里——Hadoop 的 S3A 连接器本来就认这两个环境变量
 # (默认凭据提供链的一部分),不需要在 Java opts 里手写一遍凭据。
+# 2026-08-19 真实故障:部署后 CrashLoopBackOff,
+# `ClassNotFoundException: Class org.apache.hadoop.fs.s3a.S3AFileSystem
+# not found`——apache/spark 官方镜像故意不打包云存储连接器 jar(s3a 属于
+# 可选依赖,体积原因),这和 apps/spark-iceberg-demo/manifests/
+# sparkapplication.yaml 撞的是同一类缺口,那边是 SparkApplication 用
+# `spark.jars.packages` 在提交时从 Maven 现拉解决的,但 History Server是
+# 裸 Deployment,没有 spark-submit 那套依赖解析机制。用 initContainer 从
+# Maven Central 下载同样版本的 jar(hadoop-aws:3.3.4 + aws-java-sdk-
+# bundle:1.12.262,和 sparkapplication.yaml 用的是完全一致的版本——那份
+# 文件已经验证过这两个版本号和这个基础镜像自带的 hadoop-client-api/
+# runtime:3.3.4 兼容,不是另外猜的),补进 ${SPARK_HOME}/jars/ 目录本身
+# ——具体怎么补、为什么不能用 spark.driver.extraClassPath,见下面
+# initContainers 那段的说明。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,12 +43,42 @@ spec:
       labels:
         app: spark-history-server
     spec:
+      # spark-class(见 /opt/spark/bin/spark-class 里的
+      # LAUNCH_CLASSPATH="$SPARK_JARS_DIR/*")直接从 ${SPARK_HOME}/jars/*
+      # 拼类路径来启动 org.apache.spark.launcher.Main,不经过 spark-submit
+      # 那条会读 spark.driver.extraClassPath 的路径——试过用这个配置项
+      # 追加 classpath,读了 spark-class 脚本源码确认根本不会生效,不能
+      # 只凭经验假设,得读实际脚本逻辑。真正管用的办法是把两个 S3A 相关的
+      # jar 直接放进 ${SPARK_HOME}/jars/ 目录本身。emptyDir 卷挂载在这个
+      # 路径上会先清空原有内容,所以 initContainer 要先把镜像自带的全部
+      # jars 复制进这个卷,再补下载这两个,不能只放这两个进去(会丢失
+      # 镜像原有的核心 jar,直接启动失败)。
+      initContainers:
+        - name: fetch-s3a-jars
+          image: apache/spark:3.5.9
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              cp -r /opt/spark/jars/. /jars/
+              curl -fsSL -m 60 -o /jars/hadoop-aws-3.3.4.jar \
+                https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar
+              curl -fsSL -m 120 -o /jars/aws-java-sdk-bundle-1.12.262.jar \
+                https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
+              echo "jars 目录就绪,共 $(ls /jars | wc -l) 个文件"
+          volumeMounts:
+            - name: s3a-jars
+              mountPath: /jars
       containers:
         - name: history-server
           image: apache/spark:3.5.9
           command:
             - /opt/spark/bin/spark-class
             - org.apache.spark.deploy.history.HistoryServer
+          volumeMounts:
+            - name: s3a-jars
+              mountPath: /opt/spark/jars
           # 【可插拔基础设施,见 ADR-030】又一份独立的 S3A 配置(和 Hive
           # Metastore/Trino 各自的那份不共用),接外部 S3 要同步改这里 +
           # 下面的 AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY,取舍(path-
@@ -78,6 +121,9 @@ spec:
               path: /
               port: 18080
             initialDelaySeconds: 30
+      volumes:
+        - name: s3a-jars
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

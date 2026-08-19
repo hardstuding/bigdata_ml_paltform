@@ -68,12 +68,19 @@ spec:
                 key: rootPassword
           - name: MLFLOW_S3_ENDPOINT_URL
             value: "http://minio.minio.svc.cluster.local:9000"
+        # 2026-08-19 真实故障:1536Mi 限制下,新 pod 启动约 36 秒内内存占用
+        # 就爬到 1535Mi(kubectl top 实测),几乎必然触发 OOMKill——容器
+        # exitCode 137 但 reason 报的是 "Error" 不是 "OOMKilled"(kubelet
+        # 这个上报本身有已知的不准确,不能只看 reason 字段排除 OOM 可能性,
+        # 要对照 kubectl top 的实际内存占用曲线)。调大到 2560Mi,请求同步
+        # 调整,给 FastAPI 应用本身 + 启动时注册的后台定时任务(online_
+        # scoring_scheduler/trace_archival_scheduler)留够余量。
         resources:
           requests:
             cpu: 200m
-            memory: 768Mi
+            memory: 1024Mi
           limits:
-            memory: 1536Mi
+            memory: 2560Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: mlflow
