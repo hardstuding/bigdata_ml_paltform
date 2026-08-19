@@ -30,21 +30,25 @@ spec:
         env:
           - name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
             value: "False"
-        # 2026-08-19 真实踩坑:接 SSO 之后,OAuth 登录能正确跳到 Keycloak,
-        # 但 Keycloak 生成的 redirect_uri 少了端口(应该是
-        # airflow.local-lite.test:32460,实际是不带端口的 80)——同样场景下
-        # Superset 是正常的,对比读了 FAB 的 ProxyFix 配置才定位到:
-        # airflow.cfg 的 `[fab] proxy_fix_x_port` 默认是 1(信任 1 跳
-        # X-Forwarded-Port),但 ingress-nginx 转发的这个 header 反映的是它
-        # 自己内部监听的端口(NodePort 场景下不等于外部实际访问的 32460),
-        # ProxyFix 用这个错误值覆盖了本来从 Host 头就能正确解析出的端口。
-        # Superset 没有这层 ProxyFix 端口信任,所以没踩到同一个坑。关掉这一
-        # 项端口信任,让 Werkzeug 直接用 Host 头本身的端口(nginx 原样转发
-        # 过来的,是对的),不影响 x_for/x_proto/x_host 这几个其它场景真正
-        # 需要的信任维度。
-        config:
-          fab:
-            proxy_fix_x_port: "0"
+          - name: AIRFLOW__FAB__PROXY_FIX_X_PORT
+            value: "0"
+            # 2026-08-19 真实踩坑:接 SSO 之后,OAuth 登录能正确跳到
+            # Keycloak,但生成的 redirect_uri 少了端口(应该是
+            # airflow.local-lite.test:32460,实际是不带端口的 80)——同样
+            # 场景下 Superset 是正常的,对比读了 FAB 的 ProxyFix 配置才
+            # 定位到:airflow.cfg 的 [fab] proxy_fix_x_port 默认是 1
+            # (信任 1 跳 X-Forwarded-Port),但 ingress-nginx 转发的这个
+            # header 反映的是它自己内部监听的端口(NodePort 场景下不等于
+            # 外部实际访问的 32460),ProxyFix 用这个错误值覆盖了本来从
+            # Host 头就能正确解析出的端口。Superset 没有这层 ProxyFix
+            # 端口信任,所以没踩到同一个坑。关掉这一项端口信任,让 Werkzeug
+            # 直接用 Host 头本身的端口(nginx 原样转发过来的,是对的)。
+            # 用 env 不用 config.fab.*——这份文件上面
+            # AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
+            # 那条已经踩过一次同样的坑:chart 的 `config:` 合并只认预置在
+            # 模板里的固定键,新加的键会被静默丢掉(这次实测确认:
+            # `config.fab.proxy_fix_x_port` 渲染出的 airflow.cfg 里
+            # 压根没有这一行,不报错也不生效)。
         # 2026-08-19:接 Keycloak SSO(见下面 apiServer.apiServerConfig)要用
         # 到 OAUTH2_CLIENT_SECRET,顶层 `env:` 这个键的 schema 只认字面量
         # value(不接受 valueFrom,实测 `scripts/validate-charts.py` 报错
