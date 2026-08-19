@@ -61,6 +61,12 @@ MINIO_PW=$(kubectl -n minio get secret minio-root -o jsonpath='{.data.rootPasswo
 export AWS_ACCESS_KEY_ID="$MINIO_USER"
 export AWS_SECRET_ACCESS_KEY="$MINIO_PW"
 export MLFLOW_S3_ENDPOINT_URL="http://localhost:9000"
+# 2026-08-19:train_demo_model.py 改成完全靠环境变量配置(不再在代码里
+# 硬编码 localhost),这里显式设 MLFLOW_TRACKING_URI,不依赖脚本里的默认
+# 值——同一份 train_demo_model.py 现在也被 Argo Workflows 编排的训练
+# WorkflowTemplate 复用(见 apps/definitions/argo-training-workflow-
+# template.yaml),那边设的是集群内部 DNS,不是 localhost。
+export MLFLOW_TRACKING_URI="http://localhost:15500"
 
 python3 scripts/train_demo_model.py 2>&1 | tee -a "$LOG_FILE"
 

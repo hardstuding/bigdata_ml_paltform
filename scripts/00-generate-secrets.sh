@@ -382,7 +382,10 @@ echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 # spark-operator: SparkApplication driver/executor 直连 MinIO(S3A)读写
 # Iceberg warehouse,和 Trino 当初踩的是同一个坑,同样要复制一份
 # (ADR-036 验证 Spark+Iceberg 链路时发现 driver pod 报 secret not found)。
-MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt"
+# argo-workflows: 训练 WorkflowTemplate 的 pod 要把模型 artifact 存进
+# MinIO(和 scripts/09-train-demo-model.sh 手动跑时用的是同一个 MinIO
+# 凭据),见 apps/argo-workflows-training-image/manifests/。
+MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt argo-workflows"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done

@@ -1,0 +1,79 @@
+# Argo Workflows 编排训练——ADR-057 P4 里点名的空白("notebook 里触发/
+# Argo Workflows 编排训练"这两段从没实现过,训练一直是人直接跑
+# scripts/09-train-demo-model.sh)。这份 WorkflowTemplate 是这条链路
+# 第一次真正接入 Argo Workflows,不是"重新验证"已有能力。
+#
+# 设计取舍(为什么不是 notebook+papermill,参考了
+# /Users/zhenghe/my_work/ysb/algo 那个真实生产项目的既有模式之后决定
+# 不照抄):那边的团队日常在 Jupyter notebook 里交互式开发,notebook 是
+# 他们的原生工作产物,notebook+papermill 对他们是零额外成本。但这个
+# 平台自己的 notebook 交互式开发体验目前还是明确记录在案的差距(见
+# docs/usage-guide.md"交互式开发/Notebook"一节:没有自动连 Trino、没有
+# 自动带凭据),在这个体验成熟之前就把 notebook 当成生产流水线的执行
+# 单元,是本末倒置——会多背一个 papermill 依赖,却解决不了真正的问题。
+# 改成沿用这个项目已有的 apps/spark-iceberg-demo 那个模式:纯 Python
+# 脚本(ConfigMap 挂载,见同目录 script-configmap.yaml)+ 专门构建的
+# 依赖镜像(见同目录 Dockerfile),更简单、更好 code review、和这个
+# 项目自己的工程习惯一致。notebook 交互式开发的体验一旦真正成熟了,
+# 到时候重新评估要不要把这条链路也换成 notebook+papermill(向 ysb/algo
+# 的模式靠拢),现在不是时候。
+#
+# WorkflowTemplate 本身不是 ArgoCD Application 管的 chart/repo 资源,是
+# 一份纯 K8s 自定义资源(argoproj.io/v1alpha1 WorkflowTemplate,Argo
+# Workflows CRD 自带),GitOps 管理方式和 apps/spark-iceberg-demo 的
+# SparkApplication 是同一类——ArgoCD 只是把这份 YAML apply 到集群,不
+# 需要 helm chart。
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: train-demo-model
+  namespace: argo-workflows
+spec:
+  entrypoint: train
+  # 2026-08-19:目前只有一步。真要复现 ysb/algo 那种多步骤 DAG(特征
+  # 工程 -> 训练 -> 结果落库),在这个 templates 列表下加更多步骤、用
+  # dependencies 字段串起来就行,这个模板的结构本身已经是为多步骤准备
+  # 的,不是加了限制以后要推倒重来。
+  templates:
+    - name: train
+      container:
+        # 本地构建镜像(apps/argo-workflows-training-image/Dockerfile),
+        # 不是从任何 registry 拉——pullPolicy 必须是 IfNotPresent,不然
+        # kubelet 会尝试联网拉取一个不存在的远程镜像,直接 ErrImagePull
+        # (和 2026-08-19 当晚 OpenMetadata chart 硬编码 imagePullPolicy:
+        # Always 撞的是同一类坑,这里主动避开)。
+        image: "local/argo-workflows-training:1.0.0"
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "/scripts/train_demo_model.py"]
+        env:
+          # 集群内部 Service DNS,不需要 port-forward——和
+          # scripts/09-train-demo-model.sh 手动跑时用 localhost 的
+          # port-forward 地址是同一份代码,不同的只是这两个环境变量的
+          # 值,见 scripts/train_demo_model.py 顶部注释。
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow-mlflow.mlflow.svc.cluster.local:5000"
+          - name: MLFLOW_S3_ENDPOINT_URL
+            value: "http://minio.minio.svc.cluster.local:9000"
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootUser
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootPassword
+        volumeMounts:
+          - name: train-script
+            mountPath: /scripts
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            memory: 1024Mi
+      volumes:
+        - name: train-script
+          configMap:
+            name: train-demo-model-script
