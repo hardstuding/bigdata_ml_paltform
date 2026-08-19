@@ -94,6 +94,7 @@
 |---|---|---|
 | [027](027-kserve-model-serving.md) | KServe 模型上线服务 | 已验证 |
 | [042](042-feast-feature-store.md) | Feast 特征存储 | 已验证 |
+| [058](058-lightweight-developer-experience.md) | 开发者体验:薄 SDK + 脚手架 + skill,不自建平台 UI | **设计已定,尚未实现** |
 
 ## 可观测性、可靠性与运维
 
