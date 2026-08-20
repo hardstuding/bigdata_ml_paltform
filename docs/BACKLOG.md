@@ -93,7 +93,7 @@ WorkflowTemplate 只有训练一步)。
 ADR-057 认定的结构性债务。不做的话,上面 P1 拉起来的东西会以同样脆弱的
 方式继续堆叠。
 
-### 2.1 引入镜像构建流程,停止用运行时 `pip install`(最大的一条)
+### 2.1 引入镜像构建流程,停止用运行时 `pip install`(最大的一条)—— 3 个 Flask 应用已完成(2026-08-20)
 
 全仓库只有 1 个 Dockerfile,CI 没有任何镜像构建,而 **8 个地方在容器
 启动时现装 Python 依赖**。仅 2026-08-16 一晚就因此产生四次真实故障
@@ -101,23 +101,44 @@ ADR-057 认定的结构性债务。不做的话,上面 P1 拉起来的东西会�
 换镜像源导致 `ModuleNotFoundError`、同一 manifest 不同时间部署得到不同
 运行时)。离线/内网环境根本装不起来,这对"能原样上生产"是硬伤。
 
-范围按收益排序:3 个自建 Flask 应用(同时受"启动慢/不可复现/ConfigMap
-塞源码"三个问题影响)→ iam-sync → Superset 这类官方 chart 的
-bootstrapScript(改动面最大,最后处理)。
+**已完成(2026-08-20)第一段:3 个自建 Flask 应用**(permission-request-app
+/ table-registration-app / platform-portal)。每个应用新增
+`Dockerfile` + `requirements.txt`(锁定版本),GitHub Actions
+(`.github/workflows/build-images.yml`)在 push 到 main 且改了对应目录时
+构建镜像、推到 GHCR,tag 是构建时的 commit SHA(不用会变的 `latest`)。
+`deployment.yaml` 已切到 `ghcr.io/hardstuding/bigdata_ml_paltform/
+<app>@sha256:...` 这种带 digest 的引用,本地 docker pull + 起容器
+`/healthz` 验证过。ConfigMap 里的 `app.py` 已经不需要了(
+`permission-request-app` 的 ConfigMap 现在只剩 `employees.csv` 这份
+demo 数据,`table-registration-app`/`platform-portal` 的 ConfigMap 整个
+删掉了),`scripts/sync-app-configmaps.py` 已退役并删除。
 
-配套:依赖锁定(lock 文件)、GitHub Actions 构建推 registry、manifest
-引用带 digest 的镜像。**明确不做**:不引入 Kaniko/Tekton 这类集群内
-构建体系,对单人维护的项目过重。
+**GHCR 包可见性**:GitHub Actions 用内置 `GITHUB_TOKEN` 推送,推完实测
+`docker pull` 匿名可用(这个仓库是公开仓库,包默认跟着公开),不需要
+额外配置 imagePullSecrets。
 
-做完这一条,`sync-app-configmaps.py` 这类"源码塞 ConfigMap"的脚本可以
-退役,顺带消解下面 2.2。
+**还没做的部分**:iam-sync → Superset 这类官方 chart 的
+bootstrapScript(改动面最大,留到以后单独做)。配套的依赖锁定/CI 构建/
+digest 引用这几条已经在这批里验证出可行模式,以后接着做 iam-sync/
+Superset 时复用同一套(Dockerfile + build-images.yml 加 matrix 项)。
+**明确不做**:不引入 Kaniko/Tekton 这类集群内构建体系,对单人维护的
+项目过重。
 
-### 2.2 "生成式单一源码"脚本的增殖
+**下一步(需要 zhenghe 决定,不是纯技术判断)**:云端验证还没做——这批
+改动只在本地 docker 验证过,cloud-full 的 ArgoCD 还没同步到这版
+manifest,下次开云主机时应该优先验证这三个应用真的能从 GHCR 拉到镜像、
+Pod 正常启动(cloud-full 访问 ghcr.io 的网络连通性以前没实测过,这次是
+第一次真正依赖它)。
 
-现在有 3 个脚本在实现同一个模式(`sync-app-configmaps.py` /
+### 2.2 "生成式单一源码"脚本的增殖 —— 部分消解(2026-08-20)
+
+之前有 3 个脚本在实现同一个模式(`sync-app-configmaps.py` /
 `sync-airflow-dags-configmap.py` / `render-environment-config.py`)。
-各自都对、都接了 CI,但这个模式一直增殖本身就是"缺一个构建步骤"的症状。
-2.1 做完后重新评估哪些可以退役,不要单独动手。
+2.1 完成第一段后 `sync-app-configmaps.py` 已退役删除,现在剩
+`sync-airflow-dags-configmap.py`(Airflow DAG 还是 ConfigMap 挂载模式,
+没有跟着改成镜像)和 `render-environment-config.py`(职责不同,不是
+同一类,继续保留)。iam-sync 如果按 2.1 的模式改成镜像构建,`apps/
+iam-sync/` 目前有没有类似的"源码塞 ConfigMap"模式也需要一并检查。
 
 ### 2.3 Trino livenessProbe 的人工补丁要么固化要么消除
 

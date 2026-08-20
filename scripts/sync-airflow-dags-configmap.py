@@ -6,11 +6,13 @@ ConfigMap 里的副本是生成产物,不再手动维护两份。
 背景见 docs/BACKLOG.md P1.2a:这个仓库已经踩过一次真实的分叉——
 `dbt_demo.py` 的源文件和 ConfigMap 副本不一致过(ConfigMap 里的版本
 锁定是任务#13 单独做的,源文件当时没有同步更新),当时手动改成一致,
-但没有解决"以后还会分叉"这个根本问题。这个脚本是
+但没有解决"以后还会分叉"这个根本问题。这个脚本当初是仿照
 `scripts/sync-app-configmaps.py`(3 个自建 Flask 工具用的同一个模式)
-在 Airflow DAG 场景下的对应实现——差异只是这里是"一个 ConfigMap 里
-多个 data key",那边是"每个 app 各自一个 ConfigMap 一个 key",查找/
-替换某个 key 底下内容块的核心逻辑是一样的,不需要发明新机制。
+写的,差异只是这里是"一个 ConfigMap 里多个 data key",那边是"每个 app
+各自一个 ConfigMap 一个 key"——2026-08-20(BACKLOG 2.1)那边已经改成
+构建期固化进镜像、`sync-app-configmaps.py` 已退役,这个脚本本身管的是
+Airflow DAG(还是 ConfigMap 挂载模式,没有跟着改),继续用,只是不能再
+拿"和那边同一个模式"当参照了。
 
 用法:
   python3 scripts/sync-airflow-dags-configmap.py           # 重新生成,写回文件

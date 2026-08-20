@@ -1,7 +1,8 @@
-# 平台门户,见 docs/decisions/047-platform-portal.md。和
-# permission-request-app/table-registration-app 同一个"薄自建工具"模式:
-# 官方 python:3.12-slim 镜像 + 启动时 pip install + ConfigMap 挂源码,
-# 不建专门的容器镜像仓库。这个组件没有状态(不写数据库,现场探测现场展示),
+# 平台门户,见 docs/decisions/047-platform-portal.md。2026-08-20 起
+# (BACKLOG 2.1)用构建期固化依赖 + 源码的自建镜像(apps/platform-portal/
+# Dockerfile,GitHub Actions 推到 GHCR),不再是运行时 pip install 官方
+# python:3.12-slim 镜像那套——见 apps/permission-request-app/deployment.yaml
+# 顶部注释,同一个原因。这个组件没有状态(不写数据库,现场探测现场展示),
 # 不需要 PVC。
 apiVersion: apps/v1
 kind: Deployment
@@ -22,36 +23,11 @@ spec:
       priorityClassName: interactive
       containers:
         - name: app
-          image: python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
-          command:
-            - sh
-            - -c
-            - |
-              set -e
-              # 2026-08-16 云端部署时发现:192.168.5.2:1087 是 colima 宿主机
-              # 专用的本地代理,cloud-full(阿里云 ECS,独立公网出口)连不上,
-              # 之前把它写死成 env 会导致 pip 在 cloud-full 上连接超时崩溃。
-              # 这里还没有环境 overlay 机制(见 environments/cloud-full/
-              # README.md),改成运行时自己探测这个代理还在不在——2 秒连不上
-              # 就当作不需要代理(cloud-full 直连 pypi.org 本来就是通的,实测
-              # 确认过),不是无条件假设某个环境一定需要/不需要代理。
-              if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('192.168.5.2',1087))==0 else 1)" 2>/dev/null; then
-                export HTTP_PROXY="http://192.168.5.2:1087"
-                export HTTPS_PROXY="http://192.168.5.2:1087"
-                export NO_PROXY="localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
-              fi
-              # 2026-08-16 真实故障(用户实测发现):这个组件之前一直没补
-              # table-registration-app/permission-request-app/iam-sync 那次
-              # 已经踩过、也修过的同一个坑——pip 直连 pypi.org 官方 CDN 在
-              # 这台机器上会真的卡住不动(不是慢,是 CPU/RSS 都不再增长),
-              # 之前只有 `--timeout 30` 这个"单次 HTTP 请求超时",挡不住
-              # 这种卡死(不是超时,是连接建立后没有任何数据往来),外面没有
-              # 兜底的 `timeout` 命令,导致这次重启后卡了 7+ 分钟都没退出,
-              # 新 pod 一直起不来、Service 只能继续把流量指向旧 pod。补上
-              # 阿里云镜像(实测明显更快更稳)+ 外层 timeout(卡死也能被
-              # 强杀,不会无限期挂着)。
-              timeout -k 10 90 pip install --quiet --timeout 30 -i https://mirrors.aliyun.com/pypi/simple/ flask==3.1.3 requests==2.34.2
-              python3 /src/app.py
+          # 2026-08-20(BACKLOG 2.1):构建期固化依赖 + 源码,见
+          # apps/platform-portal/Dockerfile。tag 是构建时的 commit SHA
+          # (25e91945e172768ba40deda79a264c8ea26cddff),已经本地
+          # docker pull + / 验证过能正常拉取和跑起来。
+          image: ghcr.io/hardstuding/bigdata_ml_paltform/platform-portal@sha256:4a0063c74c9fc2667a9d00b495df905368a4fda55730cc229cc0fb57ab7fee4b
           env:
             # 2026-08-16 真实故障:门户列出的 13 个工具链接全部没带端口,
             # cloud-full 的 ingress-nginx 是 NodePort(32460 http、32535
@@ -65,9 +41,6 @@ spec:
           ports:
             - containerPort: 8080
               name: http
-          volumeMounts:
-            - name: src
-              mountPath: /src
           resources:
             requests:
               cpu: 30m
@@ -79,10 +52,6 @@ spec:
               path: /healthz
               port: 8080
             initialDelaySeconds: 8
-      volumes:
-        - name: src
-          configMap:
-            name: platform-portal-src
 ---
 apiVersion: v1
 kind: Service
