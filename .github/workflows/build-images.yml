@@ -52,6 +52,7 @@ on:
       - "apps/iam-sync/Dockerfile"
       - "apps/superset-image/Dockerfile"
       - "apps/argo-workflows-training-image/Dockerfile"
+      - "apps/feast/feature-server-image/Dockerfile"
       - ".github/workflows/build-images.yml"
 
 jobs:
@@ -75,6 +76,8 @@ jobs:
             image: superset
           - context: apps/argo-workflows-training-image
             image: argo-workflows-training
+          - context: apps/feast/feature-server-image
+            image: feast-feature-server
     steps:
       - uses: actions/checkout@v4
 
