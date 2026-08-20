@@ -237,6 +237,37 @@ JupyterHub),`submit_job()`(建 Workflow→pod 里跑
 `run_workflow_template()`,不需要 `platform-submit job.yaml` 这条
 "从终端/CI 提交"的权宜做法了(那条依然能用,只是不再是必须的)。
 
+### 2.7 cloud-full 节点上 k3s 内置 Traefik 一直没关(2026-08-20 顺手发现)
+
+排查其它问题时顺手 `kubectl -n kube-system get svc,ds` 才发现:k3s 默认
+自带的 Traefik ingress controller 从来没有被显式禁用过(`k3s server`
+没加 `--disable traefik`),`svclb-traefik-*` 这个 DaemonSet Pod
+`2/2 Running` 了整整 4 天,占着节点的 80/443 端口,和这个项目真正用的
+ingress-nginx 自己的 `svclb-ingress-nginx-*` 抢同一组端口——后者因此
+一直 `Pending`(`FailedScheduling: didn't have free ports`),这也是
+`ingress-nginx` 这个 ArgoCD Application 长期显示 `OutOfSync` 的一部分
+背景噪音(另一部分是下面这条独立的旧同步错误)。
+
+**已确认不影响真实访问**:这个项目的外部访问路径是 NodePort
+(`32460`/`32535`,不是靠 LoadBalancer 占的裸 80/443),`curl -k
+https://<公网IP>:32535/` 和 `http://<公网IP>:32460/` 都返回 404(符合
+预期——没带正确 Host 头,ingress-nginx 走的是默认后端),说明 ingress-
+nginx 本身工作正常,没有被 Traefik 顶替。**这次没有动手关闭 Traefik**
+——k3s 卸载/重装内置组件涉及节点级操作,风险和这次顺手发现的性质不匹配
+(见 `CLAUDE.md`"顺手修一下如果会跨组件/改变架构,单独立项"),留给
+专门时间处理:标准做法是给 `/etc/systemd/system/k3s.service`(或者
+k3s 安装参数)加 `--disable=traefik` 重启 k3s,或者直接删除
+`kube-system` 命名空间下 `traefik` 这个 HelmChart CR 触发 chart 卸载,
+两条路都需要先确认这台节点上 k3s 是怎么装的(`scripts/`
+目录里应该有对应的安装脚本)才能选对方式,不要现场现猜。
+
+**顺带发现一条独立的旧问题**:`ingress-nginx` 这个 Application 的
+`status.conditions` 里还挂着一条 2026-08-16 的 `SyncError`
+(`validatingwebhookconfigurations.../ingress-nginx-admission` 的
+`resourceVersion` 冲突),和 `docs/operations/troubleshooting.md` 里
+"ArgoCD 卡在过期的同步操作上"是同一类问题,处置方式那份文档里已经有,
+没有重复展开。
+
 ---
 
 ## P3:打磨已有角色能力(不需要新组件,是体验问题)
