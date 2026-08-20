@@ -136,10 +136,17 @@ with mlflow.start_run():
     accuracy = accuracy_score(y_test, model.predict(X_test))
     mlflow.log_metric("accuracy", accuracy)
 
+    # serialization_format="pickle":同 train_demo_model.py 里的教训——
+    # MLflow 3.x 默认改用 skops(更安全,避免 pickle 反序列化风险),但
+    # 这个精简训练镜像没装 skops(mlflow-skinny 不带),KServe mlserver
+    # runtime 镜像自带的 mlflow 客户端版本也较老、不认 skops 格式。换回
+    # pickle 是为了兼容部署目标和这个镜像本身的依赖范围,不是否定 skops
+    # 更安全这个前提。
     mlflow.sklearn.log_model(
         model,
         name="model",
         registered_model_name=registered_model_name,
+        serialization_format="pickle",
     )
     print(
         f"完成:从 Feast 取了 {len(features_df)} 行历史特征,训练完成,"
