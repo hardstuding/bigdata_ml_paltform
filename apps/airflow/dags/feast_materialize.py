@@ -4,15 +4,14 @@
 # 用 KubernetesPodOperator 而不是 @task(跑在 Airflow worker 自带的镜像
 # 里)——feast+pyspark+JRE 这套依赖不轻(pyspark 一个包解压后几百 MB),
 # 每次任务运行现装一遍既慢又占带宽。改用
-# apps/feast/feature-server-image/Dockerfile 构建的自定义镜像
-# (local/feast-feature-server:0.65.0-spark,和 Feast Serving 本身用的是
-# 同一个镜像,見那份 Dockerfile 顶部注释——两边都要 pyspark+JRE 是 Feast
-# 自身的架构限制,不是各自单独的选择)。这个镜像目前只在这台机器的本地
-# docker 里,没有推到任何 registry——image_pull_policy 设成 Never,k3s 的
-# docker 运行时能直接用本地镜像(这台机器的常规模式,见
-# scripts/17-load-image-cache.sh 的说明);换到真正的多节点集群时,这个
-# 镜像需要改成推到一个大家都能拉到的 registry,这是已知的后续课题,不是
-# 这次疏漏。
+# apps/feast/feature-server-image/Dockerfile 构建的自定义镜像(和 Feast
+# Serving 本身用的是同一个镜像,見那份 Dockerfile 顶部注释——两边都要
+# pyspark+JRE 是 Feast 自身的架构限制,不是各自单独的选择)。
+#
+# 2026-08-20(BACKLOG 2.1):这个镜像从"只在本地 docker 里,image_pull_
+# policy=Never"改成 GitHub Actions 自动构建推 GHCR,digest 引用 +
+# IfNotPresent——不再要求"这台机器之前手动 build 过"这个隐藏前提,换
+# 到真正的多节点集群也不用再单独处理镜像分发。
 from __future__ import annotations
 
 from datetime import datetime
@@ -21,7 +20,7 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from airflow.sdk import DAG
 from kubernetes.client import models as k8s
 
-FEAST_IMAGE = "local/feast-feature-server:0.65.0-spark"
+FEAST_IMAGE = "ghcr.io/hardstuding/bigdata_ml_paltform/feast-feature-server@sha256:dd0fbc978b6d30c099dc9d6929a895bdd8f03a38f102cdd1b347c4e2f0b55b2f"
 
 # feature_store.yaml/definitions.py 权威源是 scripts/feast_feature_repo/,
 # 部署态的拷贝在 apps/feast/manifests/feature-repo-configmap.yaml——和
@@ -170,7 +169,7 @@ ROOT_SECURITY_CONTEXT = k8s.V1PodSecurityContext(run_as_user=0)
 BASE_KWARGS = dict(
     namespace="feast",
     image=FEAST_IMAGE,
-    image_pull_policy="Never",
+    image_pull_policy="IfNotPresent",
     volumes=[FEATURE_REPO_VOLUME],
     volume_mounts=FEATURE_REPO_MOUNT,
     env_vars=MINIO_ENV,
