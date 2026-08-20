@@ -9,11 +9,10 @@
 # manifest,见 apps/argo-workflows-training-image/manifests/ 里的完整
 # 设计说明,包括为什么不采用 notebook+papermill 这个曾经考虑过的方案)。
 #
-# 依赖 apps/argo-workflows-training-image/Dockerfile 构建出的
-# local/argo-workflows-training:1.0.0 镜像已经在目标节点上——这是本地
-# 构建镜像,不从任何 registry 拉取,和 apps/feast/feature-server-image/
-# 是同一个模式(见该镜像 Dockerfile 里 2026-08-19 的说明,同一晚踩过的
-# 坑:直连 PyPI 装依赖会被限速,已经在这份 Dockerfile 里带上镜像源)。
+# 依赖的镜像(apps/argo-workflows-training-image/Dockerfile)2026-08-20
+# 起由 GitHub Actions 自动构建推到 GHCR(见 .github/workflows/
+# build-images.yml),workflow-template.yaml 里引用的是带 digest 的
+# ghcr.io 地址,不再是"本地构建、手动确保节点上已经有"那套。
 #
 # 2026-08-19 新增,这是这条链路第一次真正接入 Argo Workflows,不是"重新
 # 验证"已有能力——之前训练一直是人直接跑 scripts/09-train-demo-model.sh。

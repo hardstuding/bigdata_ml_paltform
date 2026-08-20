@@ -46,12 +46,16 @@ spec:
   templates:
     - name: train
       container:
-        # 本地构建镜像(apps/argo-workflows-training-image/Dockerfile),
-        # 不是从任何 registry 拉——pullPolicy 必须是 IfNotPresent,不然
-        # kubelet 会尝试联网拉取一个不存在的远程镜像,直接 ErrImagePull
-        # (和 2026-08-19 当晚 OpenMetadata chart 硬编码 imagePullPolicy:
-        # Always 撞的是同一类坑,这里主动避开)。
-        image: "local/argo-workflows-training:1.0.0"
+        # 2026-08-20 起(BACKLOG 2.1):GitHub Actions 自动构建推 GHCR
+        # (apps/argo-workflows-training-image/Dockerfile + .github/
+        # workflows/build-images.yml),不再是手动登云主机 build 的本地
+        # 镜像——之前 `local/argo-workflows-training:1.0.0` 这个 tag 是
+        # 手动 build 出来后靠"节点上已经有"生效的,pullPolicy 必须是
+        # IfNotPresent 是因为它压根不在任何 registry 里,现在改成真实
+        # digest 引用,`imagePullPolicy` 可以留 IfNotPresent(值不会变,
+        # 没必要每次都联网确认),Kubernetes 对 digest 引用的镜像本来就
+        # 会做内容校验,不会有拉到旧版本的风险。
+        image: "ghcr.io/hardstuding/bigdata_ml_paltform/argo-workflows-training@sha256:5c519d9ed705fbe558c8b24bf623e3965c86112337fdbabd5486d5b40a37b48f"
         imagePullPolicy: IfNotPresent
         command: ["python3", "/scripts/train_demo_model.py"]
         env:
