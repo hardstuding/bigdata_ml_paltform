@@ -102,8 +102,14 @@ spec:
               # 存在的意义本身(每次都要拿 platform/iam/ 最新数据,不是
               # 构建时固化的静态内容),用 `http.lowSpeedLimit`/
               # `http.lowSpeedTime`(git 自己的传输层超时机制,能容忍真实
-              # 慢速网络,只掐真正卡死不动的连接)。
-              image: ghcr.io/hardstuding/bigdata_ml_paltform/iam-sync:latest
+              # 慢速网络,只掐真正卡死不动的连接)。这个 digest 是
+              # linux/amd64+linux/arm64 多架构 manifest list 的 digest,
+              # 对应 commit 8fbb640b396670cfdd08ae7beef4d322aae93421,
+              # 本地(colima/arm64)docker build + 容器内 `git --version`/
+              # `kubectl version --client`/`python3 -c "import yaml"`
+              # 三个工具都确认能用,还没在真实集群里跑过一次(下次开云
+              # 主机时应该验证 CronJob 真的能触发、Job 能 Complete)。
+              image: ghcr.io/hardstuding/bigdata_ml_paltform/iam-sync@sha256:fb9ffde1ae04ca954339f3fb942070899d466a19a266a471d663de23f8c84467
               command:
                 - sh
                 - -c

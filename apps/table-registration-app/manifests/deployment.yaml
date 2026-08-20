@@ -45,10 +45,12 @@ spec:
       containers:
         - name: app
           # 2026-08-20(BACKLOG 2.1):构建期固化依赖 + 源码,见
-          # apps/table-registration-app/Dockerfile。tag 是构建时的
-          # commit SHA(25e91945e172768ba40deda79a264c8ea26cddff),已经
-          # 本地 docker pull + /healthz 验证过能正常拉取和跑起来。
-          image: ghcr.io/hardstuding/bigdata_ml_paltform/table-registration-app@sha256:7122bb2f9ec821f067f03aa405bac6372cde322efb6c100d1d9b4765dc0146bf
+          # apps/table-registration-app/Dockerfile。这个 digest 是
+          # linux/amd64+linux/arm64 多架构 manifest list 的 digest(见
+          # apps/permission-request-app/deployment.yaml 顶部的详细说明,
+          # 同一次重新构建),对应 commit
+          # 8fbb640b396670cfdd08ae7beef4d322aae93421。
+          image: ghcr.io/hardstuding/bigdata_ml_paltform/table-registration-app@sha256:cf69b99da7eaee4e1f4ee337951f1731f3a5f651a3d218831c28355ee430b99e
           env:
             - name: DB_PATH
               value: /data/registrations.db

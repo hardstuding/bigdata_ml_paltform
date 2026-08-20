@@ -65,12 +65,17 @@ spec:
         - name: app
           # 2026-08-20(BACKLOG 2.1):改成构建期固化依赖 + 源码的镜像,
           # 不再运行时现装 git/pip(那套 apt-get/pip install 脚本删掉了,
-          # 见 apps/permission-request-app/Dockerfile)。这个 digest 对应
-          # 的是 push 到 main 后 GitHub Actions(.github/workflows/
-          # build-images.yml)构建并推到 GHCR 的镜像,tag 是构建时的
-          # commit SHA(25e91945e172768ba40deda79a264c8ea26cddff),已经
-          # 本地 docker pull + /healthz 验证过能正常拉取和跑起来。
-          image: ghcr.io/hardstuding/bigdata_ml_paltform/permission-request-app@sha256:c19dc9073182a9188ccd6645d160891b4b9f3547a2cffb32c91364912ac3bf4a
+          # 见 apps/permission-request-app/Dockerfile)。这个 digest 是
+          # linux/amd64+linux/arm64 多架构 manifest list 的 digest(见
+          # .github/workflows/build-images.yml 的 buildx 多平台构建),
+          # cloud-full(x86_64)和 local-lite(colima/arm64)拉同一个
+          # digest 会各自取到匹配自己节点架构的那份,不用分开维护两个
+          # digest。对应 commit 8fbb640b396670cfdd08ae7beef4d322aae93421,
+          # 已经在 cloud-full 云主机上真实拉取+/healthz 200 验证过(第一版
+          # 单架构 digest 那次),这次多架构重新构建后的 digest 还没有
+          # 单独在云上重新验证,理论上内容一致(同一份 Dockerfile/源码),
+          # 下次开云主机时确认一下 ArgoCD 同步后 Pod 状态。
+          image: ghcr.io/hardstuding/bigdata_ml_paltform/permission-request-app@sha256:082546c2e65e6352bee968710dfe95bd296a23bdd1b8802fc02f9a502e685818
           env:
             - name: DB_PATH
               value: /data/requests.db
