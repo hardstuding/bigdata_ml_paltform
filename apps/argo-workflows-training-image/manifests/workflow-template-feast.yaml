@@ -1,0 +1,101 @@
+# BACKLOG P1.7 最后一段空白的落地:"notebook → Feast 特征 → Argo
+# Workflows 训练 → MLflow 记录"这条完整链路,之前 train-demo-model 这个
+# WorkflowTemplate 用的是合成数据(sklearn.datasets.make_classification),
+# 从没真的从 Feast 取过特征。这是一个独立的 WorkflowTemplate(不是给
+# train-demo-model 加第二个 entrypoint)——platform_sdk.
+# run_workflow_template(template_name) 是按名字触发一个 WorkflowTemplate,
+# 不支持覆盖 entrypoint,独立的资源名更符合这个调用模型,也让两条训练
+# 路径(合成数据 demo / Feast 真实特征 demo)在集群里各自独立可见,互不
+# 影响。
+#
+# 复用同一个训练镜像(apps/argo-workflows-training-image/Dockerfile,这次
+# 加了 feast[spark] + JRE),同一个 argo-workflow ServiceAccount(见
+# workflow-template.yaml 里的说明,同一个坑同一个解法)。
+#
+# 环境变量/安全上下文照抄 apps/airflow/dags/feast_materialize.py 里
+# 已经踩平的坑(不是重新猜一遍):
+#   - AWS_* 环境变量给 Feast 自己的 boto3/pyarrow S3 客户端用(registry
+#     读写),MINIO_ACCESS_KEY/MINIO_SECRET_KEY 给 feature_store.yaml
+#     里 spark_conf 的 ${env.*} 替换用,是两条独立路径,都要给。
+#   - HADOOP_USER_NAME + runAsUser: 0:镜像基础层不是这次改的
+#     quay.io/feastdev/feature-server 那个"任意 UID"风格(这次是
+#     python:3.11-slim,有正常 /etc/passwd),理论上不需要这条,但
+#     Spark/Hadoop 的 UnixLoginModule 在某些精简基础镜像上也可能查不到
+#     用户名——保留这条加固,没有已知坏处,不确定的时候优先抄一份已经
+#     验证过的配置,不省这几行。
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: train-from-feast-features
+  namespace: argo-workflows
+spec:
+  entrypoint: train
+  serviceAccountName: argo-workflow
+  templates:
+    - name: train
+      container:
+        image: "ghcr.io/hardstuding/bigdata_ml_paltform/argo-workflows-training@sha256:5c519d9ed705fbe558c8b24bf623e3965c86112337fdbabd5486d5b40a37b48f"
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "/scripts/train_from_feast_features.py"]
+        securityContext:
+          runAsUser: 0
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow-mlflow.mlflow.svc.cluster.local:5000"
+          - name: MLFLOW_S3_ENDPOINT_URL
+            value: "http://minio.minio.svc.cluster.local:9000"
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootUser
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootPassword
+          - name: AWS_ENDPOINT_URL_S3
+            value: "http://minio.minio.svc.cluster.local:9000"
+          - name: AWS_DEFAULT_REGION
+            value: "us-east-1"
+          - name: MINIO_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootUser
+          - name: MINIO_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootPassword
+          - name: HADOOP_USER_NAME
+            value: "feast"
+          - name: FEAST_REPO_PATH
+            value: "/feature_repo"
+        volumeMounts:
+          - name: train-script
+            mountPath: /scripts
+          # 和 apps/airflow/dags/feast_materialize.py 同一个坑同一个
+          # 解法:subPath 分别挂每个文件,不要整个目录挂进去——ConfigMap
+          # 卷靠 `..data` 软链 + 带时间戳的隐藏目录做原子更新,Feast 用
+          # importlib 解析 definitions.py 时会把这层目录结构误当成 Python
+          # 包路径的一部分,relative import 直接报错。
+          - name: feature-repo
+            mountPath: /feature_repo/feature_store.yaml
+            subPath: feature_store.yaml
+          - name: feature-repo
+            mountPath: /feature_repo/definitions.py
+            subPath: definitions.py
+        resources:
+          requests:
+            cpu: 300m
+            memory: 1Gi
+          limits:
+            memory: 2Gi
+      volumes:
+        - name: train-script
+          configMap:
+            name: train-demo-model-script
+        - name: feature-repo
+          configMap:
+            name: feast-feature-repo

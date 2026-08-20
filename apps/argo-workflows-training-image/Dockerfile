@@ -32,6 +32,26 @@ RUN pip install --no-cache-dir \
     pandas==2.2.3 \
     boto3==1.35.36
 
+# 2026-08-20 新增(BACKLOG P1.7,"notebook → Feast 特征 → Argo Workflows
+# 训练 → MLflow 记录"这条完整链路的训练那一步):补 feast[spark] + JRE,
+# 让训练脚本能从 Feast 的离线存储(Spark 读 Iceberg,和
+# apps/feast/feature-server-image/ 走的是同一个 offline_store 配置)取
+# point-in-time 正确的历史特征,不是像 train_demo_model.py 那样用
+# sklearn.datasets.make_classification 生成的合成数据。
+#
+# feast==0.65.0 和已部署的 Feast(quay.io/feastdev/feature-server:0.65.0,
+# 见 apps/feast/manifests/feature-server.yaml)版本对齐——client/server
+# 版本不匹配可能导致 feature_store.yaml/registry 格式不兼容,不是随便
+# 挑的。pyspark==3.5.9 和 apps/feast/feature-server-image/Dockerfile
+# 用的是同一个版本(那边已经验证过这个版本能跑 Feast 的 Spark offline
+# store),不单独选一个新版本增加不必要的变量。
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends openjdk-17-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir \
+    "feast[spark]==0.65.0" \
+    pyspark==3.5.9
+
 # train_demo_model.py 不打进镜像——通过 ConfigMap 挂载(见
 # apps/argo-workflows-training-image/manifests/script-configmap.yaml),
 # 和 apps/spark-iceberg-demo 是同一个模式:改脚本逻辑不用重新构建镜像,

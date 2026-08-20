@@ -1,0 +1,39 @@
+# 和 apps/feast/manifests/feature-repo-configmap.yaml 内容完全一致,
+# 单独在 argo-workflows 命名空间放一份——K8s 的 ConfigMap 挂载不能跨
+# 命名空间引用,workflow-template-feast.yaml 的 Workflow pod 跑在
+# argo-workflows 命名空间,没法直接挂 feast 命名空间里的那份。手动
+# 同步(权威源还是 scripts/feast_feature_repo/,和这个仓库其它几处
+# 内容重复的 ConfigMap 是同一个已有取舍,不是这次新引入的模式)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: feast-feature-repo
+  namespace: argo-workflows
+data:
+  feature_store.yaml: "project: demo\nprovider: local\n\nregistry:\n  registry_type:\
+    \ file\n  path: s3://lakehouse/feast/registry.pb\n\noffline_store:\n  type: spark\n\
+    \  spark_conf:\n    spark.master: \"local[2]\"\n    spark.sql.catalog.iceberg:\
+    \ org.apache.iceberg.spark.SparkCatalog\n    spark.sql.catalog.iceberg.type: hive\n\
+    \    spark.sql.catalog.iceberg.uri: thrift://hive-metastore.data.svc.cluster.local:9083\n\
+    \    spark.sql.extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions\n\
+    \    spark.hadoop.fs.s3a.endpoint: http://minio.minio.svc.cluster.local:9000\n\
+    \    spark.hadoop.fs.s3a.access.key: ${env.MINIO_ACCESS_KEY}\n    spark.hadoop.fs.s3a.secret.key:\
+    \ ${env.MINIO_SECRET_KEY}\n    spark.hadoop.fs.s3a.path.style.access: \"true\"\
+    \n    spark.hadoop.fs.s3a.connection.ssl.enabled: \"false\"\n    spark.hadoop.fs.s3a.impl:\
+    \ org.apache.hadoop.fs.s3a.S3AFileSystem\n    spark.jars.packages: \"org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262\"\
+    \n    spark.jars.ivy: \"/tmp/.ivy2\"\n\nonline_store:\n  type: redis\n  connection_string:\
+    \ \"feast-redis.feast.svc.cluster.local:6379\"\n\nentity_key_serialization_version:\
+    \ 3\n"
+  definitions.py: "from datetime import timedelta\n\nfrom feast import Entity, FeatureView,\
+    \ Field\nfrom feast.infra.offline_stores.contrib.spark_offline_store.spark_source\
+    \ import (\n    SparkSource,\n)\nfrom feast.types import Float32, String\n\ncustomer\
+    \ = Entity(\n    name=\"customer_name\",\n    join_keys=[\"customer_name\"],\n\
+    \    description=\"demo.orders 表里的下单客户姓名,demo 用,不是真实生产实体键设计\",\n)\n\norders_source\
+    \ = SparkSource(\n    name=\"orders_source\",\n    query=(\n        \"SELECT customer_name,\
+    \ region, product, amount, \"\n        \"CAST(order_date AS TIMESTAMP) AS event_timestamp\
+    \ \"\n        \"FROM iceberg.demo.orders\"\n    ),\n    timestamp_field=\"event_timestamp\"\
+    ,\n)\n\ncustomer_order_features = FeatureView(\n    name=\"customer_order_features\"\
+    ,\n    entities=[customer],\n    ttl=timedelta(days=3650),\n    schema=[\n   \
+    \     Field(name=\"region\", dtype=String),\n        Field(name=\"product\", dtype=String),\n\
+    \        Field(name=\"amount\", dtype=Float32),\n    ],\n    source=orders_source,\n\
+    )\n"
