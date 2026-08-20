@@ -124,11 +124,13 @@ Superset 时复用同一套(Dockerfile + build-images.yml 加 matrix 项)。
 **明确不做**:不引入 Kaniko/Tekton 这类集群内构建体系,对单人维护的
 项目过重。
 
-**下一步(需要 zhenghe 决定,不是纯技术判断)**:云端验证还没做——这批
-改动只在本地 docker 验证过,cloud-full 的 ArgoCD 还没同步到这版
-manifest,下次开云主机时应该优先验证这三个应用真的能从 GHCR 拉到镜像、
-Pod 正常启动(cloud-full 访问 ghcr.io 的网络连通性以前没实测过,这次是
-第一次真正依赖它)。
+**云端验证已完成(2026-08-20 当天)**:cloud-full 的 ArgoCD 自动同步到
+这版 manifest 后,三个应用的新 Pod 都正常拉到 GHCR 镜像并 Running(
+`kubectl describe`/`.spec.containers[0].image` 确认 digest 和本地构建
+的完全一致),`/healthz` 200,ArgoCD Application 状态 Synced/Healthy。
+cloud-full 访问 `ghcr.io` 的网络连通性此前是真实未知项(之前只验证过
+`docker.io`/`quay.io`/`registry.k8s.io` 这几个,没验证过 `ghcr.io`),
+这次确认是通的,不再是假设。
 
 ### 2.2 "生成式单一源码"脚本的增殖 —— 部分消解(2026-08-20)
 
