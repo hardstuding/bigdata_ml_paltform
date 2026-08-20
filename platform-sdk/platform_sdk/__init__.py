@@ -15,6 +15,10 @@
     mlflow = mlflow_setup("my-experiment")
 
     wf = submit_job("my-training", "train.py")
+
+    # 触发平台已经部署好的 WorkflowTemplate(比如训练流程),不是自己写
+    # 临时脚本——两者的区别见 submit.py 里 run_workflow_template() 的说明
+    wf = run_workflow_template("train-demo-model")
 """
 
 from .config import MissingCredential
@@ -29,20 +33,21 @@ __all__ = [
     "submit_job",
     "job_status",
     "job_logs",
+    "run_workflow_template",
 ]
 
 __version__ = "0.1.0"
 
 
 def __getattr__(name):
-    """submit 相关的三个函数延迟导入。
+    """submit 相关的几个函数延迟导入。
 
     它们需要 kubernetes 客户端(pyproject 里是 optional 依赖),而只想在
     notebook 里查数的人不该因为没装这个可选依赖就 `import platform_sdk`
     失败。用模块级 __getattr__ 做延迟导入,既保持了顶层的简洁用法,
     又不把重依赖变成必装。
     """
-    if name in ("submit_job", "job_status", "job_logs"):
+    if name in ("submit_job", "job_status", "job_logs", "run_workflow_template"):
         from . import submit
 
         return getattr(submit, name)

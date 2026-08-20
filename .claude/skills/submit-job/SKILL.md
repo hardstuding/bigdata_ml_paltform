@@ -67,6 +67,31 @@ meant for single-file scripts; a real multi-file project should be pulling from 
 instead, which is a documented but not-yet-built follow-up, see ADR-058's "second
 batch") and an Argo Workflow that mounts it and runs `python3 job.py`.
 
+## Triggering an existing WorkflowTemplate instead of submitting a script
+
+`submit_job()` is for the user's *own* ad-hoc script. If instead the user wants to
+kick off a pipeline the platform has already declared as an Argo `WorkflowTemplate`
+(for example, `train-demo-model`, the multi-step training pipeline defined in
+`apps/argo-workflows-training-image/manifests/workflow-template.yaml`), that's a
+different function — `run_workflow_template()`, not `submit_job()`. Don't scaffold a
+`job.yaml`/`job.py` for something that already has a WorkflowTemplate; that would be
+reimplementing what the template already does, badly.
+
+```python
+from platform_sdk import run_workflow_template
+workflow_name = run_workflow_template("train-demo-model")
+```
+
+This is the "trigger training from a notebook cell" path (`docs/BACKLOG.md` P1.7) —
+one line in a notebook, no `kubectl create`, no hand-written Workflow YAML. It creates
+a thin `Workflow` object with a `workflowTemplateRef` pointing at the named template;
+the template itself owns the image/resources/credentials, so there's nothing else to
+configure unless the template declares `parameters` (pass those as a dict:
+`run_workflow_template("train-demo-model", parameters={"key": "value"})` — check the
+template's own `spec.arguments.parameters` for what it accepts before assuming a key
+exists). The returned name works with `job_status()`/`job_logs()` exactly like
+`submit_job()`'s does — see the debug-job skill.
+
 ## One real limitation to know about before troubleshooting it yourself
 
 Calling `submit_job()` **from inside a JupyterHub notebook pod itself** currently

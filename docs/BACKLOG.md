@@ -79,12 +79,28 @@ JupyterHub/MLflow/Spark Operator/Feast/Argo Workflows 都已部署验证。
 **2026-08-19 晚些时候:"Argo Workflows 编排训练"本身已经真正实现并
 端到端验证**(不只是组件部署,是真的写了 WorkflowTemplate、提交跑通、
 Model Registry 查询确认 READY——见 `docs/CURRENT_WORK.md`、
-`apps/argo-workflows-training-image/`)。但"notebook 里触发训练"
-(在 JupyterHub 里点一下就能拉起这个 Workflow,不是 `kubectl create`)
-和"notebook → Feast 特征 → Argo Workflows 训练 → MLflow 记录"这条完整
+`apps/argo-workflows-training-image/`)。
+
+**2026-08-20:"notebook 里触发训练"的 SDK 侧机制已经写好,还没端到端
+验证**——`platform_sdk` 新增 `run_workflow_template(template_name,
+parameters=None, namespace=None)`(见 `platform-sdk/platform_sdk/
+submit.py`),用 `workflowTemplateRef` 建一个瘦 Workflow 对象触发已经
+部署好的 WorkflowTemplate,不是重新走 `submit_job()` 那套脚本上传流程。
+`.claude/skills/submit-job/SKILL.md` 和 `platform-sdk/README.md` 都
+同步更新了用法。**这次只做了 mock 单元测试**(验证提交的 payload 形状
+对不对,不需要真实集群),**没有在真实 JupyterHub notebook pod 里跑过
+一次**——下次开云主机时应该优先做这个验证:进一个 notebook pod,
+`from platform_sdk import run_workflow_template`,真的触发一次
+`train-demo-model`,确认能拿到 workflow 名字、`job_status()` 能查到
+状态。如果又撞上 `submit_job()` 那个已知的 NetworkPolicy 问题(见下面
+2.6),这个函数应该也会中招,因为走的是同一条"notebook pod 连 K8s API
+server"的路径——不要假设这个新函数天然绕开了那个问题。
+
+"notebook → Feast 特征 → Argo Workflows 训练 → MLflow 记录"这条完整
 链路串成一次真实调用,仍然是真实空白——现在每一段是分别验证的,不是
 连起来的一条链路,也没有多步骤 DAG(特征工程→训练→评估,现在
-WorkflowTemplate 只有训练一步)。
+WorkflowTemplate 只有训练一步,且不接受任何 parameters,`run_workflow_
+template()` 传 parameters 目前对这个模板是无效的,模板本身还没参数化)。
 
 ---
 
@@ -117,12 +133,28 @@ demo 数据,`table-registration-app`/`platform-portal` 的 ConfigMap 整个
 `docker pull` 匿名可用(这个仓库是公开仓库,包默认跟着公开),不需要
 额外配置 imagePullSecrets。
 
-**还没做的部分**:iam-sync → Superset 这类官方 chart 的
-bootstrapScript(改动面最大,留到以后单独做)。配套的依赖锁定/CI 构建/
-digest 引用这几条已经在这批里验证出可行模式,以后接着做 iam-sync/
-Superset 时复用同一套(Dockerfile + build-images.yml 加 matrix 项)。
-**明确不做**:不引入 Kaniko/Tekton 这类集群内构建体系,对单人维护的
-项目过重。
+**已完成(2026-08-20)第二段:iam-sync**。这个组件和 3 个 Flask 应用不是
+同一种情况——它每次跑都要拿 `platform/iam/` 的**最新** git 内容,不能
+像 Flask 应用那样把源码整个固化进镜像,固化的只有"装 git/kubectl/
+pyyaml 这几个工具"这件事(之前 initContainer + 主容器各自现装一遍,
+踩过 apt 卡死/delayed-item 重试队列等好几个坑)。**这个镜像的构建 CI
+不换阿里云镜像源**——和 3 个 Flask 应用不同,是因为构建方从"cloud-full
+云主机 / 本机 colima"变成了 GitHub Actions(境外 runner),直连官方源
+(deb.debian.org/pkgs.k8s.io)反而更快更稳,实测换阿里云源在这个网络下
+连不上,已经记进 `apps/iam-sync/Dockerfile` 的注释。**顺带修了一个多
+架构构建的隐患**:build-images.yml 一开始只建 linux/amd64,但
+local-lite(colima,arm64)也会拉这几个镜像跑同一批组件,iam-sync 的
+镜像里打包了 kubectl——这个仓库已经真实踩过"amd64 kubectl 在 arm64
+节点上用 QEMU 模拟执行,触发 client-go 并发 bug"这个坑(当年退役前的
+initContainer 就是为了绕开它),只建 amd64 会把这个坑重新引入,已经在
+写 iam-sync 镜像的同时把 build-images.yml 改成 `docker buildx` 建
+`linux/amd64,linux/arm64` 两个平台(连带 3 个 Flask 应用的镜像也补齐了
+arm64,之前只顾着验证 cloud-full 这一个环境,没考虑到 local-lite)。
+
+**还没做的部分**:Superset 这类官方 chart 的 bootstrapScript(改动面
+最大,留到以后单独做,配套的依赖锁定/CI 构建/digest 引用模式已经验证
+过两轮,可以直接复用)。**明确不做**:不引入 Kaniko/Tekton 这类集群内
+构建体系,对单人维护的项目过重。
 
 **云端验证已完成(2026-08-20 当天)**:cloud-full 的 ArgoCD 自动同步到
 这版 manifest 后,三个应用的新 Pod 都正常拉到 GHCR 镜像并 Running(
@@ -139,8 +171,10 @@ cloud-full 访问 `ghcr.io` 的网络连通性此前是真实未知项(之前只
 2.1 完成第一段后 `sync-app-configmaps.py` 已退役删除,现在剩
 `sync-airflow-dags-configmap.py`(Airflow DAG 还是 ConfigMap 挂载模式,
 没有跟着改成镜像)和 `render-environment-config.py`(职责不同,不是
-同一类,继续保留)。iam-sync 如果按 2.1 的模式改成镜像构建,`apps/
-iam-sync/` 目前有没有类似的"源码塞 ConfigMap"模式也需要一并检查。
+同一类,继续保留)。iam-sync 已经检查过:它本来就不是"源码塞
+ConfigMap"这个模式(`scripts/12-sync-iam.py` 一直是运行时 `git clone`
+拿最新代码跑,不是从 ConfigMap 读固定内容),这次镜像化没有牵扯到
+任何同步脚本,不需要额外处理。
 
 ### 2.3 Trino livenessProbe 的人工补丁要么固化要么消除
 

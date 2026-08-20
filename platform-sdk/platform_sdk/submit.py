@@ -267,3 +267,62 @@ def job_logs(workflow_name: str, namespace: str | None = None, tail: int = 200) 
             log = f"(取不到日志: {exc})"
         chunks.append(f"===== {pod.metadata.name} =====\n{log}")
     return "\n".join(chunks) if chunks else "(还没有 pod,作业可能刚提交)"
+
+
+def run_workflow_template(
+    template_name: str,
+    parameters: dict[str, str] | None = None,
+    namespace: str | None = None,
+) -> str:
+    """触发一个已经部署好的 Argo WorkflowTemplate,返回生成的 workflow 名字。
+
+    和 `submit_job()` 是两回事,不要混淆:`submit_job()` 提交的是调用方
+    自己写的临时脚本(走 ConfigMap 上传那条路径);这个函数触发的是平台
+    已经声明式部署好的 WorkflowTemplate(比如 `train-demo-model`,见
+    `apps/argo-workflows-training-image/manifests/workflow-template.yaml`)
+    ——模板本身的镜像/资源/凭据都已经在模板里配好,调用方不需要、也不能
+    改这些,只能传模板允许的 parameters(模板目前没有声明任何 parameters,
+    传了不存在的 key 会被 Argo 忽略,不会报错,但也不会生效——这不是这个
+    函数的 bug,是模板本身还没加参数化,见 docs/BACKLOG.md P1.7)。
+
+    这是 BACKLOG P1.7"notebook 里触发训练"这条空白的落地:在
+    JupyterHub notebook 里跑
+
+        from platform_sdk import run_workflow_template
+        wf = run_workflow_template("train-demo-model")
+
+    就能触发已经在 `argo-training-workflow-template` 这个组件里定义好的
+    训练流程,不需要 `kubectl create` 或者知道 Workflow YAML 长什么样。
+
+    用法和 `submit_job()` 保持一致的返回值/后续操作:拿到的名字直接传给
+    `job_status()`/`job_logs()` 查状态、看日志。
+    """
+    namespace = namespace or config.argo_namespace()
+    workflow = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Workflow",
+        "metadata": {
+            "generateName": f"{template_name}-",
+            "labels": {
+                "app.kubernetes.io/managed-by": "platform-sdk",
+                "platform-sdk/workflow-template": template_name,
+            },
+        },
+        "spec": {
+            "workflowTemplateRef": {"name": template_name},
+        },
+    }
+    if parameters:
+        workflow["spec"]["arguments"] = {
+            "parameters": [{"name": k, "value": v} for k, v in parameters.items()]
+        }
+
+    _, custom_api = _k8s_clients()
+    created = custom_api.create_namespaced_custom_object(
+        group="argoproj.io",
+        version="v1alpha1",
+        namespace=namespace,
+        plural="workflows",
+        body=workflow,
+    )
+    return created["metadata"]["name"]

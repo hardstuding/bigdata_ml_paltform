@@ -83,6 +83,21 @@ platform-submit job.yaml
 两种方式是同一套底层逻辑,`job.yaml` 的字段和 `submit_job()` 的参数
 一一对应,没有另外一套配置语法要学。
 
+### 触发平台已经部署好的 WorkflowTemplate
+
+和上面"提交自己的脚本"是两回事——这个是触发平台已经声明式部署好的
+Argo WorkflowTemplate(比如训练流程 `train-demo-model`),不是重新写
+一份等价的脚本:
+
+```python
+from platform_sdk import run_workflow_template
+
+wf_name = run_workflow_template("train-demo-model")
+```
+
+模板自己的镜像/资源/凭据都已经配好,调用方不用管。返回的名字一样能传
+给 `job_status()`/`job_logs()` 查状态、看日志。
+
 ## 环境变量一览
 
 | 变量 | 作用 | 有没有默认值 |

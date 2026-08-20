@@ -83,159 +83,38 @@ spec:
           priorityClassName: batch
           serviceAccountName: iam-sync
           restartPolicy: Never
-          initContainers:
-            # 官方 kubectl 二进制,不是社区打包的"kubectl 专用镜像"(那类
-            # 镜像来源良莠不齐,和 ADR-008 只用官方来源的原则一致)。
-            #
-            # 架构必须动态探测,不能硬编码 amd64:实测在 arm64 节点(colima
-            # 跑在 Apple Silicon 上默认就是 aarch64)上,amd64 的 kubectl
-            # 靠 QEMU 模拟执行时,`kubectl exec` 会稳定触发 client-go 的一个
-            # 真实并发 bug(REST discovery mapper 并发写同一个 map,
-            # `fatal error: concurrent map writes`,栈跟踪在
-            # k8s.io/client-go/restmapper/discovery.go),不是环境偶发抖动
-            # ——换成原生架构的二进制,不走模拟层,问题消失。这台机器上能
-            # 装起来不代表能跑,这类"模拟执行下的真实并发 bug"只有真的调用
-            # 到那条代码路径才会暴露,静态检查/helm template 都测不出来。
-            # apt-get 的 http/https 方法默认没有超时——2026-08-12 亲眼
-            # 抓到一次:一台 colima 刚重启、网络还在收敛的机器上,
-            # `apt-get install` 卡在某一次 HTTP 连接上超过半小时都不会
-            # 自己放弃(`crictl exec` 进容器用 /proc 确认了具体是
-            # `/usr/lib/apt/methods/http` 这个子进程挂着不动)——不是网络
-            # 彻底不通(同一时刻宿主机自己 curl 同样的地址是通的),是这一次
-            # TCP 连接本身卡住了,apt 不会主动放弃重连。显式加
-            # `Acquire::http::Timeout`/`Acquire::Retries`,让它按重试上限
-            # 失败退出,而不是无限期挂着等 activeDeadlineSeconds 来兜底
-            # (兜底本身也可能迟到,见上面的补充说明,不能只指望这一层)。
-            #
-            # 补充(修完 apt-get 之后又抓到一次):同一类问题不止 apt-get
-            # 一处——修完上面这条,下一次卡住的是 `curl -fsSL -o
-            # /tools/kubectl ...` 这一行,原因一样(curl 默认也不会自己
-            # 放弃一个卡住的连接),只是换了个命令而已。教训是**这个脚本
-            # 里所有会碰网络的命令都要显式给超时**,不能修一个漏一个,
-            # 每个 curl 都补了 `-m`(总超时秒数)。
-            - name: fetch-kubectl
-              image: python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
-              # 2026-08-13 colima 重启之后(用户重启了电脑)连续 3 次卡死,
-              # crictl exec 进容器看 /proc/*/cmdline 显示卡在
-              # `/usr/lib/apt/methods/http`,一开始怀疑是这个 initContainer
-              # 的 apt-get 没配代理(加了 HTTP_PROXY/HTTPS_PROXY,下面还留着,
-              # 无害、可能确实有帮助),但加完代理还是卡在同一个地方——用
-              # `kubectl run --rm -i` 单独起一个 pod 复现、这次让完整输出
-              # 落地才看清真正原因:apt 自己的 "delayed item" 重试机制卡死
-              # 循环,一直刷 `W: Tried to start delayed item ... perl ...
-              # but failed`(某一个具体包,这次是 perl,下载失败后进了这个
-              # 内部重试队列,不受 `Acquire::Retries` 这个选项约束,是 apt
-              # 一个独立的、不受这个参数控制的子系统,一直循环不放弃)。
-              # 修法是外面套一层 `timeout`,和这个脚本其他地方"网络操作必须
-              # 自带超时"是同一个原则,不追究 apt 内部这个机制为什么不听
-              # Acquire::Retries 的话——够用就行,不用把 apt 的重试语义摸透。
-              # 加了 `-k 10`(超时后先发 SIGTERM,10 秒内还没退出就补一发
-              # SIGKILL)——第一版只有 `timeout 90` 没加 `-k`,单独测试时看
-              # 起来有效,但接上真实的 CronJob 之后观察到一次 fetch-kubectl
-              # 卡在这个 delayed-item 循环里超过 90 秒还没退出(`crictl
-              # exec` 进容器确认 apt-get 进程仍在),没有确认是 apt/dpkg
-              # 忽略了普通 SIGTERM、还是别的原因,但 `timeout` 默认只发
-              # 一次信号不会自动升级——不管具体机制是什么,加 `-k` 保证
-              # 最终一定能被强杀,是更保险的写法,没有理由不加。
-              command:
-                - sh
-                - -c
-                - |
-                  set -e
-                  # 2026-08-16 云端部署时发现两层问题:
-                  # ①192.168.5.2:1087 是 colima 宿主机专用代理,cloud-full
-                  # 连不上,改成运行时探测——2 秒连不上就当作不需要(和这个
-                  # 仓库其他组件同一个模式)。
-                  # ②原来这里是 curl 直接下 dl.k8s.io 上的 kubectl 二进制
-                  # (59MB),实测这条路径本身限速到约 50kB/s(和这个仓库
-                  # 到处踩过的 PyPI/apt 官方源带宽瓶颈是同一类问题,只是
-                  # 这次是文件大小放大了影响——dl.k8s.io/release/stable.txt
-                  # 这种几字节的小文件测连通性时看着很快,骗过了第一轮判断,
-                  # 真正的大文件下载才暴露问题),90 秒超时下载不完直接失败。
-                  # 改成走 apt 装(mirrors.aliyun.com 镜像的 pkgs.k8s.io 官方
-                  # 仓库,不是野路子打包),和这个仓库其他组件"apt 换镜像站"
-                  # 是同一个模式,实测 12 秒装完,比裸下二进制更快也更省心
-                  # (不用自己判断架构、chmod +x 这些 apt 都处理好了)。
-                  if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('192.168.5.2',1087))==0 else 1)" 2>/dev/null; then
-                    export HTTP_PROXY="http://192.168.5.2:1087"
-                    export HTTPS_PROXY="http://192.168.5.2:1087"
-                    export NO_PROXY="localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
-                  fi
-                  sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
-                  timeout -k 10 60 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
-                  timeout -k 10 60 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq curl gnupg ca-certificates >/dev/null
-                  # dl.k8s.io/release/stable.txt 本身是几字节的小文件,直连
-                  # 一直很快,只用来确定当前 stable 分支的 major.minor(比如
-                  # v1.36.3 -> v1.36),真正的仓库内容走下面的阿里云镜像。
-                  KUBECTL_MINOR=$(curl -fsSL -m 15 https://dl.k8s.io/release/stable.txt | sed -E 's/^(v[0-9]+\.[0-9]+)\..*/\1/')
-                  mkdir -p /etc/apt/keyrings
-                  curl -fsSL -m 15 "https://mirrors.aliyun.com/kubernetes-new/core/stable/${KUBECTL_MINOR}/deb/Release.key" \
-                    | gpg --dearmor -o /etc/apt/keyrings/k8s.gpg
-                  echo "deb [signed-by=/etc/apt/keyrings/k8s.gpg] https://mirrors.aliyun.com/kubernetes-new/core/stable/${KUBECTL_MINOR}/deb/ /" \
-                    > /etc/apt/sources.list.d/kubernetes.list
-                  timeout -k 10 60 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
-                  timeout -k 10 60 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq kubectl >/dev/null
-                  cp "$(command -v kubectl)" /tools/kubectl
-              volumeMounts:
-                - name: tools
-                  mountPath: /tools
           containers:
             - name: sync
-              image: python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
-              # local-lite(colima)上直连 github.com 会卡住/超时(和 Argo
-              # Workflows 的 CRD 安装 Job 当初踩的是同一个网络限制,见
-              # ADR-026),要走 colima 虚拟机内部看到的宿主机代理;
-              # cloud-full 上实测直连 github.com/pypi.org/deb.debian.org
-              # 都是通的,不需要这个代理(硬编码反而连不上,已经改成运行时
-              # 探测,见下面 command)。dl.k8s.io(kubectl 二进制)两个环境都
-              # 不受影响,不需要代理也能直连。
+              # 2026-08-20(BACKLOG 2.1):git/kubectl/pyyaml 这几个工具
+              # 构建期固化进镜像(见 apps/iam-sync/Dockerfile),不用再在
+              # initContainer + 主容器里各自现装一遍——那套 apt-get/curl
+              # 加固代码(超时、镜像源、delayed-item 重试队列的坑)本身踩过
+              # 的教训是真实的,但已经不需要在运行时规避了,历史留在 git
+              # log 里。**kubectl 的多架构支持这次没有丢**:构建这个镜像的
+              # GitHub Actions workflow(build-images.yml)显式建了
+              # linux/amd64 + linux/arm64 两个平台,`apt-get install
+              # kubectl` 在交叉构建时装的是目标架构原生的包,不会重新引入
+              # "amd64 kubectl 在 arm64 节点上用 QEMU 模拟执行触发
+              # client-go 并发 bug" 这个已经修过的坑(问题详情仍保留在这次
+              # commit 的历史版本里)。
               #
-              # git clone 用 `http.lowSpeedLimit`/`http.lowSpeedTime`(git
-              # 自己的传输层超时机制)而不是简单包一层 `timeout N`——这两个
-              # 参数的意思是"传输速度连续 30 秒低于 1000 字节/秒就判定为
-              # 卡死中止",能容忍真实存在的慢速网络(仓库本来就不大,慢慢
-              # 传完也行),只掐真正卡死不动的连接,和 apt-get/curl 那两处
-              # 加固定秒数超时是同一个"网络操作必须自带超时"的原则,只是
-              # git 自己提供了更贴切的机制,不需要外面再包一层。
-              #
-              # apt-get install 这行也套了 `timeout -k 10 90`——原因见上面
-              # fetch-kubectl 那个 initContainer 的注释(apt 自己的
-              # "delayed item" 重试队列不受 Acquire::Retries 约束,会话死
-              # 循环),这里是同一个命令、同一个镜像,没道理不会踩到同一个
-              # bug,提前一起加固。
+              # 保留在运行时的只有 `git clone` 这一步——这是这个 CronJob
+              # 存在的意义本身(每次都要拿 platform/iam/ 最新数据,不是
+              # 构建时固化的静态内容),用 `http.lowSpeedLimit`/
+              # `http.lowSpeedTime`(git 自己的传输层超时机制,能容忍真实
+              # 慢速网络,只掐真正卡死不动的连接)。
+              image: ghcr.io/hardstuding/bigdata_ml_paltform/iam-sync:latest
               command:
                 - sh
                 - -c
                 - |
                   set -e
-                  export PATH="/tools:$PATH"
-                  # 2026-08-16 云端部署时发现:cloud-full 实测直连
-                  # github.com/pypi.org/deb.debian.org 都是通的,不需要这个
-                  # colima 宿主机专用代理(硬编码在 cloud-full 上反而连不上,
-                  # 见 fetch-kubectl 那个 initContainer 的同类注释)——改成
-                  # 运行时探测,apt 换阿里云镜像站(实测直连官方源明显更慢,
-                  # 这个仓库到处踩过同一类 PyPI/apt 官方源带宽瓶颈)。
-                  if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(0 if s.connect_ex(('192.168.5.2',1087))==0 else 1)" 2>/dev/null; then
-                    export HTTP_PROXY="http://192.168.5.2:1087"
-                    export HTTPS_PROXY="http://192.168.5.2:1087"
-                    export NO_PROXY="localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
-                  fi
-                  sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
-                  timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 update -qq
-                  timeout -k 10 90 apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2 install -y -qq git >/dev/null
-                  pip install --quiet --timeout 30 -i https://mirrors.aliyun.com/pypi/simple/ pyyaml==6.0.3
                   git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 clone --depth 1 https://github.com/hardstuding/bigdata_ml_paltform.git /tmp/repo
                   cd /tmp/repo
                   python3 scripts/12-sync-iam.py --no-create-users
-              volumeMounts:
-                - name: tools
-                  mountPath: /tools
               resources:
                 requests:
                   cpu: 50m
                   memory: 128Mi
                 limits:
                   memory: 256Mi
-          volumes:
-            - name: tools
-              emptyDir: {}
