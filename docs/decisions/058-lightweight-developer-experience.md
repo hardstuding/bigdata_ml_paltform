@@ -300,6 +300,25 @@ zhenghe 提到希望有"部门组默认共享的目录 + 自己的文件夹 + �
    **未经真实使用验证**(见上一条),不算完全做完。
 4. (可选,有第二个用户时再做)工作组共享目录 + NFS provisioner。
 
+### 补充:Airflow 也接进"环境一致"这条承诺(2026-08-19)
+
+zhenghe 早前问过"同时 airflow 里也能用等同的环境吗",当时只是设计上
+承诺"是同一个镜像,不是等同"——`apps/airflow/dags/platform_sdk_demo.py`
+把这条承诺落成了真实代码:用 KubernetesPodOperator 起
+`local/platform-runtime` 镜像,挂载的是**同一份**
+`examples/hello-job/job.py`(和 notebook 里手动跑、`submit_job()` 提交
+给 Argo 跑的是同一个文件,不是照抄一份改一改)。独立的 Trino 服务账号
+(`platform_sdk_demo_service`,ADR-021 一贯的"各组件各自独立账号"),
+独立的 `platform-sdk-demo` 命名空间(和 feast/dbt 同一个"KubernetesPodOperator
+运行时才现起、不是 ArgoCD 声明式管理"处境),补了 MinIO 入站白名单
+(提交前主动查过 `platform/network-policies/manifests/minio.yaml` 补上,
+不是等报错才发现)。
+
+**这一条写完之后没有上云主机真实跑一次 DAG 触发验证**(zhenghe 当时
+不在,云主机按小时计费,不为了单独验证这一条重新开机)——如实记录成
+"配置已写,未端到端验证",下次云主机开着的时候顺手触发一次
+`platform_sdk_demo` 这个 DAG 补上验证,不要假设写完 = 测过。
+
 ## 相关
 
 - [ADR-025](025-jupyterhub-sso.md) JupyterHub SSO(本 ADR 在其之上加

@@ -385,7 +385,7 @@ echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 # argo-workflows: 训练 WorkflowTemplate 的 pod 要把模型 artifact 存进
 # MinIO(和 scripts/09-train-demo-model.sh 手动跑时用的是同一个 MinIO
 # 凭据),见 apps/argo-workflows-training-image/manifests/。
-MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt argo-workflows"
+MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt argo-workflows platform-sdk-demo"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done
@@ -412,6 +412,15 @@ echo "==> 复制 Trino 服务账号凭据给 dbt(ADR-012/ADR-053,KubernetesPodOp
 # 不依赖"之前手动建过"这种没有记录的隐藏前置条件。
 ensure_ns dbt
 copy_secret trino dbt trino-service-account
+
+# ADR-058,Airflow 的 platform_sdk_demo DAG 验证"环境一致"用,
+# KubernetesPodOperator 的目标 pod 起在 platform-sdk-demo 这个命名空间,
+# 和 feast/dbt 是同一个处境。
+echo "==> 复制 Trino 服务账号凭据给 platform_sdk_demo"
+ensure_trino_service_account platform_sdk_demo_service
+ensure_ns platform-sdk-demo
+copy_secret trino platform-sdk-demo trino-service-account
+copy_secret minio platform-sdk-demo minio-root
 
 echo
 echo "完成。新生成的凭据(如果有)已追加到: ${OUT_FILE}"
