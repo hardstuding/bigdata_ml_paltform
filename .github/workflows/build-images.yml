@@ -6,7 +6,16 @@
 # 用内置的 GITHUB_TOKEN 就能推,不需要额外配置密钥)。iam-sync
 # (2026-08-20 加入这个 matrix)同一个动机,但保留了它本来就需要的运行时
 # `git clone`(拉最新 platform/iam/ 数据),只把"装 git/kubectl/pyyaml
-# 这几个工具"这件事挪到构建期。
+# 这几个工具"这件事挪到构建期。superset(同一天加入)之前已经用
+# apps/superset-image/Dockerfile 解决了运行时装依赖的问题,但是手动登
+# cloud-full 云主机现场 build + 手动导出本地缓存,这次接进同一条自动化
+# 流水线,不用再手动登云主机操作。
+#
+# app 名字和 GHCR 里的镜像名不是永远一一对应(superset 的构建目录是
+# apps/superset-image,推上去的镜像名是 superset,不带 -image 后缀,和
+# `local/superset:6.1.0-custom` 这个本地约定保持一致)——用 matrix
+# include 显式声明每一项的 context/image 对应关系,不是靠目录名硬编码
+# 推导。
 #
 # 镜像 tag 用 commit SHA(不用 latest 这种可变 tag——deployment.yaml 里
 # 引用哪个 tag 就是哪个 commit 构建出来的,可追溯,不会出现"同一个 tag
@@ -41,6 +50,7 @@ on:
       - "apps/table-registration-app/**"
       - "apps/platform-portal/**"
       - "apps/iam-sync/Dockerfile"
+      - "apps/superset-image/Dockerfile"
       - ".github/workflows/build-images.yml"
 
 jobs:
@@ -51,7 +61,17 @@ jobs:
       packages: write
     strategy:
       matrix:
-        app: [permission-request-app, table-registration-app, platform-portal, iam-sync]
+        include:
+          - context: apps/permission-request-app
+            image: permission-request-app
+          - context: apps/table-registration-app
+            image: table-registration-app
+          - context: apps/platform-portal
+            image: platform-portal
+          - context: apps/iam-sync
+            image: iam-sync
+          - context: apps/superset-image
+            image: superset
     steps:
       - uses: actions/checkout@v4
 
@@ -71,9 +91,9 @@ jobs:
       - name: Build and push (linux/amd64 + linux/arm64)
         uses: docker/build-push-action@v6
         with:
-          context: apps/${{ matrix.app }}
+          context: ${{ matrix.context }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/${{ matrix.app }}:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/${{ matrix.app }}:latest
+            ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/${{ matrix.image }}:latest

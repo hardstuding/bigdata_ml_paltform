@@ -8,9 +8,19 @@
 #
 # 2026-08-19 改成和 apps/feast/feature-server-image、
 # apps/argo-workflows-training-image 同一个模式:依赖在镜像构建时装好,
-# 不在运行时装。构建产物本地留着(image-cache-amd64/),不止是这次省一次
-# 网络等待——生产环境可能完全没有外网出口,这份本地缓存能直接
-# `docker load` 用,不用现场再连一次网构建。
+# 不在运行时装。当时是手动在 cloud-full 节点上 build(China 网络下阿里云
+# PyPI 镜像更快),构建产物导出到本机 `image-cache-amd64/` 当离线备份。
+#
+# 2026-08-20(BACKLOG 2.1):改成和 3 个 Flask 应用 + iam-sync 同一个模式,
+# 接进 GitHub Actions 自动构建推 GHCR(见 .github/workflows/
+# build-images.yml),不用再手动登云主机现场 build、手动导出/传输镜像
+# 缓存。**不用阿里云镜像源**——原因和 apps/iam-sync/Dockerfile 一样:
+# 构建方从"cloud-full 云主机"变成了 GitHub Actions(境外 runner),直连
+# 默认 PyPI 反而更快更稳,阿里云镜像在这个网络下连不上(本地
+# colima/Mac 网络实测复现过同样的连接失败)。手动登云主机现场 build +
+# 本地离线缓存这条路径仍然保留在这份文件的历史 git log 里,真遇到完全
+# 没有外网出口的生产环境,可以从这份 Dockerfile 现场改回阿里云源重新
+# 走那条老路,不是被删掉了。
 FROM apachesuperset.docker.scarf.sh/apache/superset:6.1.0
 
 # 2026-08-19 真实踩坑 1:第一次构建用了普通 `pip install`,build 显示"成功"
@@ -31,7 +41,6 @@ FROM apachesuperset.docker.scarf.sh/apache/superset:6.1.0
 # root 只是让构建期权限和已有的运行时权限对齐,不是引入新的权限提升。
 USER root
 RUN uv pip install \
-    --index-url https://mirrors.aliyun.com/pypi/simple/ \
     psycopg2-binary \
     authlib \
     trino
