@@ -98,7 +98,14 @@ Trino 的账号密码仍然要通过环境变量提供(`PLATFORM_TRINO_USER`/
 
 要把本地脚本提交到集群跑(训练任务这类),用 `submit_job()`,或者写一份
 `job.yaml` 配 `platform-submit job.yaml`——参考 `examples/hello-job/`,
-细节见 ADR-058 和(实现完成后补的)`platform-sdk/README.md`。
+细节见 ADR-058 和 `platform-sdk/README.md`。**已知限制**:直接从
+notebook pod 里调 `submit_job()` 目前连不上 K8s API server(NetworkPolicy
+问题,`docs/BACKLOG.md` 2.6),要从终端/CI 提交,不是从 notebook 里。
+
+如果用 Claude Code 之类的 AI 编程工具在这个仓库里干活,`.claude/skills/`
+下有 `query-data`/`submit-job`/`debug-job` 三个 skill,分别覆盖"怎么
+查数据"/"怎么提交作业"/"作业失败了怎么查"——写完还没经过真实使用验证,
+触发不准或者内容不够用的话直接回来改,不用假设它们已经调好了。
 
 ## 遇到问题去哪查
 
