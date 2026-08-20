@@ -78,7 +78,16 @@ RUN pip install --no-cache-dir \
     pandas==2.2.3 \
     boto3==1.35.36 \
     feast==0.65.0 \
-    pyspark==3.5.9
+    pyspark==3.5.9 \
+    redis==6.4.0
+# ↑ redis 客户端(2026-08-20 真实踩坑,cloud-full 上跑第一次才暴露):
+# feature_store.yaml 里 online_store.type 配的是 redis(和 Feast Serving/
+# feast_materialize 那条链路共用同一份配置),Feast 在 FeatureStore()
+# 初始化阶段就会校验 online_store 这段配置、eagerly import 对应模块
+# (feast.infra.online_stores.redis),哪怕这个训练脚本压根不碰在线
+# 存储、只用离线的 Spark/Iceberg 那条路径——报
+# FeastModuleImportError,不是"没装 feast[spark] extras"那类版本冲突,
+# 是缺了一个完全独立的运行时依赖。补上就行,不需要改脚本逻辑。
 
 # train_demo_model.py 不打进镜像——通过 ConfigMap 挂载(见
 # apps/argo-workflows-training-image/manifests/script-configmap.yaml),
