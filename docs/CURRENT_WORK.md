@@ -92,6 +92,26 @@ cloud-full 云主机上真实验证,不是只写完代码。
   - 这轮结束时集群状态:除了 alloy/loki/kube-prometheus-stack 这三个
     已知的 helm 仓库网络抖动(`grafana.github.io` 连不上,和这次改动
     无关的老问题)之外,**没有任何已知的 OutOfSync/Degraded 项**。
+- **P1.7 全部完成(同一天第五轮)**:算法链路最后一段空白"notebook →
+  Feast 特征 → Argo Workflows 训练 → MLflow 记录"这条完整链路真实跑通
+  了。新增 `train-from-feast-features` 这个独立 WorkflowTemplate,用
+  `FeatureStore.get_historical_features()` 从 Feast 取历史特征训练
+  (不是像 `train-demo-model` 那样用合成数据)。**云端真实触发,过程中
+  挖出并修好 4 个真实 bug**才最终跑通:
+  1. `feast[spark]` extras 要求 `pyspark>=4.0`,和这个项目锁定的
+     Spark 3.5 系列冲突——不用 extras 语法,分开装。
+  2. Feast 初始化会 eagerly import online_store(redis)对应模块,
+     哪怕这个脚本不碰在线存储——补 `redis` 包。
+  3. **最花时间**:Spark 的 Ivy 依赖解析直连 Maven Central 会在
+     cloud-full 上真的卡死不动(几百 MB 的 jar 卡在 0 字节 8+ 分钟),
+     加阿里云镜像源也没用——改成镜像构建期(GitHub Actions)把
+     Iceberg/hadoop-aws/aws-sdk 三个 jar 下载好打进镜像,训练脚本自己
+     建 SparkSession 指向本地 jar 路径,运行时完全不联网。
+  4. Hive Metastore 的 NetworkPolicy 白名单漏了 `argo-workflows`
+     命名空间——这个项目反复踩过的"新命名空间消费共享服务忘记加白
+     名单"又一次复现。
+  最终验证:Workflow Succeeded,MLflow Model Registry 查询确认
+  `demo-region-classifier` version 1 状态 READY。
 - 这份 CURRENT 记录之后,VM 会停机(经济模式),不产生持续计费。
 
 ## 上一轮 CURRENT(2026-08-20,第一轮,已完成,存档)
