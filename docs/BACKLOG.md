@@ -161,14 +161,20 @@ Dockerfile`),只是当时是手动登 cloud-full 云主机现场 build + 手动�
 覆盖,达到等价的可追溯性。云端验证过:新 Pod 正常拉取 GHCR 镜像、
 `psycopg2`/`authlib`/`trino` 三个包 import 正常、ArgoCD Synced/Healthy。
 
-**还剩两个手动构建的自定义镜像没接进 CI**(`apps/argo-workflows-
-training-image/`、`apps/feast/feature-server-image/`),都是小众、
-单一用途的镜像(只给各自的 Workflow/feature-server 用),不属于
-2026-08-16 那批"8 个地方运行时 pip install"的原始故障清单——它们已经
-在 2026-08-19 用同一个"构建期装依赖"模式解决了根本问题,只是构建方式
-还是手动登云主机,不是紧迫的缺口,以后有空可以顺手接进去,不算这批
-的遗留债务。**明确不做**:不引入 Kaniko/Tekton 这类集群内构建体系,
-对单人维护的项目过重。
+**第四段也顺手做完了:argo-workflows-training-image**。接进同一条 CI
+流水线,`workflow-template.yaml` 切到 GHCR digest 引用。**云端真实触发
+过一次训练 Workflow 验证**(不只是部署/拉取):`kubectl create` 一个
+`workflowTemplateRef` 指向 `train-demo-model` 的 Workflow,**Succeeded**,
+确认新镜像不只是能拉,训练本身也真的跑得通。
+
+**还剩一个没接进 CI**:`apps/feast/feature-server-image/`(RHEL UBI
+基础镜像 + `microdnf`,和其它几个 Debian-based 的 Dockerfile 不是同一套
+包管理器,接进去之前要单独确认这个基础镜像的多架构支持情况,不能照抄
+现成的 matrix 项),是小众、单一用途的镜像,不属于 2026-08-16 那批
+"8 个地方运行时 pip install"的原始故障清单——已经在 2026-08-19 用
+"构建期装依赖"解决了根本问题,只是构建方式还是手动登云主机,不是紧迫
+缺口,以后有空可以顺手接进去。**明确不做**:不引入 Kaniko/Tekton 这类
+集群内构建体系,对单人维护的项目过重。
 
 **云端验证已完成(2026-08-20 当天)**:cloud-full 的 ArgoCD 自动同步到
 这版 manifest 后,三个应用的新 Pod 都正常拉到 GHCR 镜像并 Running(
