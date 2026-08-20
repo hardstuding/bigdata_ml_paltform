@@ -342,13 +342,33 @@ zhenghe 早前问过"同时 airflow 里也能用等同的环境吗",当时只是
    账号,不是真实终端用户),`opa test` 本地 13/13 通过,ConfigMap 也
    确认同步到集群了。
 
-**没有验证到的**:OPA 修好之后,因为 VM 被抢占式回收,没有来得及用一个
-干净的 debug pod 确认"三个坑都修完之后,这条链路真的能从头到尾成功
-跑完"——理论上应该没问题(三个已知阻碍都各自单独验证过修好了),但没有
-一次性完整跑通的实测证据,不要当成已经确认。下次云主机可用时,第一件
-事应该是重新触发 `platform_sdk_demo` 这个 DAG(或者直接起一个 debug
-pod 跑 `examples/hello-job/job.py`),看它是不是真的一路跑到
-"完成:数据查询 + MLflow 记录都成功了。"这一行,不要跳过这一步。
+**2026-08-20 补完:VM 重新可用后第一件事就是重新触发这个 DAG,又挖出并
+修好第 4 个真实 bug,这次是真的一路跑到成功**:
+
+4. **前三个坑都修完,重新触发第一次还是失败**——`403 Forbidden: pods is
+   forbidden: User "system:serviceaccount:airflow:airflow-worker" cannot
+   list resource "pods"...in the namespace "platform-sdk-demo"`。根因和
+   `dbt_demo`/`feast_materialize` 当初踩的是**完全同一类坑**(第三次
+   复现):Airflow 官方 chart 默认只在自己的 `airflow` 命名空间建
+   `airflow-pod-launcher-role`(Role,不跨命名空间),`platform_sdk_demo`
+   这条 DAG 是第一次真正端到端跑,之前只验证过"能被解析/触发",这个 RBAC
+   缺口和之前三个一样,一直没被那种验证方式暴露出来。解法直接照抄
+   `apps/dbt-demo/manifests/airflow-worker-rbac.yaml` 的模式:在
+   `apps/platform-image/manifests/airflow-worker-rbac.yaml` 新增一份
+   Role+RoleBinding(这个目录已经被 `platform-sdk-submitter-rbac` 这个
+   Application 同步,不用新建 Application)。修完后重新触发,DagRun
+   `manual__2026-08-20T05:24:47.525368+00:00` **state=success**,
+   `run_hello_job` 这个 task **state=success**,pod 正常 Started 后按
+   `is_delete_operator_pod=True` 清理——这是这条链路第一次真正一路跑通
+   的实测证据,不再是"三个已知阻碍各自修好、理论上应该没问题"这种推断。
+
+**这四个 bug 合起来的教训**:`dbt_demo`/`feast_materialize`/
+`platform_sdk_demo` 三条 KubernetesPodOperator 起跨命名空间 pod 的 DAG,
+每一条第一次真正端到端跑的时候都撞上过"airflow-worker 在目标命名空间没
+RBAC"这个同一个坑——这不是巧合,是这套 chart 的默认行为本来就不支持
+跨命名空间,每次接一条新的这种 DAG 都要记得主动加这份 RBAC,不要等 403
+报出来才想起来查,以后新增任何用 KubernetesPodOperator 起跨命名空间
+pod 的 DAG,照抄这三份文件的模式提前把 Role+RoleBinding 加上。
 
 ## 相关
 
