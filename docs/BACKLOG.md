@@ -109,7 +109,7 @@ template()` 传 parameters 目前对这个模板是无效的,模板本身还没�
 ADR-057 认定的结构性债务。不做的话,上面 P1 拉起来的东西会以同样脆弱的
 方式继续堆叠。
 
-### 2.1 引入镜像构建流程,停止用运行时 `pip install`(最大的一条)—— 3 个 Flask 应用已完成(2026-08-20)
+### 2.1 引入镜像构建流程,停止用运行时 `pip install`(最大的一条)—— 主体已完成(2026-08-20)
 
 全仓库只有 1 个 Dockerfile,CI 没有任何镜像构建,而 **8 个地方在容器
 启动时现装 Python 依赖**。仅 2026-08-16 一晚就因此产生四次真实故障
@@ -151,10 +151,24 @@ initContainer 就是为了绕开它),只建 amd64 会把这个坑重新引入,�
 `linux/amd64,linux/arm64` 两个平台(连带 3 个 Flask 应用的镜像也补齐了
 arm64,之前只顾着验证 cloud-full 这一个环境,没考虑到 local-lite)。
 
-**还没做的部分**:Superset 这类官方 chart 的 bootstrapScript(改动面
-最大,留到以后单独做,配套的依赖锁定/CI 构建/digest 引用模式已经验证
-过两轮,可以直接复用)。**明确不做**:不引入 Kaniko/Tekton 这类集群内
-构建体系,对单人维护的项目过重。
+**已完成(2026-08-20)第三段:Superset**。它其实 2026-08-19 就已经解决了
+"运行时 bootstrapScript 装依赖"这个反模式本身(`apps/superset-image/
+Dockerfile`),只是当时是手动登 cloud-full 云主机现场 build + 手动导出
+本地缓存(`image-cache-amd64/`)——这次接进同一条 CI 流水线,不用再手动
+操作。**这个 chart 的 image 字段不支持 digest**(`helm show values`
+确认只有 `repository`/`tag`,不像自己写的裸 manifest 能用 `@sha256:...`
+语法),改用构建时的 commit SHA 当 tag,GHCR 里同一个 SHA tag 不会被
+覆盖,达到等价的可追溯性。云端验证过:新 Pod 正常拉取 GHCR 镜像、
+`psycopg2`/`authlib`/`trino` 三个包 import 正常、ArgoCD Synced/Healthy。
+
+**还剩两个手动构建的自定义镜像没接进 CI**(`apps/argo-workflows-
+training-image/`、`apps/feast/feature-server-image/`),都是小众、
+单一用途的镜像(只给各自的 Workflow/feature-server 用),不属于
+2026-08-16 那批"8 个地方运行时 pip install"的原始故障清单——它们已经
+在 2026-08-19 用同一个"构建期装依赖"模式解决了根本问题,只是构建方式
+还是手动登云主机,不是紧迫的缺口,以后有空可以顺手接进去,不算这批
+的遗留债务。**明确不做**:不引入 Kaniko/Tekton 这类集群内构建体系,
+对单人维护的项目过重。
 
 **云端验证已完成(2026-08-20 当天)**:cloud-full 的 ArgoCD 自动同步到
 这版 manifest 后,三个应用的新 Pod 都正常拉到 GHCR 镜像并 Running(
