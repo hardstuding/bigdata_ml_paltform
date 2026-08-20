@@ -155,6 +155,15 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: feast
+        # 2026-08-20 新增:train-from-feast-features 这个 WorkflowTemplate
+        # (BACKLOG P1.7)第一次真正触发时报 Hive Metastore
+        # "Connection refused"——argo-workflows 命名空间之前只被
+        # minio.yaml 加过白名单(拿 S3 那次),没人想到它读特征时也要
+        # 连 Hive Metastore 拿 Iceberg 表元数据,和 trino/spark-operator/
+        # airflow/feast 是同一类需求,这次一并补上。
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argo-workflows
       ports:
         - protocol: TCP
           port: 9083
