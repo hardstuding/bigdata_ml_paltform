@@ -13,7 +13,30 @@
 > 想知道"以前某个问题怎么解决的" → [`docs/journal/`](journal/) 和
 > [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 
-## CURRENT(2026-08-19)
+## CURRENT(2026-08-20)
+
+- **标题**:ADR-057 第三批(环境抽象补"组件选择"层)+ ADR-058 补充
+  (Airflow platform_sdk_demo DAG 首次干净成功验证)
+- **状态**:**都已完成并在 cloud-full 云主机上真实验证过**。
+  - ADR-057 第三批:`apps/components/` 成为全部 43 个组件定义的唯一
+    源码,`apps/definitions/` 变成 100% 生成产物,`pending-definitions/`
+    机制退役。本地零功能差异验证过,云端 `apps-root` 手动 hard refresh
+    后确认 Synced 到最新 commit、43 个组件全部 Healthy(个别组件短暂
+    Progressing/Degraded 是冷启动重启的正常现象,已确认自愈,不是回归)。
+  - ADR-058 补充:`platform_sdk_demo` 这条 Airflow DAG 之前三次触发都
+    卡在真实 bug 上(subPath DAG 挂载/subPath Trino 密码/OPA 白名单/
+    airflow-worker 跨命名空间 RBAC),这次挖出并修好第 4 个(RBAC),
+    重新触发后 DagRun 和 task 都是 **success**,是这条链路第一次真正
+    端到端跑通的实测证据。
+  - 顺带补完 `docs/BACKLOG.md` 2.4(三个 Flask 应用测试覆盖,补了 git
+    写入路径 + OA webhook 的 mock 测试,106 个测试全绿,本地跑的,和
+    云主机验证无关)。
+  - 云主机(`i-0jlbped4h1959tp591pe`)这次是抢占式实例容量不足
+    (`OperationDenied.NoStock`)卡了一阵,起了个后台重试循环等到有货
+    才开机成功,不是操作失败。
+  - 这份 CURRENT 记录之后,VM 会停机(经济模式),不产生持续计费。
+
+## 上一版 CURRENT(2026-08-19,已完成,存档)
 
 - **标题**:ADR-057 第一批(文档重组)+ P1.2/1.3/1.4(部署 OpenMetadata /
   JupyterHub+MLflow / Spark Operator+SeaTunnel+Spark History Server)
