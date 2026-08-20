@@ -314,10 +314,41 @@ zhenghe 早前问过"同时 airflow 里也能用等同的环境吗",当时只是
 (提交前主动查过 `platform/network-policies/manifests/minio.yaml` 补上,
 不是等报错才发现)。
 
-**这一条写完之后没有上云主机真实跑一次 DAG 触发验证**(zhenghe 当时
-不在,云主机按小时计费,不为了单独验证这一条重新开机)——如实记录成
-"配置已写,未端到端验证",下次云主机开着的时候顺手触发一次
-`platform_sdk_demo` 这个 DAG 补上验证,不要假设写完 = 测过。
+**2026-08-19 深夜追加:真的上云主机触发过一次,过程中挖出并修好 3 个
+真实 bug,但最终还没等到一次干净的成功验证就被抢占式实例回收打断了**
+(`OperationDenied.NoStock`,这个可用区这个规格暂时没货,不是操作失败,
+后台起了个循环脚本等有货就自动重开机,细节见
+`environments/cloud-full/STATUS.md` 关于抢占式实例的说明)。如实记录
+到目前为止实际验证到的程度,不要凭印象补:
+
+1. **DAG 一开始压根没被 Airflow 发现**——`airflow dags list` 里没有
+   `platform_sdk_demo`,ConfigMap 里内容明明是对的。根因是 subPath
+   挂载的老毛病:新增的 DAG 文件要在 `apps/definitions/airflow.yaml`
+   的 scheduler/dagProcessor/workers.kubernetes 三处**各自**显式加一条
+   `volumeMount`,不会跟着 ConfigMap 内容自动出现,和 `dbt_demo.py`
+   当初踩的坑一模一样,已在同一晚修好并验证(`airflow dags list`
+   确认能看到了)。
+2. **DAG 能跑了,但报 Trino "Invalid credentials"**——账号密码本身没错
+   (bcrypt hash 手工验证过是对的),根因是 `trino-service-account`
+   这个 Secret 里的 `password.db` 也是 subPath 挂载进 Trino coordinator
+   pod 的,**新建账号后 Trino pod 不会自动看到更新**,和上面 DAG 的坑
+   是同一类("subPath 挂载不是活的,是启动那一刻的快照"),不是同一个
+   具体故障——已通过重启 Trino coordinator pod 验证修好。
+3. **认证过了,又报 PERMISSION_DENIED**——这次是真实的、符合设计的
+   拒绝:`platform_sdk_demo_service` 没在
+   `apps/opa/policy/trino.rego` 的 `service_accounts` 白名单里,按
+   人类用户走审批 grant 那条路径,自然没有记录。已加进白名单
+   (和 dbt_demo_service/superset_service 同一个理由:平台自己的验证
+   账号,不是真实终端用户),`opa test` 本地 13/13 通过,ConfigMap 也
+   确认同步到集群了。
+
+**没有验证到的**:OPA 修好之后,因为 VM 被抢占式回收,没有来得及用一个
+干净的 debug pod 确认"三个坑都修完之后,这条链路真的能从头到尾成功
+跑完"——理论上应该没问题(三个已知阻碍都各自单独验证过修好了),但没有
+一次性完整跑通的实测证据,不要当成已经确认。下次云主机可用时,第一件
+事应该是重新触发 `platform_sdk_demo` 这个 DAG(或者直接起一个 debug
+pod 跑 `examples/hello-job/job.py`),看它是不是真的一路跑到
+"完成:数据查询 + MLflow 记录都成功了。"这一行,不要跳过这一步。
 
 ## 相关
 
