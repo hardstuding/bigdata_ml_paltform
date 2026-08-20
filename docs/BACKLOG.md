@@ -58,18 +58,20 @@ Secret 缺失、groups scope 从来没配过)本可以在"改配置就重新拉�
 同一层还缺"规格分档"(副本数/resources/持久化按环境取值),可以一起做,
 优先级低于组件选择。
 
-### 1.5 Argo Workflows RBAC(2026-08-19 新发现,已单独立项跟踪)
+### 1.5 Argo Workflows RBAC —— 已完成(2026-08-19)
 
-SSO 登录本身已修好(之前 CrashLoopBackOff 两天多没人发现,issuer/
-issuerAlias 配置问题),真实登录测试确认能成功拿到 Bearer token、
-落地 SPA。但登录后调用 workflows API 返回 403 "not allowed"——
-`server.sso.rbac` 需要的 K8s RBAC 绑定没配。不阻塞其它角色。
+SSO 登录 CrashLoopBackOff(issuer/issuerAlias 配置问题)和登录后调用
+workflows API 403(`server.sso.rbac` 需要的 ServiceAccount + 长期
+token Secret + Role/RoleBinding)都已修好,四个资源加进了
+`templates/apps-definitions/argo-workflows.yaml` 的 `extraObjects`。
+真实 curl+cookie-jar 验证过:登录→查询 workflows API 200→建一个真实
+Workflow→能查到→删除清理。详见 `docs/CURRENT_WORK.md` 归档记录。
 
-### 1.6 Kafka 部署 —— 大数据开发角色补齐最后一块
+### 1.6 Kafka 部署 —— 已完成(2026-08-19)
 
-Spark Operator/SeaTunnel/Spark History Server 已部署验证,Kafka 还没有
-(它目前零真实消费者,见 ADR-056 对引入顺序的判断,之前排在这几个之后
-是故意的)。
+部署 + 真实建 topic/生产/消费一条消息验证通过,大数据开发角色最后一块
+拼图补上。**还没接进真实数据管道**(没有真实 Producer/Consumer 应用,
+目前零真实消费者,这条不算数据管道本身完成,只是组件可用性)。
 
 ### 1.7 算法链路端到端重新验证
 
