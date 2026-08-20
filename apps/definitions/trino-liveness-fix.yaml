@@ -1,0 +1,34 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/trino-liveness-fix.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/trino-liveness-fix.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
+# 见 apps/trino-liveness-fix/manifests/cronjob.yaml 的完整说明——自动
+# 巡检并修复 Trino coordinator Deployment 的 livenessProbe(chart 硬编码
+# 的坏默认值,retire docs/BACKLOG.md 2.3 里那个必须每次手动重跑的脚本)。
+# 裸 manifest,不是 helm chart,和 apps/platform-sdk-submitter-rbac.yaml
+# 同一个模式。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trino-liveness-fix
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/trino-liveness-fix/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trino
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

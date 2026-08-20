@@ -63,5 +63,6 @@ enabled_components:
   - superset.yaml
   - table-registration-app-oauth2-proxy.yaml
   - table-registration-app.yaml
+  - trino-liveness-fix.yaml
   - trino-tls.yaml
   - trino.yaml

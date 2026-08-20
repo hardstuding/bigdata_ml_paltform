@@ -285,9 +285,10 @@ openmetadata.yaml` 里的配置问题。删掉这条脏数据、走一遍完整�
   一个旧的操作快照上不断 retry,用它缓存的旧 source 把已经修好的资源
   改回去。处置方式(本次会话实测有效)见
   `docs/journal/2026-08.md`,搜"卡住的旧操作"。
-- **`scripts/07-fix-trino-liveness-probe.sh` 必须在每次 Trino pod
-  template 变更后重跑**,否则 livenessProbe 回退到 chart 的坏默认值。
-  这条已经作为债务记进 ADR-057。
+- ~~`scripts/07-fix-trino-liveness-probe.sh` 必须在每次 Trino pod
+  template 变更后重跑~~——**已解决(2026-08-20)**:`apps/
+  trino-liveness-fix/` 这个 CronJob 每 5 分钟自动巡检并修复,不需要人
+  记得手动重跑了,见 docs/BACKLOG.md 2.3。
 - **cloud-full 上 Keycloak `platform` realm 的 `admin` 密码**是
   `TestLogin2026Aug`,和 `secrets/generated-credentials.txt`(那份是
   local-lite 的)不是一回事。

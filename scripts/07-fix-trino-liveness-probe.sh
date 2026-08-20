@@ -9,9 +9,16 @@
 #
 # 为什么脚本化而不是永久手动状态:apps/definitions/trino.yaml 里配了
 # spec.ignoreDifferences 让 ArgoCD 不再管这个字段,所以这个 patch 打一次
-# 就一直有效(ArgoCD 不会把它覆盖回去),但 Trino 的 Deployment 每次从
-# pending-definitions 收进来重新创建时,这个字段又会是 chart 的默认值,
-# 需要重新跑一次这个脚本。
+# 就一直有效(ArgoCD 不会把它覆盖回去),但 Trino 的 Deployment 每次被
+# 重新创建时,这个字段又会是 chart 的默认值,需要重新打一次这个 patch。
+#
+# 2026-08-20(BACKLOG 2.3):这个手动步骤已经不是唯一的修复手段了——
+# `apps/trino-liveness-fix/manifests/cronjob.yaml` 每 5 分钟自动巡检并
+# 按需重新 patch,已经在 cloud-full 上真实验证过(手动打坏 livenessProbe
+# → 触发一次 Job → 确认自动修复)。**这个脚本继续保留,当作立即手动修复
+# 的快捷方式**(不想等最多 5 分钟的巡检周期时用),不是必须的步骤了——
+# Trino Deployment 重建之后,就算不手动跑这个脚本,CronJob 也会在几分钟
+# 内自动修好。
 #
 # 用法:
 #   ./scripts/07-fix-trino-liveness-probe.sh

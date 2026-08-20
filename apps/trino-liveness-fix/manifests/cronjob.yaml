@@ -1,0 +1,103 @@
+# 见 docs/BACKLOG.md 2.3("Trino livenessProbe 的人工补丁要么固化要么
+# 消除")。之前 `scripts/07-fix-trino-liveness-probe.sh` 必须在**每次**
+# Trino coordinator Deployment 被重新创建后手动重跑,否则回退到 chart
+# 硬编码的坏默认值(打已经关掉的 http 端口,kubelet 会不停强杀重启,见
+# apps/components/trino.yaml 里 coordinator 那段的详细说明)——这不是
+# GitOps,是"GitOps 加一个没人会记得的手工步骤"。
+#
+# 这个 CronJob 把那个手动步骤自动化:每 5 分钟检查一次
+# trino-coordinator 的 livenessProbe 是不是已经是期望的 exec 探针,不是
+# 就重新 patch 一次。**用 kubectl patch 而不是重新 apply 整个
+# Deployment**,而且只在内容真的不一样时才 patch(先 get 出来比较一次,
+# 不是无脑每次都 patch)——K8s API server 本身对内容相同的 patch 也会
+# no-op,但避免每 5 分钟制造一次没有实际变化的 API 调用/审计日志噪音。
+#
+# 为什么用 CronJob 轮询而不是 ArgoCD PostSync hook:trino 这个 Application
+# 的 source 是远程 Helm chart(trinodb/charts),不是这个仓库自己的 git
+# manifest——ArgoCD 的 sync hook 资源要和目标 Application 在同一次 sync
+# 里渲染出来,官方 chart 不支持"额外插一个 Job 进去"这种扩展点(没有
+# extraDeploy/extraObjects 这类 values)。轮询延迟(最多 5 分钟)换来的是
+# 不用碰 chart 内部结构,和这个仓库"只用官方支持的部署方式"的一贯原则
+# (ADR-008)一致。
+#
+# 复用 apps/iam-sync/Dockerfile 构建出的镜像——这个 CronJob 唯一需要的
+# 工具就是 kubectl,iam-sync 镜像已经打包好了(附带的 git/pyyaml 用不上,
+# 但没有理由为了省这几十 MB 再单独建一个只差一个工具的镜像,徒增一次
+# CI 构建和一份几乎重复的 Dockerfile)。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: trino-liveness-fix
+  namespace: trino
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: trino-liveness-fix
+  namespace: trino
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["trino-coordinator"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: trino-liveness-fix
+  namespace: trino
+subjects:
+  - kind: ServiceAccount
+    name: trino-liveness-fix
+    namespace: trino
+roleRef:
+  kind: Role
+  name: trino-liveness-fix
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trino-liveness-fix
+  namespace: trino
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          # 见 ADR-041(队列资源管理):定时巡检任务,归 batch 档。
+          priorityClassName: batch
+          serviceAccountName: trino-liveness-fix
+          restartPolicy: Never
+          containers:
+            - name: fix
+              image: ghcr.io/hardstuding/bigdata_ml_paltform/iam-sync@sha256:fb9ffde1ae04ca954339f3fb942070899d466a19a266a471d663de23f8c84467
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  if ! kubectl get deploy trino-coordinator -n trino >/dev/null 2>&1; then
+                    echo "trino-coordinator 不存在,可能 Trino 还没起来或者被临时关掉了,跳过这次"
+                    exit 0
+                  fi
+                  CURRENT=$(kubectl get deploy trino-coordinator -n trino \
+                    -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.exec.command[0]}' 2>/dev/null || true)
+                  if [ "$CURRENT" = "/usr/lib/trino/bin/health-check" ]; then
+                    echo "livenessProbe 已经是期望的 exec 探针,不用 patch"
+                    exit 0
+                  fi
+                  echo "livenessProbe 不是期望值(当前: ${CURRENT:-<空,可能还是 chart 默认的 httpGet>}),重新 patch"
+                  kubectl patch deploy trino-coordinator -n trino --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe","value":{"exec":{"command":["/usr/lib/trino/bin/health-check"]},"initialDelaySeconds":30,"periodSeconds":10,"timeoutSeconds":5,"failureThreshold":6,"successThreshold":1}}]'
+                  echo "已 patch"
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi

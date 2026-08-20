@@ -176,12 +176,22 @@ ConfigMap"这个模式(`scripts/12-sync-iam.py` 一直是运行时 `git clone`
 拿最新代码跑,不是从 ConfigMap 读固定内容),这次镜像化没有牵扯到
 任何同步脚本,不需要额外处理。
 
-### 2.3 Trino livenessProbe 的人工补丁要么固化要么消除
+### 2.3 Trino livenessProbe 的人工补丁要么固化要么消除 —— 已完成(2026-08-20)
 
-`scripts/07-fix-trino-liveness-probe.sh` 必须在**每次** Trino pod
-template 变更后重跑,否则回退到 chart 的坏默认值(本次会话就重跑了 3 次)。
-这不是 GitOps,是"GitOps 加一个没人会记得的手工步骤"。可选解法:ArgoCD
-的 postSync hook、或者给上游 chart 提 issue/PR。
+之前 `scripts/07-fix-trino-liveness-probe.sh` 必须在**每次** Trino pod
+template 变更后重跑,否则回退到 chart 的坏默认值——这不是 GitOps,是
+"GitOps 加一个没人会记得的手工步骤"。
+
+**选的方案是 CronJob 轮询,不是 ArgoCD postSync hook**:trino 这个
+Application 的 source 是远程 Helm chart(trinodb/charts),postSync hook
+资源要和目标 Application 在同一次 sync 里渲染出来,官方 chart 没有
+extraDeploy/extraObjects 这类扩展点插不进去。新增 `apps/
+trino-liveness-fix/`(CronJob,每 5 分钟检查 livenessProbe 是不是已经是
+期望的 exec 探针,不是才 patch,已经一致就不动)。**cloud-full 上真实
+验证过完整闭环**:手动把 livenessProbe 打坏成 chart 默认的 httpGet →
+手动触发一次 Job → 确认自动识别出不一致并重新 patch 好 → 再触发一次
+确认变成 no-op。`scripts/07-fix-trino-liveness-probe.sh` 保留作为"不想等
+最多 5 分钟巡检周期"的立即手动修复快捷方式,不再是必须的步骤。
 
 ### 2.4 三个自建 Flask 工具的测试补完 —— 已完成(2026-08-20)
 

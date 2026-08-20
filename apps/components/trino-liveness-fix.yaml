@@ -1,0 +1,27 @@
+# 见 apps/trino-liveness-fix/manifests/cronjob.yaml 的完整说明——自动
+# 巡检并修复 Trino coordinator Deployment 的 livenessProbe(chart 硬编码
+# 的坏默认值,retire docs/BACKLOG.md 2.3 里那个必须每次手动重跑的脚本)。
+# 裸 manifest,不是 helm chart,和 apps/platform-sdk-submitter-rbac.yaml
+# 同一个模式。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trino-liveness-fix
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/trino-liveness-fix/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trino
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
