@@ -158,7 +158,14 @@ else
   # rancher-mirror.rancher.cn 这个地址,同样是官方提供的选项,不是三方
   # 野路子)。
   curl -sfL -m 30 https://rancher-mirror.rancher.cn/k3s/k3s-install.sh -o /tmp/install-k3s.sh
-  INSTALL_K3S_MIRROR=cn INSTALL_K3S_EXEC="--docker --data-dir /data/k3s --write-kubeconfig-mode 644 --tls-san ${CLOUD_VM_IP}" sh /tmp/install-k3s.sh
+  # --disable traefik:这个项目用的是自己装的 ingress-nginx(见
+  # platform/apps/ingress-nginx.yaml),k3s 自带的 Traefik 从来没被真正
+  # 用到过。2026-08-20 才发现之前的安装一直漏了这个参数——k3s 默认自带的
+  # Traefik 一直在跑,占着节点的 80/443 端口,和 ingress-nginx 自己的
+  # svclb Pod 抢端口,导致 ingress-nginx 长期 Pending/OutOfSync(这个
+  # 项目走 NodePort 对外访问,没有依赖裸 80/443,所以没有影响真实访问,
+  # 但白占资源、也是干扰排障的噪音源)。见 docs/BACKLOG.md 2.7。
+  INSTALL_K3S_MIRROR=cn INSTALL_K3S_EXEC="--docker --data-dir /data/k3s --write-kubeconfig-mode 644 --tls-san ${CLOUD_VM_IP} --disable traefik" sh /tmp/install-k3s.sh
   rm -f /tmp/install-k3s.sh
 fi
 sleep 8

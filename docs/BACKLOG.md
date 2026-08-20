@@ -109,7 +109,7 @@ template()` 传 parameters 目前对这个模板是无效的,模板本身还没�
 ADR-057 认定的结构性债务。不做的话,上面 P1 拉起来的东西会以同样脆弱的
 方式继续堆叠。
 
-### 2.1 引入镜像构建流程,停止用运行时 `pip install`(最大的一条)—— 主体已完成(2026-08-20)
+### 2.1 引入镜像构建流程,停止用运行时 `pip install`(最大的一条)—— 全部完成(2026-08-20)
 
 全仓库只有 1 个 Dockerfile,CI 没有任何镜像构建,而 **8 个地方在容器
 启动时现装 Python 依赖**。仅 2026-08-16 一晚就因此产生四次真实故障
@@ -167,14 +167,22 @@ Dockerfile`),只是当时是手动登 cloud-full 云主机现场 build + 手动�
 `workflowTemplateRef` 指向 `train-demo-model` 的 Workflow,**Succeeded**,
 确认新镜像不只是能拉,训练本身也真的跑得通。
 
-**还剩一个没接进 CI**:`apps/feast/feature-server-image/`(RHEL UBI
-基础镜像 + `microdnf`,和其它几个 Debian-based 的 Dockerfile 不是同一套
-包管理器,接进去之前要单独确认这个基础镜像的多架构支持情况,不能照抄
-现成的 matrix 项),是小众、单一用途的镜像,不属于 2026-08-16 那批
-"8 个地方运行时 pip install"的原始故障清单——已经在 2026-08-19 用
-"构建期装依赖"解决了根本问题,只是构建方式还是手动登云主机,不是紧迫
-缺口,以后有空可以顺手接进去。**明确不做**:不引入 Kaniko/Tekton 这类
-集群内构建体系,对单人维护的项目过重。
+**第五段(收尾):feast feature-server-image**。基础镜像是 RHEL UBI +
+`microdnf`(和其它几个 Debian-based 的 Dockerfile 不是同一套包管理器),
+接进去之前先用 quay.io 的 manifest list API 确认了这个基础镜像原生
+支持 `linux/amd64`+`linux/arm64`(不需要 QEMU 模拟),多架构构建没有
+额外风险。`apps/feast/manifests/feature-server.yaml` 和
+`apps/airflow/dags/feast_materialize.py`(离线物化用的是同一个镜像)
+都从 `imagePullPolicy: Never`(要求"这台机器之前手动 build 过"这个隐藏
+前提)切到 GHCR digest 引用 + `IfNotPresent`。**云端验证**:新 Pod
+拉取镜像成功,`pyspark`/`java -version` 都确认可用,真实调用
+`/get-online-features` HTTP 接口拿到正确的 schema 响应(不是连接失败或
+崩溃)。
+
+至此**这个仓库所有自定义 Dockerfile 都接进了同一条 CI 自动构建流水线,
+不再有任何"必须手动登云主机 build"的镜像**,BACKLOG 2.1 完全收尾。
+**明确不做**:不引入 Kaniko/Tekton 这类集群内构建体系,对单人维护的
+项目过重。
 
 **云端验证已完成(2026-08-20 当天)**:cloud-full 的 ArgoCD 自动同步到
 这版 manifest 后,三个应用的新 Pod 都正常拉到 GHCR 镜像并 Running(
@@ -257,7 +265,7 @@ JupyterHub),`submit_job()`(建 Workflow→pod 里跑
 `run_workflow_template()`,不需要 `platform-submit job.yaml` 这条
 "从终端/CI 提交"的权宜做法了(那条依然能用,只是不再是必须的)。
 
-### 2.7 cloud-full 节点上 k3s 内置 Traefik 一直没关(2026-08-20 顺手发现)
+### 2.7 cloud-full 节点上 k3s 内置 Traefik 一直没关 —— 已完成(2026-08-20)
 
 排查其它问题时顺手 `kubectl -n kube-system get svc,ds` 才发现:k3s 默认
 自带的 Traefik ingress controller 从来没有被显式禁用过(`k3s server`
@@ -268,25 +276,32 @@ ingress-nginx 自己的 `svclb-ingress-nginx-*` 抢同一组端口——后者�
 `ingress-nginx` 这个 ArgoCD Application 长期显示 `OutOfSync` 的一部分
 背景噪音(另一部分是下面这条独立的旧同步错误)。
 
-**已确认不影响真实访问**:这个项目的外部访问路径是 NodePort
-(`32460`/`32535`,不是靠 LoadBalancer 占的裸 80/443),`curl -k
-https://<公网IP>:32535/` 和 `http://<公网IP>:32460/` 都返回 404(符合
-预期——没带正确 Host 头,ingress-nginx 走的是默认后端),说明 ingress-
-nginx 本身工作正常,没有被 Traefik 顶替。**这次没有动手关闭 Traefik**
-——k3s 卸载/重装内置组件涉及节点级操作,风险和这次顺手发现的性质不匹配
-(见 `CLAUDE.md`"顺手修一下如果会跨组件/改变架构,单独立项"),留给
-专门时间处理:标准做法是给 `/etc/systemd/system/k3s.service`(或者
-k3s 安装参数)加 `--disable=traefik` 重启 k3s,或者直接删除
-`kube-system` 命名空间下 `traefik` 这个 HelmChart CR 触发 chart 卸载,
-两条路都需要先确认这台节点上 k3s 是怎么装的(`scripts/`
-目录里应该有对应的安装脚本)才能选对方式,不要现场现猜。
+**已确认不影响真实访问**(修复前):外部访问路径是 NodePort
+(`32460`/`32535`),不是靠 LoadBalancer 占的裸 80/443。
 
-**顺带发现一条独立的旧问题**:`ingress-nginx` 这个 Application 的
-`status.conditions` 里还挂着一条 2026-08-16 的 `SyncError`
+**已修复(2026-08-20,征得用户确认后现场处理,不是"顺手"做的——涉及
+节点级操作,单独走了一轮确认再动手)**:
+1. `/etc/rancher/k3s/config.yaml` 加 `disable: [traefik]`,
+   `systemctl restart k3s`(单节点集群,重启期间控制面短暂不可用,
+   已有 Pod 不受影响,重启后节点几秒内恢复 Ready)。
+2. `scripts/21-bootstrap-cloud-vm.sh` 的 `INSTALL_K3S_EXEC` 同步加上
+   `--disable traefik`,以后从空环境重新拉起这台节点不会再漏掉。
+3. **验证**:重启后 `kubectl -n kube-system get svc,helmchart` 确认
+   Traefik 的 Service/HelmChart CR 都已消失;之前一直 `Pending` 的
+   `svclb-ingress-nginx-*` Pod 变成 `2/2 Running`(端口冲突解除的直接
+   证据,不是推断)。
+
+**顺带修好了一条独立的旧问题**:`ingress-nginx` 这个 Application 的
+`status.conditions` 里挂着一条 2026-08-16 的 `SyncError`
 (`validatingwebhookconfigurations.../ingress-nginx-admission` 的
 `resourceVersion` 冲突),和 `docs/operations/troubleshooting.md` 里
-"ArgoCD 卡在过期的同步操作上"是同一类问题,处置方式那份文档里已经有,
-没有重复展开。
+"ArgoCD 卡在过期的同步操作上"是同一类问题——按那份文档的处置方式(先
+`kubectl patch application ... operationState.phase=Terminating` 终止
+卡住的旧操作)没能一次解决,深挖发现是 `argocd-application-controller`
+自己的对象缓存也过期了,额外 `kubectl rollout restart
+statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
+`ValidatingWebhookConfiguration` 让 ArgoCD 重新创建,才彻底解决。现在
+`ingress-nginx` 是 `Synced Healthy`,不再有任何已知的 OutOfSync 项。
 
 ---
 

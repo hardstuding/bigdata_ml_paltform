@@ -27,6 +27,7 @@
 - [ArgoCD 卡在 "waiting for healthy state of ..." 不动,手动改了 values 也没用](#argocd-卡在-waiting-for-healthy-state-of--不动手动改了-values-也没用)
 - [CRD 太大报 "annotations too long",`ServerSideApply=true` 不是每次都管用](#crd-太大报-annotations-too-longserversideapplytrue-不是每次都管用)
 - [Airflow scheduler 反复长出两个并存 ReplicaSet、ArgoCD 子 Application spec 一度没跟上 git——根因是 ArgoCD 控制面自己被 OOMKilled,不是 Airflow chart 的 bug](#airflow-scheduler-反复长出两个并存-replicasetargocd-子-application-spec-一度没跟上-git根因是-argocd-控制面自己被-oomkilled不是-airflow-chart-的-bug)
+- [一个 Application 的 SyncError 卡住不动,`operationState.phase=Terminating` 这条标准处置有时不够,还要重启 argocd-application-controller](#一个-application-的-syncerror-卡住不动operationstatephaseterminating-这条标准处置有时不够还要重启-argocd-application-controller)
 
 ### 数据平台组件(Hive / Trino / Iceberg / Postgres / Keycloak / OpenMetadata / Superset)
 
@@ -836,3 +837,28 @@
   这类捷径可能会在应用自己的用户表里留下不完整的记录,虽然不影响当时
   测试本身"看起来通过",但会在后续正常登录时以完全不相关的报错形式
   冒出来,排查成本比老老实实走一遍完整浏览器流程高得多。
+
+### 一个 Application 的 SyncError 卡住不动,`operationState.phase=Terminating` 这条标准处置有时不够,还要重启 argocd-application-controller
+
+- **现象**:某个 Application 的 `status.conditions` 里挂着一条几天前的
+  `SyncError`(比如"某个资源的 `resourceVersion` 冲突"),`kubectl
+  patch application <name> --type merge -p '{"status":{"operationState":
+  {"phase":"Terminating"}}}'` 终止卡住的旧操作、再手动触发一次新
+  `sync` 之后,状态依然是 `OutOfSync`,而且报错时间戳变成了刚才这次
+  重试的时间(不是几天前那条缓存的旧消息)——说明确实在重新尝试,但
+  还是同一个错误。
+- **原因**:即使卡住的旧 `operationState` 已经清掉,`argocd-application-
+  controller` 自己维护的一份对象缓存也可能是陈旧的,新的 sync 尝试用
+  这份陈旧缓存里记的 `resourceVersion` 去 PATCH 一个可能已经不存在、或
+  版本已经变了的资源,自然又失败一次——这是应用层面(Application 的
+  operationState)和控制器进程内存缓存两层不同的"卡住",只清前一层不够。
+- **处理**:`kubectl -n argocd rollout restart statefulset/argocd-
+  application-controller`(这个仓库用的 ArgoCD 部署方式,
+  application-controller 是 StatefulSet 不是 Deployment,先确认清楚
+  再重启,别用错资源类型报 NotFound 就以为没这个组件),等它重新
+  Ready、缓存重建后再 hard refresh + 触发一次 sync。如果那个具体的
+  OutOfSync 资源本身内容不重要/能安全重建(比如
+  `ValidatingWebhookConfiguration` 这类无状态配置),直接
+  `kubectl delete` 掉它再让 ArgoCD 重新创建,比反复重试"patch 一个卡在
+  奇怪状态的资源"更省事。
+- **涉及文件**:无(纯运维操作,不改任何 git 里的 manifest)。
