@@ -61,6 +61,20 @@ cloud-full 云主机上真实验证,不是只写完代码。
   前某次手动 `kubectl apply` 绕过 ArgoCD 留下的残留,crash-loop 但不
   影响真正在 `jupyterhub` 命名空间跑着的那个),以及几个陈旧的失败 Job
   Pod(superset-init-db/hook-image-awaiter 的历史重试记录)。
+- **BACKLOG 2.1 又推进了两段**(用户确认继续工作后,同一天第三轮内容):
+  - **Superset**:2026-08-19 其实已经解决了运行时装依赖的反模式,只是
+    构建方式是手动登云主机——这次接进 CI 自动构建流水线。这个 chart
+    的 image 字段不支持 digest(只有 repository/tag),用构建时的
+    commit SHA 当 tag 达到等价可追溯性。云端验证:新 Pod 拉取 GHCR
+    镜像成功、`psycopg2`/`authlib`/`trino` 三个包 import 正常、
+    ArgoCD Synced/Healthy。
+  - **argo-workflows-training-image**:同样接进 CI,`workflow-
+    template.yaml` 切到 GHCR digest 引用。**云端真实触发了一次训练
+    Workflow 验证**(`workflowTemplateRef` 指向 `train-demo-model`),
+    Succeeded——不只是镜像能拉,训练本身也真的跑通。
+  - 还剩 `apps/feast/feature-server-image/`(RHEL UBI 基础镜像,
+    `microdnf` 不是同一套包管理器)没接进去,已如实记进 BACKLOG,不是
+    紧迫缺口。
 - 这份 CURRENT 记录之后,VM 会停机(经济模式),不产生持续计费。
 
 ## 上一轮 CURRENT(2026-08-20,第一轮,已完成,存档)
