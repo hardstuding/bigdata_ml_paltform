@@ -38,7 +38,15 @@ data:
     #   - dbt_demo_service:apps/airflow 的 dbt_demo DAG(dbt build)用,
     #     真实执行 CREATE TABLE/INSERT 这类写操作,不是终端用户手工建表,
     #     不应该被"终端用户默认禁止写操作"这条规则挡住。
-    service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service"}
+    #   - platform_sdk_demo_service:ADR-058 的 platform_sdk_demo DAG 用,
+    #     和 dbt_demo_service/superset_service 是同一个性质——平台自己的
+    #     验证/演示账号,不代表某个真实终端用户在查数据,不该走
+    #     table-access-grants.csv 那条给人类用户走审批的路径。2026-08-19
+    #     真实踩过这个坑:一开始没加进这个集合,`iceberg.demo.orders`
+    #     报 PERMISSION_DENIED,和账号密码本身对不对是两回事(先排查完
+    #     Trino 的 password.db 是 subPath 挂载、账号新建后要重启 Trino
+    #     pod 才能生效那个坑,才轮到这条)。
+    service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service", "platform_sdk_demo_service"}
 
     is_service_account if {
     	input.context.identity.user in service_accounts
