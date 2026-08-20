@@ -13,7 +13,57 @@
 > 想知道"以前某个问题怎么解决的" → [`docs/journal/`](journal/) 和
 > [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 
-## CURRENT(2026-08-20)
+## CURRENT(2026-08-20,第二轮)
+
+用户明确授权连续自主工作(先 3h,后又延到至少 4h),这是当天第二轮
+session,BACKLOG 2.1/2.3/2.6 + P1.7 的进展都在这轮做的,全部已在
+cloud-full 云主机上真实验证,不是只写完代码。
+
+- **BACKLOG 2.1 全部完成**(3 个 Flask 应用 + iam-sync 都切到构建期镜像):
+  - 3 个自建 Flask 应用(permission-request-app/table-registration-app/
+    platform-portal)新增 Dockerfile + GitHub Actions(`build-images.yml`)
+    推 GHCR,`deployment.yaml` 切到 digest 引用,退役了运行时
+    apt-get/pip install 那套(历史上一晚炸过 4 次的坑)。
+  - iam-sync 镜像化:和 3 个 Flask 应用不同,它必须保留运行时
+    `git clone`(每次要拿 `platform/iam/` 最新数据),固化的只是
+    "装 git/kubectl/pyyaml 这几个工具"这件事。
+  - **修了一个多架构构建的隐患**:一开始只建 linux/amd64,但
+    local-lite(colima/arm64)也会拉这几个镜像,iam-sync 打包了
+    kubectl——这个仓库已经真实踩过"amd64 kubectl 在 arm64 节点 QEMU
+    模拟下触发 client-go 并发 bug"这个坑,只建 amd64 会重新引入。已经
+    改成 buildx 建 `linux/amd64,linux/arm64` 两个平台,4 个镜像全部
+    重新构建、更新了 digest。
+  - **云端全部验证过**:3 个 Flask 应用 Pod 正常拉取新 digest 并
+    Healthy;iam-sync 手动触发一次 Job,`git clone`→`kcadm.sh` 同步
+    roles/groups 全部成功;Trino livenessProbe CronJob(见下面 2.3)
+    的自愈逻辑手动打坏→触发→确认修复的完整闭环也验证过。
+- **BACKLOG 2.3 完成**:Trino livenessProbe 之前必须每次 Deployment
+  重建后手动重跑脚本,现在是 `apps/trino-liveness-fix/` 这个 CronJob
+  每 5 分钟自动巡检修复(chart 是远程 Helm 源,插不进 ArgoCD postSync
+  hook,改用轮询)。cloud-full 上真实验证过完整闭环(打坏→自愈→确认
+  no-op),不只是部署。
+- **BACKLOG 2.6:发现并纠正了一个记录错误**——2026-08-19 那次
+  "notebook 里调 submit_job() 被 NetworkPolicy 挡住"记录成"已知未
+  解决",但当时其实规则已经写对了,只是没来得及验证。这次用一个模拟
+  notebook 网络身份的 debug pod 重新测试,`submit_job()` 和新增的
+  `run_workflow_template()` 都端到端成功——这个 known limitation 已经
+  不存在了,相关文档(BACKLOG/skill/manifest 注释)都同步更新。
+- **P1.7 新增能力(SDK 侧写好 + 云端验证过,notebook→Feast→训练完整
+  链路串联仍是空白)**:`platform_sdk.run_workflow_template()`,notebook
+  里一行代码触发已经部署好的 Argo WorkflowTemplate(比如
+  `train-demo-model`),不用 `kubectl create`。云端debug pod 里真实
+  触发过一次,Workflow Succeeded。
+- **顺手发现但没动手修的事**(记进 BACKLOG 2.7):cloud-full 节点上
+  k3s 内置的 Traefik 从没被禁用,和 ingress-nginx 抢 80/443 端口——
+  已确认不影响真实访问(项目走 NodePort,不是裸 LB 路径),关闭 Traefik
+  涉及节点级 k3s 配置改动,留给专门时间处理。
+- 顺手清理了 `default` 命名空间里一个孤立的 JupyterHub 副本(17 小时
+  前某次手动 `kubectl apply` 绕过 ArgoCD 留下的残留,crash-loop 但不
+  影响真正在 `jupyterhub` 命名空间跑着的那个),以及几个陈旧的失败 Job
+  Pod(superset-init-db/hook-image-awaiter 的历史重试记录)。
+- 这份 CURRENT 记录之后,VM 会停机(经济模式),不产生持续计费。
+
+## 上一轮 CURRENT(2026-08-20,第一轮,已完成,存档)
 
 - **标题**:ADR-057 第三批(环境抽象补"组件选择"层)+ ADR-058 补充
   (Airflow platform_sdk_demo DAG 首次干净成功验证)
@@ -34,7 +84,6 @@
   - 云主机(`i-0jlbped4h1959tp591pe`)这次是抢占式实例容量不足
     (`OperationDenied.NoStock`)卡了一阵,起了个后台重试循环等到有货
     才开机成功,不是操作失败。
-  - 这份 CURRENT 记录之后,VM 会停机(经济模式),不产生持续计费。
 
 ## 上一版 CURRENT(2026-08-19,已完成,存档)
 
