@@ -59,9 +59,19 @@ spec:
         # 的"运行时 pip install"反模式本身——之前只能靠调大
         # startupProbe(见下面 supersetNode.startupProbe)硬扛网络慢,
         # 现在镜像已经带齐依赖,不再需要联网。
+        #
+        # 2026-08-20:镜像来源从手动登云主机 build 的 `local/superset:
+        # 6.1.0-custom` 改成 GitHub Actions 自动构建推到 GHCR(见
+        # .github/workflows/build-images.yml)。这个 chart 的 image 字段
+        # 是简单的 `repository:tag` 字符串拼接(`helm show values` 确认
+        # 没有 digest 字段,不像 apps/permission-request-app/manifests/
+        # deployment.yaml 那种自己写的裸 manifest 能直接用 `@sha256:...`
+        # 语法),用构建时的 commit SHA 当 tag 达到等价的可追溯性——GHCR
+        # 里同一个 SHA tag 只会被这一次构建推送一次,不会被覆盖,和 digest
+        # 引用的不可变性是一回事,只是表达方式不同。
         image:
-          repository: local/superset
-          tag: 6.1.0-custom
+          repository: ghcr.io/hardstuding/bigdata_ml_paltform/superset
+          tag: ad7f57fda6945ffc1fd08ca7a1affdc8ae7d099c
           pullPolicy: IfNotPresent
         postgresql:
           enabled: false
