@@ -72,9 +72,26 @@ cloud-full 云主机上真实验证,不是只写完代码。
     template.yaml` 切到 GHCR digest 引用。**云端真实触发了一次训练
     Workflow 验证**(`workflowTemplateRef` 指向 `train-demo-model`),
     Succeeded——不只是镜像能拉,训练本身也真的跑通。
-  - 还剩 `apps/feast/feature-server-image/`(RHEL UBI 基础镜像,
-    `microdnf` 不是同一套包管理器)没接进去,已如实记进 BACKLOG,不是
-    紧迫缺口。
+- **BACKLOG 2.1 完全收尾(第五段,feast feature-server)+ 2.7(Traefik)
+  一起处理完**(同一天第四轮):
+  - **feast feature-server-image**:基础镜像是 RHEL UBI(`microdnf`,
+    和其它 Debian-based 的 Dockerfile 不同),先用 quay.io manifest
+    list API 确认原生支持 arm64,再接进 CI。云端验证:Pod 拉取新镜像、
+    `pyspark`/`java` 都可用,真实调用 `/get-online-features` 拿到正确
+    schema。**至此仓库里所有自定义 Dockerfile 都接进了 CI,不再有任何
+    "必须手动登云主机 build"的镜像**。
+  - **BACKLOG 2.7(Traefik)**:k3s 内置 Traefik 从没禁用,占用
+    80/443 和 ingress-nginx 抢——这次是节点级操作,先问过用户确认才
+    动手(不是"顺手"做的)。`/etc/rancher/k3s/config.yaml` 加
+    `disable: [traefik]` + 重启 k3s,`scripts/21-bootstrap-cloud-vm.sh`
+    同步补上参数。验证:之前一直 `Pending` 的 svclb-ingress-nginx Pod
+    变成 `2/2 Running`。顺带发现并修好一条独立的 4 天前的 ArgoCD
+    SyncError(`operationState` 清了还不够,`argocd-application-
+    controller` 自己的对象缓存也陈旧,重启 controller 才彻底解决,
+    新增了 `docs/operations/troubleshooting.md` 条目)。
+  - 这轮结束时集群状态:除了 alloy/loki/kube-prometheus-stack 这三个
+    已知的 helm 仓库网络抖动(`grafana.github.io` 连不上,和这次改动
+    无关的老问题)之外,**没有任何已知的 OutOfSync/Degraded 项**。
 - 这份 CURRENT 记录之后,VM 会停机(经济模式),不产生持续计费。
 
 ## 上一轮 CURRENT(2026-08-20,第一轮,已完成,存档)
