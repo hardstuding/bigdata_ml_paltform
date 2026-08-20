@@ -92,22 +92,6 @@ template's own `spec.arguments.parameters` for what it accepts before assuming a
 exists). The returned name works with `job_status()`/`job_logs()` exactly like
 `submit_job()`'s does — see the debug-job skill.
 
-## One real limitation to know about before troubleshooting it yourself
-
-Calling `submit_job()` **from inside a JupyterHub notebook pod itself** currently
-fails with a connection error to the Kubernetes API server — this is a known,
-documented, *unresolved* NetworkPolicy issue (`docs/BACKLOG.md` section 2.6), not
-something wrong with the user's code or credentials. `query()` and `mlflow_setup()`
-work fine from inside a notebook; only the job-submission call is affected, because
-it needs to reach the Kubernetes API server, which the notebook's network policy
-doesn't currently permit.
-
-**Workaround**: run `platform-submit job.yaml` from a terminal with a real
-`~/.kube/config` (the user's own machine, or a CI runner) instead of from inside the
-notebook's Python kernel. Don't spend time re-diagnosing this NetworkPolicy issue from
-scratch — read `docs/BACKLOG.md` 2.6 first, it documents exactly which fixes were
-already tried and ruled out.
-
 ## After submitting
 
 See the debug-job skill for checking status, reading logs, and diagnosing failures.

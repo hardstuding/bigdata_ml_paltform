@@ -201,31 +201,31 @@ table-registration-app 29 + permission-request-app 60,后者这次从 52
 环境配置渲染防漂移、3 个 Flask 应用的测试)。原评审 P1-3 清单里更大的
 扩展(镜像构建 —— 见 2.1、集成测试)还没做。
 
-### 2.6 notebook 里直接调 `submit_job()` 被 singleuser NetworkPolicy 挡住
+### 2.6 notebook 里直接调 `submit_job()` 被 singleuser NetworkPolicy 挡住 —— 已解决(2026-08-20,之前的"未解决"是记录错误)
 
-2026-08-19(ADR-058 第一批验证)发现:`platform_sdk.submit_job()` 这个
-函数本身完全正确——从不受限制的环境(本机 kubeconfig)调用端到端成功过
-(建 ConfigMap→建 Workflow→pod 里跑成功→查 Trino→记 MLflow,全部
-Succeeded)。但**直接从 JupyterHub 的 notebook pod 里调这个函数**会被
-chart 默认的 `singleuser` NetworkPolicy 挡住连 K8s API server——试过
-ipBlock 指向节点 IP(172.22.9.16,配 443 和 6443 两个端口)、指向 API
-server 的 ClusterIP(10.43.0.1,配 /32 和 /16 两种 CIDR),**全部还是
-ConnectionRefused**,没有查清根因。K8s API server 在 k3s 里不是普通
-pod(是 k3s 进程自己在节点上起的,`kubectl get endpoints kubernetes
--n default` 能看到 Endpoints 指向的是节点 IP 不是 pod IP)——
-namespaceSelector/podSelector 这两种 NetworkPolicy 选择器天然匹配不到,
-必须用 ipBlock,但 ipBlock 也没通,不排除是这台 k3s 内置 netpol 控制器
-(kube-router)对这类流量的已知限制,需要上节点直接查 iptables/ipset
-才能查清根因,当时判断这个排查成本(云主机按小时计费)不该继续投入。
+2026-08-19(ADR-058 第一批验证)当晚查到 NetworkPolicy 该加一条什么规则
+才能放行 notebook pod 连 K8s API server(k3s 的 API server 不是普通
+pod,是节点自己起的,Service 的 Endpoints 指向节点 IP 不是 pod
+IP——namespaceSelector/podSelector 匹配不到,只能用 ipBlock 精确放行
+节点私网 IP + 6443 端口),规则写进了 `apps/components/jupyterhub.yaml`
+(`ipBlock: 172.22.9.16/32` port 6443),但**当晚会话在触发验证之前就
+结束了**,写commit 时如实标注成"没有验证通过,是已知未解决的限制"。
 
-**影响范围窄**:只影响"直接从 notebook pod 里调 submit_job()"这一种
-使用方式,`query()`/`mlflow_setup()` 这两个更常用的函数都已经在
-notebook pod 里验证过完全正常。
+**2026-08-20 补验证:这条规则从一开始就是对的,不是"未解决"**——起一个
+带 `singleuser-server` 标签、挂 `platform-sdk-submitter` ServiceAccount
+的 debug pod(模拟真实 notebook pod 的网络身份和权限,不用真的登录
+JupyterHub),`submit_job()`(建 Workflow→pod 里跑
+`print("hello from notebook-labeled pod")`→Succeeded)和新增的
+`run_workflow_template("train-demo-model")`(见下面 P1.7)都端到端
+成功,`job_status()` 也能正确查到状态。教训:上一次的"已知限制"记录
+本身没有错(如实记录了"没有验证通过"这个事实,不是编造),但下一次
+真正有机会验证时,应该优先重新验证已标记"未解决"的东西,不要假设它
+还是老样子——这条被漏验证了快一整天,如果不是这次顺手连带测了一下,
+可能会继续被当成"已知限制"存在很久。
 
-**当前权宜做法**:用 `platform-submit job.yaml` 从终端/CI 这类不受这条
-NetworkPolicy 限制的环境提交,不是从 notebook 里直接调。真要修,下次
-有专门时间时,从 SSH 到节点、直接查 kube-router 生成的 iptables/ipset
-规则开始查,不要重复这次试过的几种 ipBlock 组合。
+**当前状态**:notebook pod 里可以直接调 `submit_job()`/
+`run_workflow_template()`,不需要 `platform-submit job.yaml` 这条
+"从终端/CI 提交"的权宜做法了(那条依然能用,只是不再是必须的)。
 
 ---
 

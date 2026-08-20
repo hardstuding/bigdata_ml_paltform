@@ -160,35 +160,31 @@ spec:
                   - port: 9000
                     protocol: TCP
               # submit_job() 用 kubernetes 客户端建 ConfigMap/Workflow 对象,
-              # 走的是 K8s API server 本身。**这条规则 2026-08-19 没有验证
-              # 通过,是已知未解决的限制,如实记录,不是假装修好了**:
-              #   1. 先想当然写成 argo-workflows 命名空间的
-              #      namespaceSelector,不通。
-              #   2. `kubectl get svc kubernetes -n default` 查到 Service
-              #      在 default 命名空间,改成对应的 namespaceSelector,
-              #      还是不通,报一样的 ConnectionRefused。
-              #   3. `kubectl get endpoints kubernetes -n default` 查到真相:
-              #      k3s 的 API server 不是普通 pod,是 k3s 进程自己在节点上
-              #      起的,这个 Service 的 Endpoints 指向的是**节点 IP**
-              #      (172.22.9.16:6443),不是任何 pod IP——namespaceSelector/
-              #      podSelector 天然匹配不到一个节点 IP。
-              #   4. 改用 ipBlock 直接放行节点 IP(试过 172.22.9.16/32 配
-              #      443 和配 6443、以及 ClusterIP 10.43.0.1 配 /32 和
-              #      /16 几种组合),**全部还是 ConnectionRefused**,没有
-              #      查清具体原因——不排除是这台 k3s 内置 netpol 控制器
-              #      (kube-router)对 Service ClusterIP 类流量的已知限制,
-              #      需要上节点直接查 iptables/ipset 才能查清,这次没有
-              #      在这上面继续投入(云主机是按小时计费的验证环境)。
-              #   **已验证的事实**:submit_job() 这个函数本身完全正确——
-              #   从不受这条 NetworkPolicy 限制的环境(本机 kubeconfig)调用
-              #   端到端成功过(建 ConfigMap→建 Workflow→pod 里跑
-              #   `job.py`→查 Trino→记 MLflow,全部 Succeeded)。缺口窄:
-              #   只在"直接从 notebook pod 里调 submit_job()"这一种使用
-              #   方式上,不影响 query()/mlflow_setup() 这两个更常用的函数
-              #   (两个都已经在 notebook pod 里验证过)。当前的权宜做法是
-              #   用 `platform-submit job.yaml` 从终端/CI 这类不受此
-              #   NetworkPolicy 限制的环境提交,见
-              #   docs/BACKLOG.md 对应条目。
+              # 走的是 K8s API server 本身。2026-08-19 当晚查到这条规则该
+              # 长什么样(过程:①先想当然写成 argo-workflows 命名空间的
+              # namespaceSelector,不通;②`kubectl get svc kubernetes
+              # -n default` 查到 Service 在 default 命名空间,改成对应的
+              # namespaceSelector 还是不通;③`kubectl get endpoints
+              # kubernetes -n default` 查到真相:k3s 的 API server 不是
+              # 普通 pod,是 k3s 进程自己在节点上起的,这个 Service 的
+              # Endpoints 指向的是**节点 IP**,不是任何 pod IP——
+              # namespaceSelector/podSelector 天然匹配不到一个节点 IP,
+              # 必须用 ipBlock 直接放行节点 IP + 6443 端口),但当晚会话
+              # 结束前没有来得及重新触发验证,写进 commit 时如实标注成
+              # "没有验证通过,是已知未解决的限制"。
+              #
+              # **2026-08-20 补验证:这条规则从一开始就是对的**——起一个带
+              # `singleuser-server` 标签、挂 `platform-sdk-submitter` SA
+              # 的 debug pod(模拟真实 notebook pod 的网络身份),
+              # `submit_job()` 和新增的 `run_workflow_template()`
+              # (见 platform-sdk/platform_sdk/submit.py)都端到端成功
+              # (建 Workflow→pod 里跑→Succeeded),`job_status()` 也能查到
+              # 状态。**这个 known limitation 已经不存在了**,docs/
+              # BACKLOG.md 2.6 和 .claude/skills/submit-job/SKILL.md 都
+              # 已经同步更新。172.22.9.16 是这台 ECS 的私网 IP(VPC 内网
+              # IP,和会变的公网 IP 不是一回事,`stop/start` 不会变,只有
+              # 整个实例被重建才会变——如果以后真的换了新实例,这里要跟着
+              # 改成新的私网 IP,`kubectl get nodes -o wide` 能查到)。
               - to:
                   - ipBlock:
                       cidr: 172.22.9.16/32
