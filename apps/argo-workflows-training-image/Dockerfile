@@ -65,7 +65,7 @@ FROM python:3.11-slim
 # 分支尤其容易出现"某个具体版本号暂时没有对应二进制包"),pyspark 只需要
 # 一个能跑的 JVM,不需要精确到某个大版本号,用虚拟包更稳。
 RUN apt-get update -qq \
-    && apt-get install -y -qq --no-install-recommends default-jre-headless \
+    && apt-get install -y -qq --no-install-recommends default-jre-headless curl \
     && rm -rf /var/lib/apt/lists/*
 # 和上面的 mlflow-skinny/scikit-learn/pandas/boto3 合并成一次 pip
 # install(而不是分两次 RUN):pip 的依赖解析器在同一次调用里能同时看到
@@ -88,6 +88,29 @@ RUN pip install --no-cache-dir \
 # 存储、只用离线的 Spark/Iceberg 那条路径——报
 # FeastModuleImportError,不是"没装 feast[spark] extras"那类版本冲突,
 # 是缺了一个完全独立的运行时依赖。补上就行,不需要改脚本逻辑。
+
+# 2026-08-20 真实踩坑:train_from_feast_features.py 需要的
+# Iceberg/hadoop-aws/aws-sdk 这三个 jar,原本想靠 Spark 自己的
+# `spark.jars.packages`(feature_store.yaml 里配的)运行时从 Maven
+# Central 解析下载——cloud-full 云主机上直连 repo1.maven.org 会真的
+# 卡死不动(aws-java-sdk-bundle 这个几百 MB 的大包,下载进度停在 0
+# 字节超过 8 分钟没有任何变化,加了 spark.jars.repositories 指向阿里云
+# 镜像也没用,Ivy 的默认解析器链路优先级仍然先打 Maven Central,不会
+# 因为多了一个候选源就绕开卡住的那个)——这是这个仓库反复踩过的"直连
+# 境外源卡死"同一类问题,运行时下载这条路径本身就不可靠,应该在构建期
+# 解决,不是加更多运行时重试/镜像候选源。GitHub Actions 的 runner 在
+# 境外,直连 Maven Central 没有这个问题,构建期下载一次,打进镜像里,
+# 训练 pod 运行时完全不需要联网下载——版本号和
+# apps/spark-iceberg-demo/manifests/sparkapplication.yaml、
+# scripts/feast_feature_repo/feature_store.yaml 里的
+# spark.jars.packages 保持一致,不是另挑一套。
+RUN mkdir -p /opt/spark-jars \
+    && curl -fsSL -o /opt/spark-jars/iceberg-spark-runtime-3.5_2.12-1.10.0.jar \
+        https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.10.0/iceberg-spark-runtime-3.5_2.12-1.10.0.jar \
+    && curl -fsSL -o /opt/spark-jars/hadoop-aws-3.3.4.jar \
+        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
+    && curl -fsSL -o /opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar \
+        https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
 
 # train_demo_model.py 不打进镜像——通过 ConfigMap 挂载(见
 # apps/argo-workflows-training-image/manifests/script-configmap.yaml),

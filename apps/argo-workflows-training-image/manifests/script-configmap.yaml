@@ -117,7 +117,7 @@ data:
     里跑(集群内部 Service DNS)两种场景下工作,调用方负责设置这些变量。
 
     依赖(见 apps/argo-workflows-training-image/Dockerfile):
-        feast[spark]==0.65.0 pyspark==3.5.9 mlflow-skinny scikit-learn pandas
+        feast==0.65.0 pyspark==3.5.9 mlflow-skinny scikit-learn pandas redis
     """
     import os
 
@@ -142,19 +142,46 @@ data:
     mlflow.set_experiment(experiment_name)
 
     # feature_store.yaml 里的 offline_store 是 Spark(读 iceberg.demo.orders)。
-    # 用 Feast 自己提供的 get_spark_session_or_start_new_with_repoconfig()
-    # 拿 SparkSession(而不是自己另起一个、重复一遍 spark_conf 里那些 Iceberg/
-    # S3A 配置)——这是 SparkOfflineStore 内部实际调用来创建/复用会话的同一个
-    # 函数,保证这里用来查 entity_df 的会话和 get_historical_features() 内部
-    # 用的是同一套 catalog/S3 配置,不会出现"两个 Spark 会话配置不一致"的
-    # 隐藏坑。
+    #
+    # **2026-08-20 真实踩坑**:本来想直接用 Feast 自己的
+    # get_spark_session_or_start_new_with_repoconfig() 拿 SparkSession——这样
+    # 能保证用来查 entity_df 的会话和 get_historical_features() 内部用的是
+    # 同一套配置。但 feature_store.yaml 里的 `spark.jars.packages` 靠 Spark
+    # 运行时从 Maven Central 现拉 Iceberg/hadoop-aws/aws-sdk 这三个 jar,
+    # cloud-full 云主机直连 Maven Central 会真的卡死不动(和这个项目到处
+    # 踩过的"直连境外源卡死"是同一类问题,加 spark.jars.repositories 指向
+    # 阿里云镜像也没用,Ivy 的默认解析器链路不会因为多了候选源就绕开卡住的
+    # 那个)。改成在镜像构建期(GitHub Actions,境外 runner,直连 Maven
+    # Central 没问题)把这三个 jar 下载好打进镜像(见
+    # apps/argo-workflows-training-image/Dockerfile 的 /opt/spark-jars/),
+    # 运行时直接从本地加载,不联网。
+    #
+    # 用自己建的 SparkSession(不是走 feast 那个函数)是关键——PySpark 的
+    # `SparkSession.builder.config(...).getOrCreate()` 如果 JVM 里已经有一个
+    # 活跃的 session,会直接复用那个已有的,新的 config 不会生效。利用这条
+    # 特性:提前用本地 jar 路径建好 session,feast 内部再调用它自己那个
+    # "构建/复用 session" 的函数时,拿到的就是这个已经配好本地 jar 的
+    # session,不会再触发一次网络下载。其它 catalog/S3A 配置项直接从
+    # feature_store.yaml 解析出来的 store.config.offline_store.spark_conf
+    # 里读,不在这个脚本里重复写一遍容易漂移的配置。
     from feast import FeatureStore  # noqa: E402  (放在环境变量检查之后,懒加载重依赖)
-    from feast.infra.offline_stores.contrib.spark_offline_store.spark import (  # noqa: E402
-        get_spark_session_or_start_new_with_repoconfig,
-    )
+    from pyspark.sql import SparkSession  # noqa: E402
 
     store = FeatureStore(repo_path=FEAST_REPO_PATH)
-    spark = get_spark_session_or_start_new_with_repoconfig(store.config.offline_store)
+    _spark_conf = dict(store.config.offline_store.spark_conf)
+    _spark_conf.pop("spark.jars.packages", None)
+    _spark_conf.pop("spark.jars.repositories", None)
+    _spark_conf["spark.jars"] = ",".join(
+        [
+            "/opt/spark-jars/iceberg-spark-runtime-3.5_2.12-1.10.0.jar",
+            "/opt/spark-jars/hadoop-aws-3.3.4.jar",
+            "/opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar",
+        ]
+    )
+    _builder = SparkSession.builder
+    for _k, _v in _spark_conf.items():
+        _builder = _builder.config(_k, _v)
+    spark = _builder.getOrCreate()
 
     # entity_df 需要每个实体一行 + 一个 event_timestamp(point-in-time 正确性
     # 靠这个字段保证,不是"取最新值"这种简化写法)——直接从同一份 Spark
