@@ -51,6 +51,7 @@ on:
       - "apps/platform-portal/**"
       - "apps/iam-sync/Dockerfile"
       - "apps/superset-image/Dockerfile"
+      - "apps/argo-workflows-training-image/Dockerfile"
       - ".github/workflows/build-images.yml"
 
 jobs:
@@ -72,6 +73,8 @@ jobs:
             image: iam-sync
           - context: apps/superset-image
             image: superset
+          - context: apps/argo-workflows-training-image
+            image: argo-workflows-training
     steps:
       - uses: actions/checkout@v4
 

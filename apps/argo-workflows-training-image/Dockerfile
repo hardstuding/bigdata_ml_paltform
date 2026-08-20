@@ -4,10 +4,14 @@
 # docs/BACKLOG.md P2.1),在镜像构建时一次装好。
 #
 # 2026-08-19 真实踩坑(和 apps/feast/feature-server-image/Dockerfile 那次
-# 一样):直连官方 PyPI 装包在这片网络里会被限速到几十 KB/s,换成阿里云
-# PyPI 镜像后能到 1MB/s 以上量级,构建时间从"数十分钟到数小时"降到几
-# 分钟。这不是这个 Dockerfile 独有的坑,以后这个项目里任何新增的自定义
-# 镜像装 Python 依赖都应该默认带上这个 mirror 参数,不用每次重新踩一遍。
+# 一样):当时是手动登 cloud-full 云主机 build,直连官方 PyPI 装包在
+# 这片网络里会被限速到几十 KB/s,换成阿里云 PyPI 镜像后能到 1MB/s 以上
+# 量级,构建时间从"数十分钟到数小时"降到几分钟。
+#
+# 2026-08-20:接进 GitHub Actions 自动构建(见 .github/workflows/
+# build-images.yml),不再需要手动登云主机——构建方是境外 runner,不用
+# 阿里云镜像源,直连默认 PyPI 反而更快(和 apps/iam-sync/Dockerfile、
+# apps/superset-image/Dockerfile 同一个原因)。
 FROM python:3.11-slim
 
 # mlflow-skinny 版本和已部署的 MLflow server(ghcr.io/mlflow/mlflow:
@@ -22,7 +26,7 @@ FROM python:3.11-slim
 # 掩盖掉了——这类"本机凑巧能跑、干净容器里跑不起来"的坑,只有真正
 # 在干净环境里跑一次才能发现,这也是这次要做"Argo Workflows 编排训练"
 # 的价值之一,不只是把手动步骤自动化。
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
+RUN pip install --no-cache-dir \
     mlflow-skinny==3.14.0 \
     scikit-learn==1.5.2 \
     pandas==2.2.3 \
