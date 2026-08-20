@@ -1,9 +1,61 @@
 # 常见问题排查
 
 > 施工过程中遇到的真实问题按时间顺序往这里加,格式:现象 → 原因 → 处理方式。这份文档主要给未来的 AI Agent 和人类共同排障用,记录要具体(报错信息、命令、涉及的组件版本)。
+>
+> 下面正文条目仍按时间顺序排(新问题接着加在最后,不要为了分类插到中间——插入会打乱和 git blame/commit 的对应关系)。这份索引按"症状类别"分组,是排障时按现象快速定位用的入口,和正文顺序是两回事,2026-08-20 补上(此前这里只有一个空的 `## 索引` 标题,没有真正的索引内容,出事时只能整份文档 Ctrl+F)。
 
 ## 索引
 
+### 网络 / 镜像拉取
+
+- [kubectl logs / exec 在这台机器上直接报 "Internal Privoxy Error"](#kubectl-logs--exec-在这台机器上直接报-internal-privoxy-error)
+- [某些镜像仓库(如 quay.io)在这个网络下连不上,但 docker hub 是通的](#某些镜像仓库如-quayio在这个网络下连不上但-docker-hub-是通的)
+- [`apt-get install` 卡死不动,`Acquire::Retries` 不管用:apt 自己的 "delayed item" 重试队列是另一套机制](#apt-get-install-卡死不动acquireretries-不管用apt-自己的-delayed-item-重试队列是另一套机制)
+- [自建的 `python:3.12-slim` 薄应用 pip install 反复 exit 124,但 `curl` 从其他 pod 测同一个网络明明是通的](#自建的-python312-slim-薄应用-pip-install-反复-exit-124但-curl-从其他-pod-测同一个网络明明是通的)
+- [推倒重建集群之后,ArgoCD/Trino/Superset/OpenMetadata/MLflow 这类做 OIDC discovery 的组件全部连超时](#推倒重建集群之后argocdtrinosupersetopenmetadatamlflow-这类做-oidc-discovery-的组件全部连超时)
+- [Alloy 采不到日志:`loki.source.kubernetes` 拉不到数据,换成 hostPath 又报 "no such file or directory"](#alloy-采不到日志lokisourcekubernetes-拉不到数据换成-hostpath-又报-no-such-file-or-directory)
+
+### ArgoCD / GitOps
+
+- [kube-prometheus-stack 的 CRD 一直 OutOfSync,Prometheus 资源起不来](#kube-prometheus-stack-的-crd-一直-outofsyncprometheus-资源起不来)
+- [prometheus-operator 起来了但一直不创建 StatefulSet,Prometheus CR 的 status 一直是空的](#prometheus-operator-起来了但一直不创建-statefulsetprometheus-cr-的-status-一直是空的)
+- [Helm Application 手动 patch 过 Deployment 之后,ArgoCD 卡住不再应用新的 git 变更](#helm-application-手动-patch-过-deployment-之后argocd-卡住不再应用新的-git-变更)
+- [从 apps/definitions 挪走一个组件后,ArgoCD 里那个 Application 卡在 Missing 删不掉](#从-appsdefinitions-挪走一个组件后argocd-里那个-application-卡在-missing-删不掉)
+- [手动 `helm template | kubectl apply` 绕过 ArgoCD 之后,命名空间删不掉,卡在 Terminating](#手动-helm-template--kubectl-apply-绕过-argocd-之后命名空间删不掉卡在-terminating)
+- [git push 之后,ArgoCD 迟迟不应用新配置——标准排查步骤](#git-push-之后argocd-迟迟不应用新配置标准排查步骤)
+- [ArgoCD Application 显示 Healthy,但里面唯一的 Job 其实从来没跑过](#argocd-application-显示-healthy但里面唯一的-job-其实从来没跑过)
+- [ArgoCD 卡在 "waiting for healthy state of ..." 不动,手动改了 values 也没用](#argocd-卡在-waiting-for-healthy-state-of--不动手动改了-values-也没用)
+- [CRD 太大报 "annotations too long",`ServerSideApply=true` 不是每次都管用](#crd-太大报-annotations-too-longserversideapplytrue-不是每次都管用)
+- [Airflow scheduler 反复长出两个并存 ReplicaSet、ArgoCD 子 Application spec 一度没跟上 git——根因是 ArgoCD 控制面自己被 OOMKilled,不是 Airflow chart 的 bug](#airflow-scheduler-反复长出两个并存-replicasetargocd-子-application-spec-一度没跟上-git根因是-argocd-控制面自己被-oomkilled不是-airflow-chart-的-bug)
+
+### 数据平台组件(Hive / Trino / Iceberg / Postgres / Keycloak / OpenMetadata / Superset)
+
+- [Hive Metastore 建 Iceberg schema 报错 "Failed to create external path ... : null"](#hive-metastore-建-iceberg-schema-报错-failed-to-create-external-path---null)
+- [Trino 建 Iceberg schema 时指定 location 会报错,不指定就正常](#trino-建-iceberg-schema-时指定-location-会报错不指定就正常)
+- [Superset 报 ModuleNotFoundError: No module named 'psycopg2'(或 'authlib')](#superset-报-modulenotfounderror-no-module-named-psycopg2或-authlib)
+- [Keycloak start-dev 自带的 H2 是内存/临时数据库,pod 重启就把 realm 全部丢光](#keycloak-start-dev-自带的-h2-是内存临时数据库pod-重启就把-realm-全部丢光)
+- [改 coredns-custom 加自定义域名解析,CoreDNS 直接 CrashLoopBackOff(集群 DNS 短暂中断)](#改-coredns-custom-加自定义域名解析coredns-直接-crashloopbackoff集群-dns-短暂中断)
+- [OpenMetadata 改了 OIDC 环境变量,`/api/v1/system/config/auth` 还是显示旧的 basic 认证](#openmetadata-改了-oidc-环境变量apiv1systemconfigauth-还是显示旧的-basic-认证)
+- [组件重新拉起来报 "password authentication failed",Postgres 密码"变了"](#组件重新拉起来报-password-authentication-failedpostgres-密码变了)
+- [OpenMetadata SSO 登录报 "Account already exists. Please contact administrator."——不是配置问题,是数据库里一条半损坏的用户记录](#openmetadata-sso-登录报-account-already-exists-please-contact-administrator不是配置问题是数据库里一条半损坏的用户记录)
+
+### K8s 资源生命周期 / NetworkPolicy
+
+- [Helm chart 的 envFromSecrets(复数)不一定覆盖所有容器,initContainer 可能读不到](#helm-chart-的-envfromsecrets复数不一定覆盖所有容器initcontainer-可能读不到)
+- [同一个命名空间里的 Job 连不上同命名空间的 pod,NetworkPolicy 报 "connection refused"](#同一个命名空间里的-job-连不上同命名空间的-podnetworkpolicy-报-connection-refused)
+- [`kubectl delete pod` 删 CNPG 的 Postgres pod 卡在 `Terminating` 十几分钟不退出](#kubectl-delete-pod-删-cnpg-的-postgres-pod-卡在-terminating-十几分钟不退出)
+- [`KubernetesPodOperator` 拉起跨命名空间/自定义镜像的 Spark 任务,一路要闯好几关(RBAC、日志流、容器 UID、模板变量)](#kubernetespodoperator-拉起跨命名空间自定义镜像的-spark-任务一路要闯好几关rbac日志流容器-uid模板变量)
+- [新建的 Job/CronJob 的 pod 刚起来第一次连接直接 Connection refused,但同样标签的 pod 手动测试是通的](#新建的-jobcronjob-的-pod-刚起来第一次连接直接-connection-refused但同样标签的-pod-手动测试是通的)
+- [给 ConfigMap 新增一个 key 之后,subPath 挂载这个新 key 的文件在 pod 里变成了一个空目录](#给-configmap-新增一个-key-之后subpath-挂载这个新-key-的文件在-pod-里变成了一个空目录)
+
+### 本机(colima)环境 / 脚本习惯
+
+- [colima 会自动把 k3s LoadBalancer 的 80/443 转发到 Mac 的 localhost](#colima-会自动把-k3s-loadbalancer-的-80443-转发到-mac-的-localhost)
+- [bash 脚本用 `set -euo pipefail`,给不存在的东西 `grep` 会让脚本"悄悄卡住"](#bash-脚本用-set--euo-pipefail给不存在的东西-grep-会让脚本悄悄卡住)
+
+### 已废弃 / 仅存档
+
+- [ArgoCD 接 Keycloak OIDC,登录跳转到集群内部域名,浏览器打不开(已废弃,仅存档)](#argocd-接-keycloak-oidc登录跳转到集群内部域名浏览器打不开已废弃仅存档)
 ### kube-prometheus-stack 的 CRD 一直 OutOfSync,Prometheus 资源起不来
 
 - **现象**:ArgoCD 里 `kube-prometheus-stack` Application 长期 `OutOfSync`,`kubectl get crd prometheuses.monitoring.coreos.com` 报 NotFound,Prometheus 的 Pod/StatefulSet 一直没创建出来。
