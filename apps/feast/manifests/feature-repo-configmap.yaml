@@ -12,6 +12,17 @@ metadata:
   namespace: feast
 data:
   feature_store.yaml: |
+    # Feast 特征仓库配置(见 docs/decisions/042-feast-feature-store.md)。
+    #
+    # 【可插拔基础设施,见 ADR-030】registry.path 和 offline_store.spark_conf 里的
+    # S3A 配置都指向本仓库自带的 MinIO;接外部 S3 只需要改
+    # fs.s3a.endpoint/access.key/secret.key 这三行(access/secret 走
+    # ${env.MINIO_ACCESS_KEY}/${env.MINIO_SECRET_KEY} 变量展开,不是写死在这个
+    # 文件里,和 apps/hive-metastore/manifests/core-site-configmap.yaml 是同一个
+    # 模式——运行前用 scripts/12-feast-feature-pipeline.sh 从 minio-root 这个
+    # k8s Secret 读值导出成环境变量,这个文件本身不含明文凭据)。offline_store
+    # 接的是 apps/spark-iceberg-demo 已验证过的同一个 Iceberg catalog
+    # (catalog 名固定叫 "iceberg",见 ADR-036),不是另起一套。
     project: demo
     provider: local
 
@@ -33,11 +44,24 @@ data:
         spark.hadoop.fs.s3a.path.style.access: "true"
         spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
         spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+        # 版本对齐 apps/spark-iceberg-demo/manifests/sparkapplication.yaml 已经
+        # 验证过的组合(ADR-036),不是另挑一套。
         spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
         spark.jars.ivy: "/tmp/.ivy2"
+        # 2026-08-20 真实踩坑:`spark.jars.packages` 触发的 Ivy 解析直连
+        # repo1.maven.org(Maven Central 官方源)在这片网络下会真的卡死不动
+        # (不是慢,是某个 jar——这次是 aws-java-sdk-bundle,一个几百 MB 的大
+        # 包——下载进度停在 0 字节超过 8 分钟没有任何变化),和这个项目到处
+        # 踩过的"直连境外 CDN/官方源带宽瓶颈或直接卡死"是同一类问题(PyPI/apt
+        # 官方源那几次)。加一个阿里云的 Maven 公共镜像仓库当额外候选源——
+        # Ivy 按 `spark.jars.repositories` 列出的顺序尝试,不会移除默认的
+        # Maven Central,只是多一个更快的选项。
+        spark.jars.repositories: "https://maven.aliyun.com/repository/public"
 
     online_store:
       type: redis
+      # 集群内部访问用这个 Service DNS;本机脚本跑 feast materialize 时通过
+      # scripts/12-feast-feature-pipeline.sh 里的 port-forward 改写成 localhost。
       connection_string: "feast-redis.feast.svc.cluster.local:6379"
 
     entity_key_serialization_version: 3
