@@ -124,13 +124,17 @@ template 变更后重跑,否则回退到 chart 的坏默认值(本次会话就�
 这不是 GitOps,是"GitOps 加一个没人会记得的手工步骤"。可选解法:ArgoCD
 的 postSync hook、或者给上游 chart 提 issue/PR。
 
-### 2.4 三个自建 Flask 工具的测试补完
+### 2.4 三个自建 Flask 工具的测试补完 —— 已完成(2026-08-20)
 
-**主体已完成**(2026-08-16,60 个测试接进 CI)。剩余缺口如实记录:
-`GIT_TOKEN` 在测试环境始终不配置,所以真正执行 git clone/push 的分支
-(`apply_to_git`/`apply_grant_to_git`/`reclaim_expired`/`transfer`)和
-真实 POST 到外部 OA webhook 的网络路径,只测到"没配置时优雅降级",没有
-测到真实调用本身。要补需要搭临时本地 git 仓库或更细的 mock。
+主体 2026-08-16 完成(60 个测试接进 CI)。**剩余缺口 2026-08-20 补完**:
+`apply_to_git`/`apply_grant_to_git`/`reclaim_expired`/`transfer` 里真正
+执行 git clone/commit/push 的分支,现在用 `local_git_repo` fixture(起
+一个本地裸仓库当 `REPO_URL`,不连真实 GitHub)覆盖;外部 OA webhook 的
+真实 POST(成功标记 `pending_external`、失败退化回本地 `pending` 两条
+分支)用 `monkeypatch.setattr(perm.requests, "post", ...)` 覆盖,不发
+真实网络请求。三个应用现在合计 106 个测试(platform-portal 17 +
+table-registration-app 29 + permission-request-app 60,后者这次从 52
+补到 60)。
 
 ### 2.5 扩大 CI
 

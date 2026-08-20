@@ -13,6 +13,7 @@
 """
 import csv
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -171,12 +172,14 @@ class TestBuildApprovalSteps:
 # 调内部函数,这样能顺带验证认证头解析/HTTP 状态码这些路由层面的行为,
 # 不只是业务逻辑本身。
 #
-# 覆盖范围的诚实说明:GIT_TOKEN 在测试环境里始终不设置(空字符串),所以
-# apply_to_git()/apply_grant_to_git()/reclaim_expired()/transfer() 里真正
-# 执行 git clone/push 的分支不会被这些测试跑到,只测到"没配置 GIT_TOKEN
-# 时优雅降级,不崩溃"这条路径——真正的 git 读写分支(以及外部 OA webhook
-# 的实际 POST)不在这次覆盖范围内,需要 mock subprocess/网络调用才能测,
-# 是更进一步的后续工作,不是这次顺手能做完的。
+# 覆盖范围(2026-08-20 补完,见 docs/BACKLOG.md 2.4):默认的 client
+# fixture 场景下 GIT_TOKEN 不设置,只测到"没配置时优雅降级,不崩溃"这
+# 条路径。真正执行 git clone/commit/push 的分支(apply_to_git()/
+# apply_grant_to_git()/reclaim_expired()/transfer())现在由下面
+# TestGitWritePaths 这个类覆盖——用 local_git_repo fixture 起一个本地
+# 裸仓库当 REPO_URL,不连真实 GitHub。外部 OA webhook 的真实 POST(成功
+# 和失败两条分支)由 TestExternalOaWebhookDispatch 覆盖,mock
+# perm.requests.post,不发真实网络请求。
 def _reset_db():
     """每个测试前清空三张表,保证测试之间互不干扰(id 从 1 重新分配,
     不依赖上一个测试留下的行)。"""
@@ -200,6 +203,40 @@ def client():
     perm.app.config["TESTING"] = True
     with perm.app.test_client() as c:
         yield c
+
+
+@pytest.fixture
+def local_git_repo(tmp_path, monkeypatch):
+    """给 apply_to_git()/apply_grant_to_git()/reclaim_expired()/transfer()
+    这几个真正执行 git clone/push 的分支搭一个本地裸仓库当 REPO_URL——不用
+    真的连 GitHub。REPO_URL 是本地路径(不是 https://),所以 GIT_TOKEN
+    拼接那行 `REPO_URL.replace("https://", ...)` 是 no-op,可以放心塞一个
+    假 token 只用来通过 `if not GIT_TOKEN` 这个门槛,不会被真的发送到任何
+    地方。返回裸仓库路径,测试断言时用它建一个新 clone 读最终内容。"""
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(bare)], check=True, capture_output=True)
+
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "clone", str(bare), str(seed)], check=True, capture_output=True)
+    iam_dir = seed / "platform" / "iam"
+    iam_dir.mkdir(parents=True)
+    (iam_dir / "memberships.csv").write_text("username,group_name\nengineer2,viewers\n")
+    (iam_dir / "table-access-grants.csv").write_text("username,table_fqn,security_level,granted_at,expires_at\n")
+    subprocess.run(["git", "-C", str(seed), "config", "user.email", "seed@test.local"], check=True)
+    subprocess.run(["git", "-C", str(seed), "config", "user.name", "seed"], check=True)
+    subprocess.run(["git", "-C", str(seed), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(seed), "commit", "-m", "seed"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(seed), "push"], check=True, capture_output=True)
+
+    monkeypatch.setattr(perm, "REPO_URL", str(bare))
+    monkeypatch.setattr(perm, "GIT_TOKEN", "dummy-token-not-a-real-secret")
+    return bare
+
+
+def _read_csv_from_bare(bare_path, tmp_path, rel_path, name):
+    checkout = tmp_path / name
+    subprocess.run(["git", "clone", str(bare_path), str(checkout)], check=True, capture_output=True)
+    return (checkout / rel_path).read_text()
 
 
 def auth(username):
@@ -582,3 +619,203 @@ class TestAuditAndHealthz:
         monkeypatch.setattr(perm, "get_current_user", lambda: ("admin", ["platform-team"]))
         resp = client.get("/audit")
         assert resp.status_code == 200
+
+
+class TestGitWritePaths:
+    """补 docs/BACKLOG.md 2.4 里明确记录的缺口:apply_to_git()/
+    apply_grant_to_git()/reclaim_expired()/transfer() 真正执行 git
+    clone/commit/push 的分支,之前只测过"没配 GIT_TOKEN 时优雅降级"这一半。
+    用 local_git_repo fixture 起一个本地裸仓库当 REPO_URL,不连真实
+    GitHub。"""
+
+    def test_approve_with_git_token_pushes_membership(self, client, monkeypatch, local_git_repo, tmp_path):
+        client.post("/request", data={"group_name": "data-analysts"}, headers=auth("engineer1"))
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        req_id = conn.execute("SELECT id FROM requests").fetchone()["id"]
+        conn.close()
+
+        monkeypatch.setattr(perm, "get_current_user", lambda: ("admin", ["platform-team"]))
+        resp = client.post(f"/requests/{req_id}/approve")
+        assert resp.status_code == 302
+
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        row = conn.execute("SELECT * FROM requests WHERE id=?", (req_id,)).fetchone()
+        conn.close()
+        assert row["status"] == "applied"
+
+        content = _read_csv_from_bare(local_git_repo, tmp_path, "platform/iam/memberships.csv", "check1")
+        assert "engineer1,data-analysts" in content
+        assert "engineer2,viewers" in content  # 种子数据没被覆盖掉,是追加
+
+    def test_approve_dedupes_when_line_already_present(self, client, monkeypatch, local_git_repo, tmp_path):
+        """seed 数据里已经有 engineer2,viewers 这一行,批准同样的申请不该
+        重复追加。"""
+        client.post("/request", data={"group_name": "viewers"}, headers=auth("engineer2"))
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        req_id = conn.execute("SELECT id FROM requests WHERE username='engineer2'").fetchone()["id"]
+        conn.close()
+
+        monkeypatch.setattr(perm, "get_current_user", lambda: ("admin", ["platform-team"]))
+        resp = client.post(f"/requests/{req_id}/approve")
+        assert resp.status_code == 302
+
+        content = _read_csv_from_bare(local_git_repo, tmp_path, "platform/iam/memberships.csv", "check2")
+        assert content.count("engineer2,viewers") == 1
+
+    def test_table_access_full_chain_approve_pushes_grant(self, client, monkeypatch, local_git_repo, tmp_path):
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "owner-x", monkeypatch, client)
+        request_id = row["id"]
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        steps = {
+            r["approver_username"]: r
+            for r in conn.execute("SELECT * FROM approval_steps WHERE request_id=?", (request_id,)).fetchall()
+        }
+        conn.close()
+
+        resp = client.post(f"/table-access/step/{steps['manager1']['id']}/approve", headers=auth("manager1"))
+        assert resp.status_code == 302
+        resp = client.post(f"/table-access/step/{steps['owner-x']['id']}/approve", headers=auth("owner-x"))
+        assert resp.status_code == 302
+
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        final = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (request_id,)).fetchone()
+        conn.close()
+        assert final["status"] == "approved"
+
+        content = _read_csv_from_bare(local_git_repo, tmp_path, "platform/iam/table-access-grants.csv", "check3")
+        assert "engineer1,iceberg.demo.orders,1," in content
+
+    def test_reclaim_expired_removes_expired_row_and_pushes(self, client, monkeypatch, local_git_repo, tmp_path):
+        # 直接往种子仓库的 grants.csv 塞一条已过期 + 一条未过期,验证只有
+        # 过期的那条被摘掉。
+        checkout = tmp_path / "seed_grant"
+        subprocess.run(["git", "clone", str(local_git_repo), str(checkout)], check=True, capture_output=True)
+        grants_path = checkout / "platform" / "iam" / "table-access-grants.csv"
+        grants_path.write_text(
+            "username,table_fqn,security_level,granted_at,expires_at\n"
+            "old_user,iceberg.demo.old_table,1,2020-01-01T00:00:00+00:00,2020-02-01T00:00:00+00:00\n"
+            "fresh_user,iceberg.demo.fresh_table,1,2020-01-01T00:00:00+00:00,2099-01-01T00:00:00+00:00\n"
+        )
+        subprocess.run(["git", "-C", str(checkout), "config", "user.email", "seed@test.local"], check=True)
+        subprocess.run(["git", "-C", str(checkout), "config", "user.name", "seed"], check=True)
+        subprocess.run(["git", "-C", str(checkout), "commit", "-am", "add expired grant"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(checkout), "push"], check=True, capture_output=True)
+
+        monkeypatch.setattr(perm, "INTERNAL_TOKEN", "internal-secret")
+        monkeypatch.setattr(perm, "notify_wecom", lambda msg: None)  # 不真的调外部 webhook
+        resp = client.post("/internal/reclaim-expired", headers={"X-Internal-Token": "internal-secret"})
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["reclaimed"] == 1
+        assert body["tables"] == ["iceberg.demo.old_table"]
+
+        content = _read_csv_from_bare(local_git_repo, tmp_path, "platform/iam/table-access-grants.csv", "check4")
+        assert "old_user" not in content
+        assert "fresh_user" in content
+
+    def test_transfer_moves_membership_rows_in_git(self, client, monkeypatch, local_git_repo, tmp_path):
+        monkeypatch.setattr(perm, "get_current_user", lambda: ("admin", ["platform-team"]))
+        monkeypatch.setattr(perm, "notify_wecom", lambda msg: None)
+        # seed 数据里 engineer2 已经在 viewers,transfer 到一个新用户身上。
+        resp = client.post("/admin/transfer", data={"from_user": "engineer2", "to_user": "engineer5"})
+        assert resp.status_code == 200
+        assert b"engineer5" in resp.data
+
+        content = _read_csv_from_bare(local_git_repo, tmp_path, "platform/iam/memberships.csv", "check5")
+        assert "engineer5,viewers" in content
+
+    def test_transfer_skips_git_write_when_target_already_has_group(self, client, monkeypatch, local_git_repo, tmp_path):
+        """to_user 已经拥有 from_user 的全部组,不用改 memberships.csv,
+        不该产生新的 commit(验证"不需要写就不写"这条,不是泛泛地测
+        happy path)。"""
+        # 先给种子仓库加一行 engineer6,viewers,让它和 engineer2 的组完全
+        # 重叠,再测 transfer 不应该往 git 里多写一次。
+        checkout = tmp_path / "seed_transfer"
+        subprocess.run(["git", "clone", str(local_git_repo), str(checkout)], check=True, capture_output=True)
+        memberships = checkout / "platform" / "iam" / "memberships.csv"
+        memberships.write_text(memberships.read_text() + "engineer6,viewers\n")
+        subprocess.run(["git", "-C", str(checkout), "config", "user.email", "seed@test.local"], check=True)
+        subprocess.run(["git", "-C", str(checkout), "config", "user.name", "seed"], check=True)
+        subprocess.run(["git", "-C", str(checkout), "commit", "-am", "seed engineer6"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(checkout), "push"], check=True, capture_output=True)
+        before_rev = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        monkeypatch.setattr(perm, "get_current_user", lambda: ("admin", ["platform-team"]))
+        monkeypatch.setattr(perm, "notify_wecom", lambda msg: None)
+        resp = client.post("/admin/transfer", data={"from_user": "engineer2", "to_user": "engineer6"})
+        assert resp.status_code == 200
+        assert "已经拥有".encode() in resp.data
+
+        after_checkout = tmp_path / "after_transfer"
+        subprocess.run(["git", "clone", str(local_git_repo), str(after_checkout)], check=True, capture_output=True)
+        after_rev = subprocess.run(
+            ["git", "-C", str(after_checkout), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+        assert after_rev == before_rev
+
+
+class TestExternalOaWebhookDispatch:
+    """补 docs/BACKLOG.md 2.4 里另一半没测的路径:dispatch_step() 在
+    APPROVAL_BACKEND=webhook 时真的 POST 到 EXTERNAL_OA_WEBHOOK_URL——之前
+    只测过 local 模式(留在 pending、发企微通知)。用 monkeypatch 替换
+    perm.requests.post,不真的发网络请求。"""
+
+    def test_webhook_success_marks_pending_external(self, client, monkeypatch):
+        monkeypatch.setattr(perm, "APPROVAL_BACKEND", "webhook")
+        monkeypatch.setattr(perm, "EXTERNAL_OA_WEBHOOK_URL", "https://oa.example.com/hook")
+        monkeypatch.setattr(perm, "notify_wecom", lambda msg: None)
+
+        calls = []
+
+        def fake_post(url, json=None, timeout=None):
+            calls.append((url, json))
+            class Resp:
+                status_code = 200
+            return Resp()
+
+        monkeypatch.setattr(perm.requests, "post", fake_post)
+
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "owner-x", monkeypatch, client)
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        step = conn.execute(
+            "SELECT * FROM approval_steps WHERE request_id=? AND approver_username='manager1'", (row["id"],)
+        ).fetchone()
+        conn.close()
+
+        # L1 一次激活 manager1 + owner-x 两个人,两条都各自 POST 一次。
+        assert step["status"] == "pending_external"
+        assert len(calls) == 2
+        manager_call = next(c for c in calls if c[1]["approver_username"] == "manager1")
+        assert manager_call[0] == "https://oa.example.com/hook"
+
+    def test_webhook_failure_falls_back_to_local_pending(self, client, monkeypatch):
+        monkeypatch.setattr(perm, "APPROVAL_BACKEND", "webhook")
+        monkeypatch.setattr(perm, "EXTERNAL_OA_WEBHOOK_URL", "https://oa.example.com/hook")
+        wecom_calls = []
+        monkeypatch.setattr(perm, "notify_wecom", lambda msg: wecom_calls.append(msg))
+
+        def failing_post(url, json=None, timeout=None):
+            raise perm.requests.RequestException("connection refused")
+
+        monkeypatch.setattr(perm.requests, "post", failing_post)
+
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "owner-x", monkeypatch, client)
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        step = conn.execute(
+            "SELECT * FROM approval_steps WHERE request_id=? AND approver_username='manager1'", (row["id"],)
+        ).fetchone()
+        conn.close()
+
+        # POST 失败,不该把这一步吞掉变成没人能处理——退化回本地 pending,
+        # 照样发企微通知(L1 两个人各一条)。
+        assert step["status"] == "pending"
+        assert len(wecom_calls) == 2
