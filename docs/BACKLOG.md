@@ -73,34 +73,54 @@ Workflow→能查到→删除清理。详见 `docs/CURRENT_WORK.md` 归档记录
 拼图补上。**还没接进真实数据管道**(没有真实 Producer/Consumer 应用,
 目前零真实消费者,这条不算数据管道本身完成,只是组件可用性)。
 
-### 1.7 算法链路端到端重新验证
+### 1.7 算法链路端到端重新验证 —— 全部完成(2026-08-20)
 
 JupyterHub/MLflow/Spark Operator/Feast/Argo Workflows 都已部署验证。
-**2026-08-19 晚些时候:"Argo Workflows 编排训练"本身已经真正实现并
-端到端验证**(不只是组件部署,是真的写了 WorkflowTemplate、提交跑通、
-Model Registry 查询确认 READY——见 `docs/CURRENT_WORK.md`、
-`apps/argo-workflows-training-image/`)。
+"Argo Workflows 编排训练"(2026-08-19)、"notebook 里触发训练"的 SDK
+机制 `run_workflow_template()`(2026-08-20,云端 debug pod 验证过,见
+BACKLOG 2.6)都已经完成并验证。
 
-**2026-08-20:"notebook 里触发训练"的 SDK 侧机制已经写好,还没端到端
-验证**——`platform_sdk` 新增 `run_workflow_template(template_name,
-parameters=None, namespace=None)`(见 `platform-sdk/platform_sdk/
-submit.py`),用 `workflowTemplateRef` 建一个瘦 Workflow 对象触发已经
-部署好的 WorkflowTemplate,不是重新走 `submit_job()` 那套脚本上传流程。
-`.claude/skills/submit-job/SKILL.md` 和 `platform-sdk/README.md` 都
-同步更新了用法。**这次只做了 mock 单元测试**(验证提交的 payload 形状
-对不对,不需要真实集群),**没有在真实 JupyterHub notebook pod 里跑过
-一次**——下次开云主机时应该优先做这个验证:进一个 notebook pod,
-`from platform_sdk import run_workflow_template`,真的触发一次
-`train-demo-model`,确认能拿到 workflow 名字、`job_status()` 能查到
-状态。如果又撞上 `submit_job()` 那个已知的 NetworkPolicy 问题(见下面
-2.6),这个函数应该也会中招,因为走的是同一条"notebook pod 连 K8s API
-server"的路径——不要假设这个新函数天然绕开了那个问题。
+**最后一段空白"notebook → Feast 特征 → Argo Workflows 训练 → MLflow
+记录"这条完整链路也已经真实跑通**:新增 `train-from-feast-features`
+这个独立 WorkflowTemplate(不是给 `train-demo-model` 加第二个
+entrypoint,`run_workflow_template()` 按名字触发不支持覆盖
+entrypoint),用 `FeatureStore.get_historical_features()` 从
+`customer_order_features` 取 point-in-time 正确的历史特征(不是像
+`train-demo-model` 那样用合成数据),训练一个玩具分类器,注册进 MLflow
+Model Registry。
 
-"notebook → Feast 特征 → Argo Workflows 训练 → MLflow 记录"这条完整
-链路串成一次真实调用,仍然是真实空白——现在每一段是分别验证的,不是
-连起来的一条链路,也没有多步骤 DAG(特征工程→训练→评估,现在
-WorkflowTemplate 只有训练一步,且不接受任何 parameters,`run_workflow_
-template()` 传 parameters 目前对这个模板是无效的,模板本身还没参数化)。
+**云端真实触发,过程中挖出并修好 4 个真实 bug**(如实记录,不是一次
+就顺利跑通):
+1. `feast[spark]==0.65.0` 的 extras 语法要求 `pyspark>=4.0.0`,和这个
+   项目整条 Spark/Iceberg 链路锁定的 3.5 系列冲突——改成不用 extras
+   语法,分别装 `feast`(不带 `[spark]`)+ `pyspark==3.5.9`。
+2. `FeatureStore()` 初始化会 eagerly import `online_store` 配置对应的
+   模块(即使这个脚本压根不碰在线存储),报 `FeastModuleImportError:
+   No module named 'redis'`——补上 `redis` 包。
+3. **最花时间的一个**:`spark.jars.packages` 触发的 Ivy 依赖解析直连
+   `repo1.maven.org`,cloud-full 云主机上会真的卡死不动(几百 MB 的
+   `aws-java-sdk-bundle` 下载进度停在 0 字节超过 8 分钟),加
+   `spark.jars.repositories` 指向阿里云镜像也没用(Ivy 默认解析器
+   优先级不会因为多了候选源就绕开卡住的那个)——改成在镜像构建期
+   (GitHub Actions,境外 runner)把三个 jar 下载好打进镜像,训练脚本
+   自己建 SparkSession 指向本地 jar 路径(利用 `SparkSession.builder.
+   getOrCreate()` "已有活跃 session 就复用、忽略新 config" 这条特性,
+   让 feast 内部拿到的是这个已经配好本地 jar 的 session),运行时完全
+   不联网。
+4. Hive Metastore 的 NetworkPolicy(`allow-consumers-to-hive-
+   metastore`)只列了 trino/spark-operator/airflow/feast 四个命名
+   空间,没人想到 `argo-workflows` 读特征时也要连它拿 Iceberg 表元
+   数据——和这个项目反复踩过的"新命名空间消费共享服务,NetworkPolicy
+   忘记加白名单"是同一类坑,第 N 次复现,补上。
+5. `mlflow.sklearn.log_model()` 报 `ModuleNotFoundError: No module
+   named 'skops'`——和 `train_demo_model.py` 早就踩过、也修过的同一个
+   坑(MLflow 3.x 默认序列化格式这个精简镜像没装),补
+   `serialization_format="pickle"`。
+
+**最终验证**:`train-from-feast-verify-7q7pv` 这个 Workflow
+**Succeeded**,日志显示"从 Feast 取了 10 行历史特征,训练完成…已注册
+进 MLflow Model Registry(demo-region-classifier)",`MlflowClient.
+get_model_version()` 查询确认 `status: READY`。
 
 ---
 
