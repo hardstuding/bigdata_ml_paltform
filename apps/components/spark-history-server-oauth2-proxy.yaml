@@ -1,0 +1,64 @@
+# Spark History Server 前面挡一层 oauth2-proxy,和 MLflow(ADR-019)是同一个
+# 模式、同一个官方 chart 来源,配置结构基本照抄那份,只换了上游地址和域名。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: spark-history-server-oauth2-proxy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://oauth2-proxy.github.io/manifests
+    chart: oauth2-proxy
+    targetRevision: 10.7.0
+    helm:
+      valuesObject:
+        config:
+          existingSecret: oauth2-proxy-secret
+          configFile: |
+            provider = "oidc"
+            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            skip_oidc_discovery = true
+            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
+            redirect_url = "http://spark-history.local-lite.test:32460/oauth2/callback"
+            # 2026-08-19:和 mlflow-oauth2-proxy 撞到的是同一个 bug——没显式配
+            # scope 时二进制默认值带 groups,这个 Keycloak client 没配 groups
+            # scope,Keycloak 直接 invalid_scope 拒绝。History Server 本身也没有
+            # 按组差异化权限的设计(和 MLflow 同一类"只挡登录,不做细粒度授权"),
+            # 显式声明去掉 groups。
+            scope = "openid email profile"
+            upstreams = [ "http://spark-history-server.spark-operator.svc.cluster.local:18080/" ]
+            email_domains = [ "*" ]
+            # 和 mlflow-oauth2-proxy 同样的原因:local-lite 没有 TLS,浏览器
+            # 和 ingress-nginx 之间是明文 HTTP,不关掉这个 cookie 存不住。
+            cookie_secure = false
+            skip_provider_button = true
+            # 按 Keycloak group 收紧,和 mlflow-oauth2-proxy 同一次改动
+            # (见 ADR-028、platform/iam/)。
+            oidc_groups_claim = "groups"
+            allowed_groups = [ "platform-team", "algorithm-team" ]
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - spark-history.local-lite.test
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: spark-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -14,10 +14,11 @@
 - ❌ **缺失**——今天做不到
 
 > 状态基准:2026-08-19,以 cloud-full 环境为准。
-> "没部署"指组件定义写好了但在 `environments/cloud-full/pending-definitions/`,
-> `apps-root` 不会同步它——**注意这不是资源不够**(cloud-full 是
-> 16 vCPU / 64 GiB),是"哪些组件启用"至今仍靠人工在目录之间 `git mv`,
-> 见 ADR-057"环境抽象只做了一半"。
+> "没部署"指组件定义写好了但不在 `environments/cloud-full/config.yaml`
+> 的 `enabled_components` 列表里,`apps-root` 不会同步它——**注意这不是
+> 资源不够**(cloud-full 是 16 vCPU / 64 GiB)。2026-08-20 起"哪些组件
+> 启用"已经改成这份声明式列表(ADR-057 第三批,`docs/BACKLOG.md` 1.1
+> 已完成),不再靠人工在目录之间 `git mv`。
 
 ---
 

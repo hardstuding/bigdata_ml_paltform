@@ -7,3 +7,38 @@ domain_suffix: local-lite.test
 http_port_suffix: ""
 https_port_suffix: ""
 external_scheme: http
+
+# 2026-08-20 新增(ADR-057 第三批):**这份清单是按 docs/architecture.md
+# 组件表里"local-lite(设计归属)"这一列的 ✅/⚠️ 推出来的,不是对着这台
+# 机器当前真实状态核对过的**——写这份清单的时候 colima 没有在跑,没办法
+# 现场确认。这正是这次要解决的问题本身:以前"这台机器现在到底装了什么"
+# 只能翻 `ls apps/definitions/`,现在至少有一份明确写下来的意图,但**下次
+# colima 启动时,应该先 `python3 scripts/render-environment-config.py
+# local-lite --check` 看有没有和这台机器实际用惯的组件对不上,对不上就
+# 更新这份清单,不要假设这份清单天然是对的**。
+#
+# 没收进来的组件里,Feast 尤其要注意:docs/architecture.md 表格标它
+# local-lite 是 ✅,但它的离线特征存储要靠 Spark 读 Iceberg
+# (`feast_materialize.py` 那条链路),Spark Operator 在同一张表里标的是
+# local-lite "—"(cloud-full 才有)——这是文档本身互相矛盾的地方,没有
+# 强行猜一个"应该"的答案,这次先不收进 local-lite,等真正需要在本机验证
+# Feast 时再决定要不要连带把 Spark Operator 也一起启用,不在这里悄悄
+# 绕过依赖关系。
+enabled_components:
+  - hive-metastore.yaml
+  - iam-sync.yaml
+  - keycloak-db-init.yaml
+  - minio.yaml
+  - network-policies.yaml
+  - opa.yaml
+  - permission-request-app-oauth2-proxy.yaml
+  - permission-request-app.yaml
+  - platform-iam-rbac.yaml
+  - platform-portal-oauth2-proxy.yaml
+  - platform-portal.yaml
+  - postgres-backup.yaml
+  - postgres.yaml
+  - cloudnative-pg-operator.yaml
+  - resource-quotas.yaml
+  - table-registration-app-oauth2-proxy.yaml
+  - table-registration-app.yaml

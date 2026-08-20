@@ -51,13 +51,13 @@
 ## 组件清单
 
 **local-lite 这一列是"这个 Phase 设计上归哪个环境"的静态标注,不是这台机器
-现在实际跑着什么**——按需 park/unpark 是这台机器的常态(资源有限,验证完
-一个组件经常发现还要接着测下一个,就没收回去),真实的"现在到底常驻哪些
-组件"以 `ls apps/definitions/`(常驻)和 `ls environments/cloud-full/
-pending-definitions/`(park 着)的当前输出为准,不要相信这张表或其他文档
-里任何写死的组件名单——2026-08-14 文档审计就发现过 Spark Operator/Airflow
-在这张表标着"cloud-full 才有",但实际已经在 `apps/definitions/` 常驻好几天,
-文档没跟上。
+现在实际跑着什么**——按需启用/关闭是这台机器的常态(资源有限,验证完
+一个组件经常发现还要接着测下一个,就没关掉),真实的"现在到底启用哪些
+组件"以 `environments/<env>/config.yaml` 里的 `enabled_components`
+列表(2026-08-20 起,ADR-057 第三批)和 `ls apps/definitions/` 的当前
+输出为准,不要相信这张表或其他文档里任何写死的组件名单——2026-08-14
+文档审计就发现过 Spark Operator/Airflow 在这张表标着"cloud-full 才有",
+但实际已经在 `apps/definitions/` 常驻好几天,文档没跟上。
 
 | 层 | 组件 | 作用 | 资源权重 | local-lite(设计归属) | cloud-full | prod | 阶段 |
 |---|---|---|---|---|---|---|---|

@@ -1,0 +1,34 @@
+# Strimzi(CNCF 项目,官方镜像,不是 Bitnami 那条线,见 ADR-008)。装在 kafka
+# 命名空间,默认只监听自己所在命名空间(watchAnyNamespace: false),Kafka
+# 集群本身(CR)也建在这个命名空间里,见 apps/kafka/manifests/。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kafka-operator
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://strimzi.io/charts/
+    chart: strimzi-kafka-operator
+    targetRevision: 1.1.0
+    helm:
+      valuesObject:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kafka
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

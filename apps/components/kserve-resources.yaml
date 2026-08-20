@@ -1,0 +1,51 @@
+# KServe 主体(controller + webhook)。deploymentMode: Standard(官方术语也叫
+# RawDeployment)——不用默认的 Knative Serverless 模式,避免再装一整套
+# Knative Serving(+ 通常还要 Istio)只为了拿"scale-to-zero"这一个特性,这台
+# 机器的资源画像用不上,标准模式直接是普通的 Deployment/Service/HPA,和
+# 项目里其他组件是同一套心智模型,不用另外学一套 Knative 的概念。
+#
+# ingressGateway.className 指到我们已有的 ingress-nginx(chart 默认是
+# istio,这台机器没有装 Istio)。
+#
+# cert-manager 依赖:chart 自己带 Certificate/Issuer 资源给 webhook 用 TLS,
+# cert-manager 我们已经在跑(见 docs/decisions/016/017),不需要额外装。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kserve-resources
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: oci://ghcr.io/kserve/charts/kserve-resources
+    chart: kserve-resources
+    targetRevision: v0.19.0
+    helm:
+      valuesObject:
+        kserve:
+          controller:
+            deploymentMode: Standard
+            gateway:
+              ingressGateway:
+                className: nginx
+            # chart 默认 Always——2026-08-16 云端部署时发现:即使这个镜像
+            # 已经通过国内镜像站(daocloud)拉到本地、tag 完全匹配,Always
+            # 每次调度还是会去连 registry-1.docker.io 校验,超时后直接
+            # ImagePullBackOff,完全无视本地已有的缓存。改成
+            # IfNotPresent——本地有就用本地的,不需要每次都联网校验。
+            # 注意:image/tag/imagePullPolicy 是 controller 下的平级字段
+            # (不是嵌在 image: 底下),第一版改错嵌套层级导致
+            # `couldn't parse image name "map[...]:v0.19.0"` 报错,改回
+            # 平级后才生效。
+            imagePullPolicy: IfNotPresent
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kserve
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,27 @@
+# NetworkPolicy,见 docs/decisions/035-network-policy.md。试点阶段
+# (2026-08-12)只覆盖 permission-request-app 这一个 namespace;2026-08-13
+# 推广到 keycloak/data(Postgres)/minio 这三个核心命名空间——这个
+# Application 的 `destination.namespace` 字段本身只是个默认值,实际每份
+# manifest 都显式写了自己的 `metadata.namespace`,不受这个字段影响。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: network-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/network-policies/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: permission-request-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

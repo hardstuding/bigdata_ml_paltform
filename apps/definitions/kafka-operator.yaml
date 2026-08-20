@@ -1,3 +1,10 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/kafka-operator.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/kafka-operator.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
 # Strimzi(CNCF 项目,官方镜像,不是 Bitnami 那条线,见 ADR-008)。装在 kafka
 # 命名空间,默认只监听自己所在命名空间(watchAnyNamespace: false),Kafka
 # 集群本身(CR)也建在这个命名空间里,见 apps/kafka/manifests/。

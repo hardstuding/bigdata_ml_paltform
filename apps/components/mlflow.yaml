@@ -1,0 +1,107 @@
+# 官方 MLflow 项目自己发布的 chart(ghcr.io/mlflow/charts/mlflow,OCI 格式),
+# 不是社区维护的。backendStoreUriFrom 直接支持引用 Secret,不用把连接串明文
+#写进 values——这是这次几个 chart 里设计最干净的一个。
+#
+# artifact 存储用 MinIO(S3 兼容),defaultArtifactRoot 模式下客户端(以后的
+# JupyterHub/训练任务)直接写 S3,不经过 MLflow server 代理,所以要给
+# MLFLOW_S3_ENDPOINT_URL 指向我们的 MinIO,不是真实 AWS S3。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mlflow
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: oci://ghcr.io/mlflow/charts/mlflow
+    chart: mlflow
+    targetRevision: 0.1.0
+    helm:
+      valuesObject:
+        server:
+          value_options:
+            host: "0.0.0.0"
+            port: 5000
+            # 默认 4 个 gunicorn worker 在 local-lite 的内存画像下跑不住
+            # (OOMKilled),降到 2 还是不够(chart 默认拉的是 "-full" 标签
+            # 镜像,自带一堆 ML 库,光 import 阶段的基础内存需求就不小,
+            # 5 秒内就被 OOMKilled,不是慢慢涨上去的),local-lite 降到 1。
+            workers: 1
+            # MLflow 3.x 加了个安全中间件,默认只认 localhost 发起的请求,
+            # k8s 的健康检查是从 pod IP 直接访问,会被这层拒绝
+            # (readiness probe 报 connection refused,其实进程是正常起来
+            # 的,不是真的连不上)。开放所有 host 访问,local-lite 场景下
+            # 这层 pod 本来就只能在集群内部访问,不算暴露风险。
+            allowed_hosts: "*"
+        # 【可插拔基础设施,见 ADR-030】backendStoreUriFrom 读的是
+        # mlflow-db-secret 这个 Secret 的 uri 字段(scripts/00-generate-
+        # secrets.sh 拼的完整 DSN,不是这里的独立字段)——接外部 Postgres
+        # 改这个 Secret 的 uri 值就行,不用改这份 Application yaml 本身。
+        # 和 Keycloak 那个参考例子(platform/apps/keycloak.yaml)不一样:
+        # keycloakx chart 原生把 host/port/database 拆成独立字段,MLflow
+        # 官方 chart 只接受一整个 URI,做不到同样细粒度。配套的
+        # apps/mlflow/manifests/create-db-job.yaml 接外部 Postgres 时应该
+        # 跳过(数据库该由 DBA 按平时流程建),同样的 uri 也要同步改成外部
+        # 实例的连接串。
+        mlflow:
+          backendStoreUriFrom:
+            secretKeyRef:
+              name: mlflow-db-secret
+              key: uri
+          defaultArtifactRoot: "s3://mlflow/"
+        # 【可插拔基础设施,见 ADR-030】接外部 S3(不是 MinIO)只用改这三行:
+        # MLFLOW_S3_ENDPOINT_URL 指向真实 S3(或删掉这个变量,MLflow 默认
+        # 就是连 AWS S3),AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY 换成外部
+        # 存储的凭据(不一定非要走 minio-root 这个 Secret)。
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootUser
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-root
+                key: rootPassword
+          - name: MLFLOW_S3_ENDPOINT_URL
+            value: "http://minio.minio.svc.cluster.local:9000"
+        # 2026-08-19 真实故障:1536Mi 限制下,新 pod 启动约 36 秒内内存占用
+        # 就爬到 1535Mi(kubectl top 实测),几乎必然触发 OOMKill——容器
+        # exitCode 137 但 reason 报的是 "Error" 不是 "OOMKilled"(kubelet
+        # 这个上报本身有已知的不准确,不能只看 reason 字段排除 OOM 可能性,
+        # 要对照 kubectl top 的实际内存占用曲线)。调大到 2560Mi,请求同步
+        # 调整,给 FastAPI 应用本身 + 启动时注册的后台定时任务(online_
+        # scoring_scheduler/trace_archival_scheduler)留够余量。
+        resources:
+          requests:
+            cpu: 200m
+            memory: 1024Mi
+          limits:
+            memory: 2560Mi
+        # 2026-08-19 真实故障:mlflow 命名空间的 ResourceQuota(见
+        # platform/resource-quotas/manifests/quotas.yaml)限死
+        # limits.memory 3Gi。这个 Deployment 默认走 RollingUpdate,滚动
+        # 更新期间需要同时给旧 pod(旧的 resources 值)和新 pod 一起留出
+        # quota 空间,只要新旧两份限制加起来超过 3Gi(哪怕新值本身完全
+        # 在 quota 之内),新 ReplicaSet 就会一直卡在 "0/1 replicas
+        # created"、报 "exceeded quota"——表面看着像 ArgoCD/kubectl 卡住
+        # 了没同步,其实是 Deployment controller 自己在等一个永远等不到
+        # 的调度窗口,不会自愈,得手动把旧 ReplicaSet scale 到 0 腾出
+        # 配额才能推进。这次改内存限制(1536Mi→2560Mi)真实踩过一次,
+        # 卡了超过一小时没人发现。单副本、非 HA 关键的组件,改成
+        # Recreate 策略(先杀旧 pod 再建新的,不需要新旧同时占配额)
+        # 更合适,接受几秒到几十秒的短暂不可用换掉这整类问题。
+        deploymentStrategy:
+          type: Recreate
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mlflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

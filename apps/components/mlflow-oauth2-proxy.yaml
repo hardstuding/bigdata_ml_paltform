@@ -1,0 +1,94 @@
+# MLflow 开源版没有原生 OIDC/SSO 支持(只有本地用户名密码的 basic-auth app,
+# 不接 Keycloak;有个社区插件 mlflow-oidc-auth 能做到,但要求自己重新 build
+# 镜像装这个 pip 包,和这个项目"尽量用官方镜像、不自己维护镜像构建"的取舍
+# 冲突,见 docs/decisions/ 里 ADR-008 反对 Bitnami 的同一条理由——多维护一条
+# 镜像构建流水线的成本,不比省下来的东西划算)。
+#
+# 改用 oauth2-proxy 挡在前面(官方 quay.io/oauth2-proxy 项目,不是我们自己的
+# hack):浏览器先经 oauth2-proxy 走完 Keycloak 登录,登录成功后才把请求代理
+# 给 MLflow 本身,MLflow 完全不需要知道 OIDC 这回事。这是给"应用本身没有原生
+# SSO"这类组件的通用解法,不只是 MLflow 专属,以后遇到类似情况可以复用同一个
+# 模式。
+#
+# 官方 chart 默认用"legacy config"(config.configFile 是一段 oauth2-proxy 自己
+# 的 ini 格式配置),没用更新的 alphaConfig(那个格式更啰嗦,legacy 格式够用)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mlflow-oauth2-proxy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://oauth2-proxy.github.io/manifests
+    chart: oauth2-proxy
+    targetRevision: 10.7.0
+    helm:
+      valuesObject:
+        config:
+          existingSecret: oauth2-proxy-secret
+          configFile: |
+            provider = "oidc"
+            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            skip_oidc_discovery = true
+            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
+            redirect_url = "http://mlflow.local-lite.test:32460/oauth2/callback"
+            # 2026-08-19 真实故障:没显式配 scope 时,oauth2-proxy 二进制自己的
+            # 默认值是 "openid email profile groups"。ADR-019 明确说过 MLflow
+            # 开源版不做按组差异化的权限控制(所有登录过的人权限完全一样),这个
+            # mlflow Keycloak client 也确实没配 groups 这个 client scope——请求一个
+            # client 不认识的 scope,Keycloak 直接在 /auth 这一步就报
+            # invalid_scope 拒绝,登录连 Keycloak 登录页都进不去。这个 bug 从这个
+            # 组件第一次写出来就存在,一直没被抓到是因为 MLflow 长期 park、没有真的
+            # 走过一次登录。显式声明 scope,去掉不需要的 groups。
+            scope = "openid email profile"
+            # 2026-08-19 真实故障(502,curl 端到端测试才发现):
+            # `kubectl get svc -n mlflow` 显示真实 Service 名字是
+            # mlflow-mlflow(chart 用 release 名前缀,不是裸 mlflow),
+            # 这里写的是不存在的名字,SSO 登录本身完全成功之后,反向代理
+            # 到后端这一步直接 DNS 解析失败。同样是长期 park、从没真的
+            # 走过一次登录才没被抓到的 bug。
+            upstreams = [ "http://mlflow-mlflow.mlflow.svc.cluster.local:5000/" ]
+            email_domains = [ "*" ]
+            # local-lite 没有 TLS(见 ADR-016),浏览器和 ingress-nginx 之间是
+            # 明文 HTTP,cookie_secure 默认要求 HTTPS 才会真正下发 cookie,
+            # 不关掉的话登录会一直"成功"又立刻被弹回登录页(cookie 没存住)。
+            cookie_secure = false
+            # 不加这行,未登录访问会先停在 oauth2-proxy 自己的"Sign In"
+            # 中间页(要点一下按钮才跳 Keycloak),和其他组件(Trino/Superset/
+            # OpenMetadata)点开就直接跳转的体验不一致。只有一个 provider,
+            # 跳过这个中间页更合理。
+            skip_provider_button = true
+            # 2026-08-11 起按 Keycloak group 收紧(和 ArgoCD/Grafana/
+            # JupyterHub 是同一次企业级权限收拢,见 ADR-028、platform/iam/)。
+            # oidc_groups_claim 默认就是 "groups",这里写出来是让配置自解释,
+            # 不是必须覆盖默认值。--allowed-group 是 oauth2-proxy 官方原生
+            # 支持的选项(直接跑过官方镜像的 --help 确认过,不是猜的),不需要
+            # 额外的插件或改造。
+            oidc_groups_claim = "groups"
+            allowed_groups = [ "platform-team", "algorithm-team" ]
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - mlflow.local-lite.test
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mlflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

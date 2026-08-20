@@ -1,3 +1,10 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/mlflow-oauth2-proxy.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/mlflow-oauth2-proxy.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
 # MLflow 开源版没有原生 OIDC/SSO 支持(只有本地用户名密码的 basic-auth app,
 # 不接 Keycloak;有个社区插件 mlflow-oidc-auth 能做到,但要求自己重新 build
 # 镜像装这个 pip 包,和这个项目"尽量用官方镜像、不自己维护镜像构建"的取舍

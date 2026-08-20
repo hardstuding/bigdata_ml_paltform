@@ -1,0 +1,56 @@
+# CloudNativePG(CNCF 沙箱项目,EDB 主导)。评估用,给 apps/postgres/ 那个
+# 单实例原生 manifest 找一条 HA 升级路径——见 docs/decisions/033-postgres-
+# backup.md 的"后果"部分提到过备份是有了,但真正的高可用(自动故障转移/
+# 多副本)还是空白;用户确认过"换组件也是可以换的,问题不大"。
+#
+# 这一步只装 operator 本身(轻量,不影响现有共享 Postgres),不代表已经
+# 决定切换——真正的迁移(建新 Cluster、导数据、切各组件连接串、下线旧
+# 实例)是更大的动作,牵一发动全身(几乎所有组件都连着这个共享实例),
+# 需要用户在场安排一个可以接受短暂中断的窗口,不适合无人监督执行。评估
+# 记录见 docs/decisions/038-cloudnativepg-evaluation.md。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudnative-pg-operator
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    targetRevision: 0.29.0
+    helm:
+      valuesObject:
+        # CRD 走一次性脚本装,不靠 Helm/ArgoCD——见
+        # scripts/16-install-cloudnative-pg-crds.sh 顶部的详细说明(和
+        # KServe 的 ClusterServingRuntime 是同一类"GitOps 这条路走不通,
+        # 退回一次性脚本"的情况)。
+        crds:
+          create: false
+        resources:
+          requests:
+            cpu: 50m
+            memory: 100Mi
+          limits:
+            memory: 256Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # 先按 KServe 的经验加了 ServerSideApply=true 想解决 CRD 太大的问题
+      # (ADR-027 那个坑),实测这次不管用——加了这个选项之后
+      # clusters/poolers 这两个 CRD 还是报一模一样的
+      # "metadata.annotations: Too long: may not be more than 262144
+      # bytes"。没有深挖是 ArgoCD 处理 Helm chart `crds/` 目录这条路径本身
+      # 不完全遵守这个 sync option,还是 CNPG 这两个 CRD 就是比 server-side
+      # apply 能处理的上限还大——不重要,反正这条路走不通,退回一次性脚本
+      # (见 scripts/16-install-cloudnative-pg-crds.sh 顶部说明),这个选项
+      # 留着不影响,但不能只靠它。
+      - ServerSideApply=true

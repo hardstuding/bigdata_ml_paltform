@@ -1,0 +1,52 @@
+# OpenMetadata 的搜索后端(不是 Elasticsearch,官方 chart 默认已经切到
+# OpenSearch)。官方 opensearch-project chart,单节点模式给 local-lite。
+#
+# sysctlInit.enabled: OpenSearch 要求宿主机内核参数 vm.max_map_count>=262144
+# (mmap 数量限制,JVM 索引引擎要用),用 chart 自带的特权 initContainer 设置,
+# 不需要我们手动登进 colima 虚拟机改内核参数。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opensearch
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://opensearch-project.github.io/helm-charts/
+    chart: opensearch
+    targetRevision: 3.8.0
+    helm:
+      valuesObject:
+        singleNode: true
+        replicas: 1
+        sysctlInit:
+          enabled: true
+        # OpenSearch 2.12+ 的 security 插件强制要求这个,不设直接拒绝启动。
+        # 这个密码要和 openmetadata.yaml 里 elasticsearch.auth 配的一致
+        # (都引用同一个 opensearch-admin Secret)。
+        extraEnvs:
+          - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: opensearch-admin
+                key: password
+        resources:
+          requests:
+            cpu: 300m
+            memory: 768Mi
+          limits:
+            memory: 1280Mi
+        persistence:
+          enabled: true
+          size: 5Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openmetadata
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

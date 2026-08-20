@@ -38,20 +38,22 @@ issuer 不匹配导致 CrashLoopBackOff 两天多没人发现、Keycloak realm �
 Spark History Server 缺 S3A 连接器 jar。详见 `docs/journal/2026-08.md`
 和对应 commit。
 
-### 1.1 环境抽象补上"组件选择"层 —— 现在优先级更高了,不是更低了
+### 1.1 环境抽象补上"组件选择"层 —— 已完成(2026-08-20)
 
 这次拉起 P1.2/1.3/1.4 全靠人工 `git mv` + 逐个手动排查 Keycloak
 client/Secret/scope 缺口完成,过程中暴露的好几个 bug(client 已存在但
 Secret 缺失、groups scope 从来没配过)本可以在"改配置就重新拉起"这套
 机制的约束下被更早、更结构性地测试捕获,现在只能靠"当天有没有人手动
 测登录"这种运气发现。cloud-full 是 16 vCPU / 64 GiB,不是资源不够,是
-"哪些组件在哪个环境启用"至今靠人工在 `apps/definitions/` 和
-`environments/cloud-full/pending-definitions/` 之间 `git mv`——这个
+"哪些组件在哪个环境启用"当时(2026-08-19)靠人工在 `apps/definitions/`
+和 `environments/cloud-full/pending-definitions/` 之间 `git mv`——这个
 机制是 2026-08-08 为 6GB 的 colima 本机设计的,搬到云上没有重新评估过。
 
-要做的:让"启用哪些组件"变成 `environments/<env>/config.yaml` 里的声明,
-和已有的 `scripts/render-environment-config.py` 机制衔接(不是再造一个
-新脚本),`pending-definitions/` 这个靠目录位置表达启用状态的机制退役。
+**已完成(2026-08-20,ADR-057 第三批)**:"启用哪些组件"已经变成
+`environments/<env>/config.yaml` 里的 `enabled_components` 声明式列表,
+和已有的 `scripts/render-environment-config.py` 机制衔接(没有再造一个
+新脚本),`pending-definitions/` 这个靠目录位置表达启用状态的机制已退役、
+目录已删除。
 
 同一层还缺"规格分档"(副本数/resources/持久化按环境取值),可以一起做,
 优先级低于组件选择。
@@ -258,7 +260,7 @@ NetworkPolicy 限制的环境提交,不是从 notebook 里直接调。真要修,
   manifest 注释里现在动辄二三十行。对维护者有用,但对第一次读的人是
   噪音——考虑保留结论、细节移到 ADR/journal。
 - **`environments/cloud-full/pending-definitions/`**:P1.1 做完之后这个
-  目录应该整个消失,届时一并清理。
+  目录整个消失了(2026-08-20 完成)。
 
 ---
 

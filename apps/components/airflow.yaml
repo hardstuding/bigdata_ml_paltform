@@ -1,0 +1,283 @@
+# 官方 apache-airflow chart 默认自带 postgresql(Bitnami 的,见 ADR-008)和
+# redis(CeleryExecutor 用的)子 chart,两个都关掉:数据库用我们自己已经在跑
+# 的 Postgres 实例(apps/postgres,库由 airflow-db-init 那个 Job 建好),
+# executor 用 KubernetesExecutor 就不需要 Celery/Redis 这层broker了,任务
+# 天然是 k8s 原生调度,也更符合"组件独立、不多背一层"的原则。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: airflow
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://airflow.apache.org
+    chart: airflow
+    targetRevision: 1.22.0
+    helm:
+      valuesObject:
+        executor: KubernetesExecutor
+        # 任务失败时 KubernetesExecutor 默认会很快删掉对应的 pod,排查问题时
+        # 经常等 kubectl 反应过来 pod 已经没了,连 crictl 都抓不到日志(调试
+        # 这个 DAG 时反复踩到,靠关这个开关才第一次真正抓到失败任务的日志)。
+        # 只关"失败时删除"这一半——成功的任务 pod 还是照常清理,不然这台机器
+        # 会一直堆积 pod 对象。用 env 而不是 config.kubernetes_executor.*——
+        # 试过后者,chart 的 config 合并只认预置在模板里的固定键,新加的键会
+        # 被静默丢掉(实测确认,渲染出来的 airflow.cfg 里根本没有这个键),
+        # env 是更直接、保证生效的路径。
+        env:
+          - name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
+            value: "False"
+          - name: AIRFLOW__FAB__PROXY_FIX_X_PORT
+            value: "0"
+            # 2026-08-19 真实踩坑:接 SSO 之后,OAuth 登录能正确跳到
+            # Keycloak,但生成的 redirect_uri 少了端口(应该是
+            # airflow.local-lite.test:32460,实际是不带端口的 80)——同样
+            # 场景下 Superset 是正常的,对比读了 FAB 的 ProxyFix 配置才
+            # 定位到:airflow.cfg 的 [fab] proxy_fix_x_port 默认是 1
+            # (信任 1 跳 X-Forwarded-Port),但 ingress-nginx 转发的这个
+            # header 反映的是它自己内部监听的端口(NodePort 场景下不等于
+            # 外部实际访问的 32460),ProxyFix 用这个错误值覆盖了本来从
+            # Host 头就能正确解析出的端口。Superset 没有这层 ProxyFix
+            # 端口信任,所以没踩到同一个坑。关掉这一项端口信任,让 Werkzeug
+            # 直接用 Host 头本身的端口(nginx 原样转发过来的,是对的)。
+            # 用 env 不用 config.fab.*——这份文件上面
+            # AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
+            # 那条已经踩过一次同样的坑:chart 的 `config:` 合并只认预置在
+            # 模板里的固定键,新加的键会被静默丢掉(这次实测确认:
+            # `config.fab.proxy_fix_x_port` 渲染出的 airflow.cfg 里
+            # 压根没有这一行,不报错也不生效)。
+        # 2026-08-19:接 Keycloak SSO(见下面 apiServer.apiServerConfig)要用
+        # 到 OAUTH2_CLIENT_SECRET,顶层 `env:` 这个键的 schema 只认字面量
+        # value(不接受 valueFrom,实测 `scripts/validate-charts.py` 报错
+        # 才发现),chart 单独留了 `extraEnv`(纯模板字符串,不做 schema
+        # 校验)给这类需要引用 Secret 的场景用,和 superset chart 的
+        # extraEnvRaw 是同一个用途。
+        extraEnv: |
+          - name: OAUTH2_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: airflow-oidc-secret
+                key: clientSecret
+        postgresql:
+          enabled: false
+        redis:
+          enabled: false
+        # 【可插拔基础设施,见 ADR-030】和 MLflow 是同一类(chart 只接受
+        # 一整个连接串,不是拆开的字段):airflow-metadata 这个 Secret 的
+        # connection 字段是完整 DSN(scripts/00-generate-secrets.sh 拼的),
+        # 接外部 Postgres 改这个 Secret 的值。配套的
+        # apps/airflow/manifests/create-db-job.yaml 接外部 Postgres 时
+        # 应该跳过(数据库该由 DBA 按平时流程建)。
+        data:
+          metadataSecretName: airflow-metadata
+        fernetKeySecretName: airflow-fernet-key
+        apiSecretKeySecretName: airflow-api-secret
+        jwtSecretName: airflow-jwt-secret
+        # 内置的 createUserJob 要把初始密码明文写进 values(会进公开仓库的 git
+        # 历史),关掉改用 scripts/05-configure-airflow.sh 走 Secret 建管理员账号。
+        createUserJob:
+          enabled: false
+        # 2026-08-12 实测发现:chart 自带的 migrateDatabaseJob 是 Helm 原生
+        # post-install/post-upgrade hook,ArgoCD 要等主 Sync 阶段所有资源
+        # Healthy 才会触发 PostSync——但 Deployment 的 initContainer 又要等
+        # 这个 migrate job 跑完才能启动,死锁(Deployment 永远到不了
+        # Healthy,hook 永远不触发,`kubectl get jobs -n airflow` 里这个
+        # Job 从始至终没被创建过)。关掉 chart 自带的这个,改用
+        # apps/airflow/manifests/migrate-db-job.yaml 里手写的普通 Job(不带
+        # 任何 hook 注解,和 create-db-job.yaml 是同一个思路)。
+        migrateDatabaseJob:
+          enabled: false
+        # 2026-08-14 实测发现:这个键名是错的,一直静默生效失败。1.22.0 这个
+        # chart 版本对应 Airflow 3.x,组件早就从 `webserver` 改名成
+        # `apiServer`(见官方 chart values.yaml),`webserver:` 这个键在
+        # schema 里根本不存在,Helm 不校验多余的键,所以既不报错也不生效
+        # ——实际部署出来的 `apiServer.resources` 一直是空的 `{}`,吃的是
+        # chart 内部的极小默认值(limit 128Mi/request 64Mi)。更隐蔽的是,
+        # `wait-for-airflow-migrations` 这个 init container 的资源配置在
+        # chart 模板里直接复用 `apiServer.resources`(不是它自己独立的字段,
+        # 见 api-server-deployment.yaml 的 `resources: {{ .Values.apiServer.
+        # resources }}`),128Mi 跑 `airflow db check-migrations`(要加载完整
+        # Airflow 应用)必然 OOMKilled(exitCode 137,实测确认),表现成
+        # api-server 这个 Deployment 卡在 Init:CrashLoopBackOff 起不来。
+        apiServer:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 150m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+          # 2026-08-19:接 Keycloak SSO——Airflow 3.x 默认的 auth_manager 还是
+          # FabAuthManager(和 Superset 底层同一个 Flask-AppBuilder),所以走
+          # 的是同一套 webserver_config.py / AUTH_TYPE = AUTH_OAUTH 机制,不是
+          # 什么新东西,直接照抄 apps/definitions/superset.yaml 里 enable_oauth
+          # 那段的结构。这个键在 3.x chart 里叫 apiServerConfig(不是老版本的
+          # webserver.webserverConfig,那个键在这个 chart 版本渲染不出实际
+          # 生效的资源,踩过一次同名字段改名的坑,见上面 apiServer 那段大注释
+          # ——这次直接用官方 values.yaml 里写明的 apiServer.apiServerConfig)。
+          apiServerConfig: |
+            import os
+            from flask_appbuilder.security.manager import AUTH_OAUTH
+            AUTH_TYPE = AUTH_OAUTH
+            OAUTH_PROVIDERS = [
+                {
+                    "name": "keycloak",
+                    "icon": "fa-key",
+                    "token_key": "access_token",
+                    "remote_app": {
+                        "client_id": "airflow",
+                        "client_secret": os.environ.get("OAUTH2_CLIENT_SECRET"),
+                        "client_kwargs": {"scope": "openid profile email"},
+                        "api_base_url": "http://keycloak.local-lite.test/auth/realms/platform/protocol/",
+                        "server_metadata_url": "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration",
+                    },
+                }
+            ]
+            AUTH_ROLE_ADMIN = "Admin"
+            AUTH_ROLE_PUBLIC = "Public"
+            AUTH_USER_REGISTRATION = True
+            AUTH_USER_REGISTRATION_ROLE = "Admin"
+        scheduler:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 150m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+          # 挂整个 ConfigMap 目录会踩 Airflow 3.x 的坑:k8s ConfigMap 卷靠
+          # `..data` 软链 + 带时间戳的隐藏目录做原子更新,Airflow 3.x 新的
+          # DAG 目录遍历逻辑会把这些隐藏目录识别成"递归循环"直接崩溃退出
+          # (RuntimeError: Detected recursive loop when walking DAG
+          # directory)——实测确认。用 subPath 只挂这一个文件,绕开整个
+          # 软链目录结构;代价是 ConfigMap 改了以后这个文件不会自动热更新,
+          # 需要重启 pod 才能生效,这个 demo DAG 可以接受。
+          extraVolumes:
+            - name: dags
+              configMap:
+                name: airflow-dags
+          extraVolumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags/seatunnel_device_events.py
+              subPath: seatunnel_device_events.py
+            - name: dags
+              mountPath: /opt/airflow/dags/feast_materialize.py
+              subPath: feast_materialize.py
+            - name: dags
+              mountPath: /opt/airflow/dags/dbt_demo.py
+              subPath: dbt_demo.py
+            - name: dags
+              mountPath: /opt/airflow/dags/platform_sdk_demo.py
+              subPath: platform_sdk_demo.py
+        # dagProcessor 是 Airflow 3.x 才拆出来的独立组件(DAG 解析不再是
+        # scheduler 自己干),之前没配 resources,这次一起补上。DAG 文件同样
+        # 要挂进这里——scheduler 和 dagProcessor 都要能看到 dags 目录,不是
+        # 只挂一边。
+        dagProcessor:
+          replicas: 1
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+          # 挂整个 ConfigMap 目录会踩 Airflow 3.x 的坑:k8s ConfigMap 卷靠
+          # `..data` 软链 + 带时间戳的隐藏目录做原子更新,Airflow 3.x 新的
+          # DAG 目录遍历逻辑会把这些隐藏目录识别成"递归循环"直接崩溃退出
+          # (RuntimeError: Detected recursive loop when walking DAG
+          # directory)——实测确认。用 subPath 只挂这一个文件,绕开整个
+          # 软链目录结构;代价是 ConfigMap 改了以后这个文件不会自动热更新,
+          # 需要重启 pod 才能生效,这个 demo DAG 可以接受。
+          extraVolumes:
+            - name: dags
+              configMap:
+                name: airflow-dags
+          extraVolumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags/seatunnel_device_events.py
+              subPath: seatunnel_device_events.py
+            - name: dags
+              mountPath: /opt/airflow/dags/feast_materialize.py
+              subPath: feast_materialize.py
+            - name: dags
+              mountPath: /opt/airflow/dags/dbt_demo.py
+              subPath: dbt_demo.py
+            - name: dags
+              mountPath: /opt/airflow/dags/platform_sdk_demo.py
+              subPath: platform_sdk_demo.py
+        triggerer:
+          replicas: 1
+          persistence:
+            enabled: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+        statsd:
+          enabled: false
+        dags:
+          gitSync:
+            enabled: false
+        # 2026-08-16 发现的真实缺口:这个 Application 从一开始就没配
+        # Ingress,平台门户(apps/platform-portal)列了 Airflow 这个入口
+        # 但点进去根本没有路由——之前一直没暴露是因为都是靠
+        # `kubectl port-forward` 直连调试,没人真的走过 Ingress 这条路。
+        ingress:
+          apiServer:
+            enabled: true
+            ingressClassName: nginx
+            hosts:
+              - name: airflow.local-lite.test
+        # KubernetesExecutor 每个任务起一个独立 pod,用的是 workers.kubernetes
+        # 这份 pod 模板——不是 scheduler/dagProcessor 那份。一开始只挂了
+        # scheduler/dagProcessor,任务 pod 里根本没有 DAG 文件,报
+        # "Dag not found during start up"(实测确认,DAG 逻辑本身用
+        # `airflow tasks test` 在 scheduler pod 里跑是完全正常的,问题只在
+        # KubernetesExecutor 起的任务 pod 缺这个挂载)。
+        workers:
+          kubernetes:
+            # 2026-08-13 补上:这是 KubernetesExecutor 每个任务起 pod 用的
+            # 默认模板,没配置的话是 BestEffort QoS——排查
+            # seatunnel_device_events 这个 DAG 时踩过一次真实的 OOM
+            # 问题,单独在那个 DAG 里用 executor_config 加了 pod_override
+            # (见 apps/airflow/dags/seatunnel_device_events.py),但那只
+            # 覆盖那一个 DAG,这里补一个平台级默认值,以后新增的 DAG
+            # 不用每次都记得自己加。
+            resources:
+              requests:
+                cpu: 50m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+            extraVolumes:
+              - name: dags
+                configMap:
+                  name: airflow-dags
+            extraVolumeMounts:
+              - name: dags
+                mountPath: /opt/airflow/dags/seatunnel_device_events.py
+                subPath: seatunnel_device_events.py
+              - name: dags
+                mountPath: /opt/airflow/dags/feast_materialize.py
+                subPath: feast_materialize.py
+              - name: dags
+                mountPath: /opt/airflow/dags/dbt_demo.py
+                subPath: dbt_demo.py
+              - name: dags
+                mountPath: /opt/airflow/dags/platform_sdk_demo.py
+                subPath: platform_sdk_demo.py
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: airflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

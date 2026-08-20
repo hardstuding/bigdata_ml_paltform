@@ -1,0 +1,33 @@
+# 【放弃了 feast-dev/feast 官方 Helm chart,改裸 manifest】详细原因见
+# apps/feast/manifests/feature-server.yaml 顶部注释和
+# docs/decisions/042-feast-feature-store.md"已知限制"——已发布的 0.65.0
+# chart 版本用的是旧 Java 实现(command: java -jar feast-serving.jar),和
+# GitHub master 分支能看到的、支持 feature_store_yaml_base64 的新版 Python
+# 模板完全是两套不同的东西(helm pull 下来实测才发现,不能只读 GitHub 源码
+# 就当成已发布版本的行为)。而且这个 Java 镜像在 0.65.0 这个 tag 下根本没有
+# 发布过。裸 manifest(redis.yaml/feature-server.yaml/
+# feature-repo-configmap.yaml,都在 apps/feast/manifests/)这条路径实测
+# 跑通,和 Hive Metastore(没有可信 chart 时的先例,见 ADR-003)是同一类
+# 处理方式。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: feast
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/feast/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: feast
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

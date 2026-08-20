@@ -1,0 +1,64 @@
+# local-lite: standalone 单节点单盘,chart 默认是 16 副本分布式模式(16Gi 内存起),
+# 本地资源画像必须整体覆盖,不能只调 replicas。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: minio
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.min.io/
+    chart: minio
+    targetRevision: 5.4.0
+    helm:
+      valuesObject:
+        # 这台机器的网络到 quay.io 老是连不上(TLS handshake timeout/EOF,
+        # docker hub 反而是通的),chart 默认镜像源是 quay.io,这里改成
+        # docker hub 上 MinIO 官方也在发布的同名镜像。
+        image:
+          repository: minio/minio
+          tag: RELEASE.2025-09-07T16-13-09Z
+        mcImage:
+          repository: minio/mc
+          tag: RELEASE.2025-08-13T08-35-41Z
+        mode: standalone
+        replicas: 1
+        existingSecret: minio-root
+        persistence:
+          enabled: true
+          size: 8Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+        consoleService:
+          type: ClusterIP
+        service:
+          type: ClusterIP
+        buckets:
+          - name: lakehouse
+            policy: none
+            purge: false
+          - name: mlflow
+            policy: none
+            purge: false
+          # Spark 作业的 eventLog 写这里(spark.eventLog.dir),Spark History
+          # Server 从这里读出来展示——见 ADR-029、
+          # environments/cloud-full/pending-definitions/spark-history-server.yaml
+          - name: spark-logs
+            policy: none
+            purge: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: minio
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

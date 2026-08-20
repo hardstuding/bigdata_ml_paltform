@@ -36,7 +36,7 @@ platform/        # 平台底座:ArgoCD、ingress-nginx、cert-manager、Keycloak
 apps/
   definitions/    # 业务组件的 ArgoCD Application 定义(当前启用的)
   <component>/    # 没有官方 chart、我们自己写 manifest 的组件各占一个目录(postgres、hive-metastore、spark-history-server 等)
-environments/     # local-lite / cloud-full / prod 三个环境画像;pending-definitions/ 收着"配置已验证、本机资源关系暂时收起来"的组件
+environments/     # local-lite / cloud-full / prod 三个环境画像;每个环境的 config.yaml 里 enabled_components 列表决定这个环境要哪些组件(apps/components/ 是全部组件的源码)
 scripts/          # 一键拉起 / 常用运维 / 校验脚本,编号大致是执行顺序
 docs/
   architecture.md   # 架构总览、组件清单、路线图
@@ -177,11 +177,11 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 |---|---|---|
 | `scripts/03-configure-keycloak.sh` | 建 platform realm + 各组件的 OIDC client | 每接一个新的 SSO 组件之后都要重跑一次(幂等,已存在的 client/用户不会被覆盖)——比如 JupyterHub/Argo Workflows 的 client 就是它们的 Application 先建好自己的 namespace 之后,再跑这个脚本才能建成 |
 | `scripts/12-sync-iam.py` | 把 `platform/iam/` 里的组织架构/角色数据同步进 Keycloak(Group/Role/成员) | 改了 `platform/iam/` 下任意文件之后 |
-| `scripts/05-configure-airflow.sh` | 建 Airflow 初始管理员账号 | Airflow 从 `pending-definitions/` 拉回来、Deployment 第一次起来之后 |
+| `scripts/05-configure-airflow.sh` | 建 Airflow 初始管理员账号 | Airflow 从 `enabled_components` 里启用、Deployment 第一次起来之后 |
 | `scripts/06-configure-superset-datasources.sh` | 给 Superset 注册 Trino 数据源(服务账号认证) | Superset 或 Trino 任一个被重建之后 |
 | `scripts/07-fix-trino-liveness-probe.sh` | 修 Trino chart 里硬编码错的 livenessProbe(见 ADR-017) | **每次** `trino-coordinator` 这个 Deployment 被重新创建(不是重启,是整个 Deployment 对象重建)都要重跑,否则会一直被 kubelet 杀死重启 |
 | `scripts/10-install-kserve-serving-runtimes.sh` | 装 KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等,官方 chart 不带) | KServe 装完之后跑一次;这些是集群级资源,自身不占用运行时资源,不需要跟着组件重建反复重跑 |
-| `scripts/14-configure-airflow-seatunnel-variable.sh` | 给 `seatunnel_device_events` 这个 DAG 写 MinIO 凭据(Airflow Variable) | Airflow 从 `pending-definitions/` 拉回来、webserver 第一次起来之后 |
+| `scripts/14-configure-airflow-seatunnel-variable.sh` | 给 `seatunnel_device_events` 这个 DAG 写 MinIO 凭据(Airflow Variable) | Airflow 从 `enabled_components` 里启用、webserver 第一次起来之后 |
 
 ### Demo / 演示脚本(可选,验证平台端到端能力用)
 

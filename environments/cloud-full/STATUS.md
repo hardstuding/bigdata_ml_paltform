@@ -60,8 +60,9 @@ ArgoCD/PV/组件常驻这些都还没做——现在全部已经做完并且验�
 - [x] SSH 隧道 + 独立 kubeconfig(`~/.kube/cloud-full-config`)
 - [x] `scripts/00-generate-secrets.sh`
 - [x] ArgoCD 安装 + root apps 接管(GitOps)
-- [x] `pending-definitions/` 全部组件收回常驻(cloud-full 要求,不同于
-      local-lite 的按需 park)
+- [x] `enabled_components` 全部 43 个组件常驻(cloud-full 要求,不同于
+      local-lite 的按需选择;2026-08-20 起改用 ADR-057 第三批的声明式
+      机制,`pending-definitions/` 已退役)
 - [x] 核心链路(Trino/Superset/Airflow)端到端验证通过——详见
       `docs/CURRENT_WORK.md` 任务 #12~#16 完成记录
 - [x] 2026-08-16 抢占式实例迁移(省钱)+ 经济模式关机(RAM 角色 +

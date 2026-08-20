@@ -9,14 +9,20 @@ values.yaml` 覆盖开哪些组件、给多少资源"。**这个 values.yaml 覆
 [ADR-005](../../docs/decisions/005-argocd-gitops.md)),resources 直接
 写死在 `apps/definitions/*.yaml` 里,不是从外部 values 文件注入的。
 
-真正跑起来的机制是 `environments/cloud-full/pending-definitions/`
-这套"park/unpark":本机(local-lite)资源不够跑的组件,定义文件先放在
-这里,不会被 `apps-root` 这个 ArgoCD ApplicationSet 扫到,`git mv` 到
-`apps/definitions/` 才会被 GitOps 收进去、真正部署。这个机制**解决了
-"哪些组件要开"这个问题,但没有解决"同一个组件在不同环境给多少资源"这个
-问题**——目前每个组件在 `pending-definitions/` 里写的 resources 值
-就是 local-lite 的降配值,搬到真正的 cloud-full 硬件上不改直接用会
-明显浪费资源,也发挥不出硬件的性能。
+真正跑起来的机制(2026-08-20 起,ADR-057 第三批)是
+`environments/<env>/config.yaml` 里的 `enabled_components` 列表:
+`apps/components/` 是全部 43 个组件定义的唯一源码,某个环境要不要某个
+组件,是这份列表里有没有对应文件名,`python3 scripts/
+render-environment-config.py <env>` 把列表里的组件渲染进
+`apps/definitions/`(`apps-root` 这个 ArgoCD ApplicationSet 扫的就是
+这个目录)。以前(2026-08-20 之前)靠 `git mv` 组件文件在
+`apps/definitions/` 和 `environments/cloud-full/pending-definitions/`
+之间搬来搬去表达"这个环境要不要这个组件"的机制已经退役,`pending-
+definitions/` 目录已删除。这套新机制**解决了"哪些组件要开"这个问题,
+但没有解决"同一个组件在不同环境给多少资源"这个问题**——`apps/
+components/` 里每个组件写的 resources 值就是 local-lite 的降配值,
+搬到真正的 cloud-full 硬件上不改直接用会明显浪费资源,也发挥不出硬件的
+性能。
 
 **这份文档是当前阶段务实的补丁**:不是一份能直接 `kubectl apply` 生效
 的 values 文件,是一份"接入 cloud-full 硬件时,该做哪些事、每个组件
@@ -38,9 +44,10 @@ Spark Operator/Kafka + JupyterHub/MLflow/Argo Workflows/KServe 全部
 
 ## 接入步骤
 
-1. `environments/cloud-full/pending-definitions/*.yaml` 全部
-   `git mv` 到 `apps/definitions/`(见那个目录下 README.md 的说明),
-   一次性把所有组件收进 GitOps 管理范围。
+1. 确认 `environments/cloud-full/config.yaml` 的 `enabled_components`
+   列表包含要接入的组件(现状:cloud-full 已经是全部 43 个组件),跑
+   `python3 scripts/render-environment-config.py cloud-full` 生成
+   `apps/definitions/`,一次性把所有组件收进 GitOps 管理范围。
 2. 按下面"资源建议"这一节,把每个组件 Application yaml 里的
    `resources.requests/limits` 从 local-lite 的降配值调大——这一步
    目前是手工改,没有自动化(见上面"现状"那段的说明)。

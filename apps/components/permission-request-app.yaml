@@ -1,0 +1,24 @@
+# 权限自助申请门户本体。见 docs/decisions/032-permission-request-app.md。
+# 前面挂 oauth2-proxy 做 SSO,见同目录下的 permission-request-app-oauth2-proxy.yaml。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: permission-request-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/permission-request-app/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: permission-request-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

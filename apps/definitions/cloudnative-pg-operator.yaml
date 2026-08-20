@@ -1,3 +1,10 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/cloudnative-pg-operator.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/cloudnative-pg-operator.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
 # CloudNativePG(CNCF 沙箱项目,EDB 主导)。评估用,给 apps/postgres/ 那个
 # 单实例原生 manifest 找一条 HA 升级路径——见 docs/decisions/033-postgres-
 # backup.md 的"后果"部分提到过备份是有了,但真正的高可用(自动故障转移/

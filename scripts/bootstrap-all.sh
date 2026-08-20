@@ -111,8 +111,9 @@ run_required "scripts/03-configure-keycloak.sh" ./scripts/03-configure-keycloak.
 
 log ""
 log "===== 核心 7 步(README 那份清单 + 补的 argo-workflows CRD)全部完成 ====="
-log "接下来是组件专属初始化——对应组件现在如果是 park 状态会自动跳过,"
-log "以后从 pending-definitions/ 拉回来之后,单独重跑对应的那一条命令就行,"
+log "接下来是组件专属初始化——对应组件现在如果没启用会自动跳过,"
+log "以后在 environments/<env>/config.yaml 的 enabled_components 里启用、"
+log "重新渲染 apps/definitions/ 之后,单独重跑对应的那一条命令就行,"
 log "不需要重跑整份脚本。"
 
 step "修 Trino livenessProbe(chart 硬编码错误,见 ADR-017;每次 Deployment 重建都要重跑,含第一次拉起)"

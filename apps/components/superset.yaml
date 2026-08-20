@@ -1,0 +1,177 @@
+# 官方 apache/superset chart,默认自带的 postgresql/redis 子 chart 是
+# bitnamilegacy 镜像(见 ADR-008),关掉换成我们自己的 Postgres(库由
+# apps/superset/manifests/create-db-job.yaml 建)。Redis 也关了(local-lite
+# 简化,没有它 Superset 能跑,只是缺异步查询/告警这些高级功能)。
+#
+# 数据库连接和 SECRET_KEY 不写在这份 values 里——chart 默认行为是从
+# DB_USER/DB_PASS/DB_HOST/DB_PORT/DB_NAME 这几个环境变量读连接串
+# (`database.uri` 不设置时的默认逻辑)。注意用的是 envFromSecret(单数,
+# 覆盖主 Secret 的名字),不是 envFromSecrets(复数,追加一个)——踩过一次
+# 坑:initContainer(wait-for-postgres)的 envFrom 硬编码只引用 envFromSecret
+# 指向的那一个 Secret,用复数形式追加进去的内容它读不到,会一直连不上
+# 卡在 Init 状态。
+#
+# init.adminUser.password 是 chart 自己的硬编码默认值("admin"),不是我们
+# 写的——这个值不会出现在我们的 git 历史里(是 helm template 渲染时才展开的),
+# 但运行时的实际密码确实很弱,cloud-full/prod 之前要处理掉(改 init.command
+# 或者关掉 init.createAdmin 自己建,和 Airflow 那次一样)。
+#
+# Keycloak SSO:和 Trino 不一样,Superset(Flask-AppBuilder)的 OAuth 不要求
+# 自己起 HTTPS,直接走 configOverrides 加 AUTH_OAUTH 就行,踩坑成本低很多
+# (见 ADR-017 记的 Trino 那堆坑,Superset 这边基本不适用)。用
+# server_metadata_url 走 OIDC discovery,不用手动拼 auth/token/jwks 各个
+# endpoint。AUTH_USER_REGISTRATION_ROLE=Admin 是 local-lite 简化(第一个登录
+# 的人自动拿 Admin),和 ArgoCD/Grafana 那两条待办一样,以后要换成按 Keycloak
+# group 映射角色。
+#
+# 2026-08-16 cloud-full 真实故障(端到端 curl 登录模拟,不是猜的):前面
+# 端口/discovery 那批修完之后,授权码能换回来,但最后一步报
+# "Error returning OAuth user info: Invalid URL 'openid-connect/userinfo':
+# No scheme supplied"。根因是 Flask-AppBuilder 对 provider name ==
+# "keycloak" 有一段专门写死的分支(`security/manager.py` 里
+# `get_oauth_user_info`),不走 server_metadata_url discovery 出来的
+# userinfo_endpoint,而是自己手动拼 `oauth_remotes["keycloak"].get(
+# "openid-connect/userinfo")`——这是一个相对路径,authlib 要靠
+# remote_app 里单独配置的 `api_base_url` 做前缀拼接,server_metadata_url
+# 管不到这条路径,漏配就是这个报错。补上 api_base_url(内部地址、不带
+# 端口,和 server_metadata_url 一样是服务端到服务端调用),对齐
+# Keycloak 官方 protocol 端点这段公共前缀。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: superset
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://apache.github.io/superset
+    chart: superset
+    targetRevision: 0.22.4
+    helm:
+      valuesObject:
+        # 2026-08-19 从"运行时 bootstrapScript 现装依赖"改成"构建时镜像
+        # 已经装好"——见 apps/superset-image/Dockerfile 的完整说明
+        # (psycopg2-binary/authlib/trino 为什么需要、构建过程踩的两个真实
+        # 坑:venv 和系统 pip 不是同一个 Python 环境、构建期默认用户对
+        # site-packages 没写权限)。这解决的是 docs/BACKLOG.md P2.1 点名
+        # 的"运行时 pip install"反模式本身——之前只能靠调大
+        # startupProbe(见下面 supersetNode.startupProbe)硬扛网络慢,
+        # 现在镜像已经带齐依赖,不再需要联网。
+        image:
+          repository: local/superset
+          tag: 6.1.0-custom
+          pullPolicy: IfNotPresent
+        postgresql:
+          enabled: false
+        redis:
+          enabled: false
+        cache:
+          enabled: false
+        # 【可插拔基础设施,见 ADR-030】chart 默认从 DB_USER/DB_PASS/
+        # DB_HOST/DB_PORT/DB_NAME 这几个环境变量拼连接串,这几个键都在
+        # superset-db-secrets 这个 Secret 里(scripts/00-generate-
+        # secrets.sh 生成)——接外部 Postgres 改这个 Secret 的值就行,不用
+        # 改这份 Application yaml。配套的
+        # apps/superset/manifests/create-db-job.yaml 接外部 Postgres 时
+        # 应该跳过(数据库该由 DBA 按平时流程建)。
+        envFromSecret: superset-db-secrets
+        extraEnvRaw:
+          - name: OAUTH2_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: superset-oidc-secret
+                key: clientSecret
+        configOverrides:
+          enable_oauth: |
+            from flask_appbuilder.security.manager import AUTH_OAUTH
+            AUTH_TYPE = AUTH_OAUTH
+            OAUTH_PROVIDERS = [
+                {
+                    "name": "keycloak",
+                    "icon": "fa-key",
+                    "token_key": "access_token",
+                    "remote_app": {
+                        "client_id": "superset",
+                        "client_secret": os.environ.get("OAUTH2_CLIENT_SECRET"),
+                        "client_kwargs": {"scope": "openid profile email"},
+                        "api_base_url": "http://keycloak.local-lite.test/auth/realms/platform/protocol/",
+                        "server_metadata_url": "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration",
+                    },
+                }
+            ]
+            AUTH_ROLE_ADMIN = "Admin"
+            AUTH_ROLE_PUBLIC = "Public"
+            AUTH_USER_REGISTRATION = True
+            AUTH_USER_REGISTRATION_ROLE = "Admin"
+          examples_db: |
+            # 2026-08-19:load_examples 默认的 examples 连接不配就落到 pod
+            # 本地 SQLite(见 apps/superset/manifests/create-db-job.yaml 的
+            # 说明),没有持久化,pod 一重启示例数据就没了、仪表盘报
+            # "no such table"。改成用 envFromSecret 里已经有的这几个
+            # DB_* 变量(和主 superset 库同一个 Postgres 实例、同一个账号),
+            # 接到 create-db-job.yaml 新建的 superset_examples 这个库上。
+            SQLALCHEMY_EXAMPLES_URI = (
+                f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASS']}@"
+                f"{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/superset_examples"
+            )
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts:
+            - superset.local-lite.test
+        init:
+          # 2026-08-19:实测确认这些示例数据(birth_names/video_game_sales/
+          # world_health 等)是打包在 apache-superset 这个 pip 包里的
+          # .parquet 文件,`superset load_examples` 不联网、不依赖外部
+          # 数据源,纯本地加载,开着不会引入这个项目一直在提防的"运行时
+          # 联网"问题。用来给刚接触这个平台的人一个开箱即用的可视化demo,
+          # 不影响这个项目自己的 iceberg.demo.orders 那张真实业务 demo 表
+          # (scripts/08-create-demo-data.sh)。
+          loadExamples: true
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+        supersetNode:
+          replicas:
+            replicaCount: 1
+          # 2026-08-16 真实故障:chart 默认的 startupProbe 预算(15s 初始
+          # 延迟 + 60 次 * 5s = 315 秒)在这台机器网络慢的时候不够用——
+          # 实测确认(exitCode 137,SIGKILL,从 Started 到 Terminated 正好
+          # 5分44秒,不是随机崩溃),当时是 bootstrapScript 运行时装依赖
+          # 卡住导致的。2026-08-19 已经把依赖改成构建时装进镜像(见上面
+          # image 那段注释),理论上不再需要这么大的预算,但这次没有专门
+          # 收紧验证过(改镜像本身已经是这次的改动,不想在同一次改动里
+          # 顺手收紧探针又碰上别的边界情况),先保留这个已知能用的预算,
+          # 之后有余量再单独收紧验证。
+          startupProbe:
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 90
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 1024Mi
+        supersetWorker:
+          # 没有 Redis/Celery broker,worker 起来也没用。replicaCount 压到 0
+          # (Deployment 对象还在,但不占资源,比强行让 enabled:false 生效更可靠)。
+          replicas:
+            replicaCount: 0
+        supersetCeleryBeat:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: superset
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
 """
-CI 用:扫描仓库里所有 ArgoCD Application(不管现在是 active 还是收在
-pending-definitions/ 里,CI 要验证的是"这份配置本身对不对",不是"现在集群
-里跑没跑"),对每一个 Helm chart 来源跑一次 `helm template`,渲染失败就算
-CI 失败。
+CI 用:扫描仓库里所有 ArgoCD Application,对每一个 Helm chart 来源跑一次
+`helm template`,渲染失败就算 CI 失败。
+
+2026-08-20(ADR-057 第三批):以前扫的是 apps/definitions/(常驻组件)+
+environments/cloud-full/pending-definitions/(park 着的组件)两个目录,
+这套"目录位置表达启用状态"的机制已经退役,组件源码统一挪到 apps/
+components/。**扫描目标还是 apps/definitions/,不是 apps/components/**
+——试过直接扫 apps/components/,发现里面还没替换占位符的那几个文件
+(`{{DOMAIN_SUFFIX}}` 这类)会让 oauth2-proxy chart 自己的 `tpl` 函数
+把这段当成 Go 模板语法去解析,直接报错,不是真的配置问题。CI 跑之前
+`scripts/render-environment-config.py cloud-full` 已经把 apps/
+definitions/ 渲染成占位符全部替换过的真实内容(而且 cloud-full 的
+enabled_components 目前是全部 43 个组件,覆盖面和直接扫 apps/components/
+是一样的),扫这份渲染结果既不会踩占位符的坑,又不会漏扫任何组件。
 
 抓不到的问题:helm template 只验证"chart 语法 + 我们的 values 能不能正确
 渲染成 YAML",抓不到"渲染出来的配置在真实集群里跑不跑得起来"这类问题
@@ -136,7 +146,6 @@ def main():
     dirs = [
         REPO_ROOT / "platform" / "apps",
         REPO_ROOT / "apps" / "definitions",
-        REPO_ROOT / "environments" / "cloud-full" / "pending-definitions",
     ]
 
     failures = []

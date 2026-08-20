@@ -1,0 +1,34 @@
+# Argo Workflows 编排训练——WorkflowTemplate + 训练脚本 ConfigMap(裸
+# manifest,见 apps/argo-workflows-training-image/manifests/ 里的完整
+# 设计说明,包括为什么不采用 notebook+papermill 这个曾经考虑过的方案)。
+#
+# 依赖 apps/argo-workflows-training-image/Dockerfile 构建出的
+# local/argo-workflows-training:1.0.0 镜像已经在目标节点上——这是本地
+# 构建镜像,不从任何 registry 拉取,和 apps/feast/feature-server-image/
+# 是同一个模式(见该镜像 Dockerfile 里 2026-08-19 的说明,同一晚踩过的
+# 坑:直连 PyPI 装依赖会被限速,已经在这份 Dockerfile 里带上镜像源)。
+#
+# 2026-08-19 新增,这是这条链路第一次真正接入 Argo Workflows,不是"重新
+# 验证"已有能力——之前训练一直是人直接跑 scripts/09-train-demo-model.sh。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-training-workflow-template
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/argo-workflows-training-image/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-workflows
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

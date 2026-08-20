@@ -185,6 +185,13 @@ echo "==> airflow client"
 # 前缀下(源码 airflow/api_fastapi/app.py 里 `app.mount("/auth", ...)`),
 # Superset 没有这层挂载,直接照抄 superset 那行的 redirect_uris 漏了这个
 # 前缀,实测 Keycloak 报 "Invalid parameter: redirect_uri" 才发现。
+#
+# 2026-08-20 补记:这段第一次加的时候直接改了生成产物 scripts/03-
+# configure-keycloak.sh,没改这份模板——违反了这个文件自己顶部写的"改动
+# 请改模板文件"规则。下次重新渲染这份脚本(比如 ADR-057 第三批那次)时
+# 这段内容差点被静默冲掉,靠渲染脚本的 diff 输出("已重新生成"而不是
+# "已经一致")才发现少了这段,补挂到正确的位置。教训是:生成产物文件
+# 顶部那句警告不是摆设,改完之后跑一次 `--check` 会立刻告诉你改错地方了。
 create_client_if_absent airflow '["http://airflow.local-lite.test/auth/oauth-authorized/keycloak","http://airflow.local-lite.test:32460/auth/oauth-authorized/keycloak"]' airflow airflow-oidc-secret clientSecret
 
 echo "==> openmetadata client"

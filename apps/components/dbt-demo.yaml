@@ -1,0 +1,24 @@
+# dbt demo 项目的 ConfigMap(ADR-012/ADR-053)。挂进
+# apps/airflow/dags/dbt_demo.py 那个 KubernetesPodOperator 目标 pod。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dbt-demo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/dbt-demo/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dbt
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

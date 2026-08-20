@@ -29,7 +29,7 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml
 
-      - name: helm template 渲染校验(所有 ArgoCD Application,含 pending-definitions)
+      - name: helm template 渲染校验(所有 ArgoCD Application,扫 apps/definitions/ 这份 cloud-full 渲染结果,见 scripts/validate-charts.py 开头说明)
         run: python3 scripts/validate-charts.py
 
       - name: Airflow DAG 单一源码校验(ConfigMap 里的内容不能和 apps/airflow/dags/*.py 漂移)

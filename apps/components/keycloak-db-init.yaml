@@ -1,0 +1,33 @@
+# Keycloak 是 Phase 0 常驻组件,不像 Phase 2/3 那样会被
+# scripts/local-lite-toggle-heavy.sh 挪进挪出,这个 Job 建完库之后
+# 长期保持 Complete 状态即可,不需要收进 pending-definitions。
+#
+# 【可插拔基础设施】这个 Job 只在"用本仓库自带的 Postgres"这个默认路径下
+# 需要——它做的事是对着 apps/postgres/ 那个 Postgres 实例
+# `CREATE DATABASE keycloak`。如果你在 platform/apps/keycloak.yaml 里把
+# database.hostname 改成了公司已有的外部 Postgres,不要装这个文件(删掉,
+# 或者不要从 pending 挪过来):数据库/用户应该由你们自己的 DBA 按平时流程
+# 建,这个 Job 对着别人的实例跑 CREATE DATABASE 大概率没权限,也不是你想要
+# 的行为。见 ADR-030。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak-db-init
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/keycloak-db-init/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

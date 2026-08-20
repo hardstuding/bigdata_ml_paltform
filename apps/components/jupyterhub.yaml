@@ -1,0 +1,269 @@
+# 官方 jupyterhub/jupyterhub chart(hub.jupyter.org 发布,不是社区非官方
+# 维护的,和当初否决 PostHog 是同一条筛选标准)。KubeSpawner 是这个 chart
+# 的默认 spawner,每个用户登录后会拉起一个独立的 notebook Pod,不需要额外
+# 配置。
+#
+# 认证:hub 镜像自带 oauthenticator 包(实测确认过,不是猜的),用
+# GenericOAuthenticator 接 Keycloak。
+#
+# 2026-08-11 补充:最早三个 URL 按 Grafana 那套"浏览器/后端分开配"模式写的
+# (token_url/userdata_url 用集群内部域名),实测浏览器登录后卡在
+# /hub/oauth_callback 报 500,Keycloak 日志给的真实原因:
+#   USER_INFO_REQUEST_ERROR ... reason="Invalid token issuer.
+#   Expected 'http://keycloak-keycloakx-http.keycloak.svc.cluster.local/...'"
+# 根因:Keycloak 签发的 access token 里 iss 是发起 /auth 授权请求时用的域名
+# (浏览器打的 keycloak.local-lite.test),但 userinfo 端点会按"当前这次请求
+# 打进来时用的 Host"重新算一遍期望的 issuer,两者对不上就直接拒绝
+# ——这是 Keycloak 自己的 token 校验行为,不是配置错误。Grafana 当初这样配
+# 没出问题,是因为 Grafana 的 OAuth 客户端只解码 id_token 里的 claim,压根
+# 没有单独发请求去 userinfo 端点;JupyterHub 的 GenericOAuthenticator会
+# 真的对 userdata_url 发一次 HTTP 请求,才踩中这个校验。
+#
+# 修复:token_url/userdata_url 也改成外部域名,和 authorize_url 保持一致
+# (单一 issuer 模式,和 ArgoCD/Trino/Argo Workflows 是同一套)。hub pod 靠
+# platform/coredns-custom/ 的自定义 DNS zone(集群内全局生效,不用每个
+# chart 单独配 hostAliases)解析 keycloak.local-lite.test。
+#
+# 2026-08-19 补:cloud-full 是 NodePort(32460),浏览器打的
+# authorize_url/oauth_callback_url 必须带端口(不带端口本来就连不上,
+# 和 8-16 那批组件的第一层坑一样)。token_url/userdata_url 保持不带
+# 端口——上面 2026-08-11 那次"单一 issuer"的结论是在 Keycloak 还是
+# KC_HOSTNAME_STRICT=false 时代 debug 出来的,2026-08-16 已经换成
+# KC_HOSTNAME_STRICT=true + 固定 issuer + KC_HOSTNAME_BACKCHANNEL_
+# DYNAMIC=true(和 Trino/Grafana/oauth2-proxy 现在用的是同一套),
+# 理论上内部无端口地址现在也能通过 issuer 校验——但这是本次新做的
+# 判断,没有真实登录验证过,先按这个部署,登录测试如果又踩中旧的
+# issuer 不匹配,再回退成三个 URL 都用外部带端口地址。
+# db 用 chart 默认的 sqlite-pvc,不接共享 Postgres——hub 的状态(谁登录过、
+# 谁的 server 在跑)不是别的组件需要联动的数据,没有理由为了这个单独接一次
+# Postgres,和当初给 Keycloak/Trino 接 Postgres(数据会被其他东西依赖,或者
+# 丢了代价很大)是不同的权衡。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jupyterhub
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://hub.jupyter.org/helm-chart/
+    chart: jupyterhub
+    targetRevision: 4.4.1
+    helm:
+      valuesObject:
+        hub:
+          config:
+            JupyterHub:
+              authenticator_class: generic-oauth
+              admin_access: true
+            Authenticator:
+              # 2026-08-11 从 allow_all(谁认证通过都放行)改成按 Keycloak
+              # group 收紧,和 ArgoCD/Grafana 是同一次企业级权限收拢(见
+              # ADR-028、platform/iam/)。GenericOAuthenticator 原生支持
+              # allowed_groups/admin_groups 读 token 的 groups claim,
+              # claim_groups_key 默认就是 "groups",不用额外配
+              # (kubectl exec 进 hub pod 实测确认过默认值)。
+              #
+              # 背景(JupyterHub 3.x 起 Authenticator.allow_all 默认 false,
+              # 不配任何 allowed_*/admin_* 会导致认证成功但 403 "not
+              # currently authorized",见 ADR-025 更正 2):这次是主动配
+              # allowed_groups,不是碰到那个坑再补。
+              #
+              # manage_groups 必须开:admin_groups 单独配不生效,真实报错是
+              # "GenericOAuthenticator.admin_groups requires
+              # GenericOAuthenticator.manage_groups to also be set",hub
+              # 直接 CrashLoopBackOff 起不来(第一次部署时踩到,补的这行)。
+              manage_groups: true
+              allowed_groups:
+                - platform-team
+                - algorithm-team
+                - data-analysts  # 2026-08-14 补:数分角色一直没在白名单里,原配置漏了,
+                                 # 之前从没在这个组件 un-park 时被真正测过登录
+              admin_groups:
+                - platform-team
+            GenericOAuthenticator:
+              client_id: jupyterhub
+              authorize_url: "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
+              token_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
+              userdata_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
+              login_service: "Keycloak"
+              username_claim: "preferred_username"
+              scope:
+                - "openid"
+                - "profile"
+                - "email"
+              oauth_callback_url: "http://jupyterhub.local-lite.test:32460/hub/oauth_callback"
+          extraEnv:
+            OAUTH_CLIENT_SECRET:
+              valueFrom:
+                secretKeyRef:
+                  name: jupyterhub-oidc-secret
+                  key: clientSecret
+          extraConfig:
+            "01-oauth-secret": |
+              import os
+              c.GenericOAuthenticator.client_secret = os.environ["OAUTH_CLIENT_SECRET"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+        singleuser:
+          # 2026-08-19(ADR-058):从"用户自己按需装包"改成用平台统一镜像
+          # (apps/platform-image/),里面已经带了 platform_sdk + Trino/
+          # MLflow/scikit-learn/pandas 客户端。这就是"打开 notebook 自动
+          # 连好 Trino"这个体验缺口(docs/usage-guide.md 记录过)的解法。
+          # 本地构建镜像,pullPolicy 必须是 IfNotPresent(和这个项目其它
+          # 自建镜像同一个坑:kubelet 会尝试联网拉一个不存在的远程镜像,
+          # 直接 ErrImagePull)。
+          image:
+            name: local/platform-runtime
+            tag: "0.1.0"
+            pullPolicy: IfNotPresent
+          # 2026-08-19 真实踩坑(镜像/RBAC 都配好之后,platform_sdk.query()
+          # 报 ConnectionRefused,一开始怀疑是 Trino/MLflow 本身没起来,
+          # 排查发现两边真实服务都健康、连它们自己也没问题,问题出在调用方
+          # 这一侧):chart 默认给 singleuser pod 挂了一条 NetworkPolicy
+          # (`singleuser.networkPolicy`,z2jh 的既定安全姿态——notebook 允许
+          # 出公网但不许碰集群内部 IP,防止 notebook 变成打内网的跳板),
+          # 默认的 `egressAllowRules.privateIPs` 是 false。Trino/MLflow 的
+          # ClusterIP 都是私网段,被这条规则原样挡掉,不联网也报
+          # ConnectionRefused(不是 DNS 失败、不是超时,容易误判成对端服务
+          # 本身的问题)。和 platform/network-policies/manifests/minio.yaml
+          # 里"新命名空间要连 MinIO 必须显式加白名单"是同一个设计思路——这里
+          # 反过来,是"新的调用方要出站,必须显式放行目标"。不整体打开
+          # privateIPs(那会让这条防跳板的策略形同虚设),按命名空间精确放行。
+          networkPolicy:
+            egress:
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: trino
+                ports:
+                  - port: 8443
+                    protocol: TCP
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: mlflow
+                ports:
+                  - port: 5000
+                    protocol: TCP
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: minio
+                ports:
+                  - port: 9000
+                    protocol: TCP
+              # submit_job() 用 kubernetes 客户端建 ConfigMap/Workflow 对象,
+              # 走的是 K8s API server 本身。**这条规则 2026-08-19 没有验证
+              # 通过,是已知未解决的限制,如实记录,不是假装修好了**:
+              #   1. 先想当然写成 argo-workflows 命名空间的
+              #      namespaceSelector,不通。
+              #   2. `kubectl get svc kubernetes -n default` 查到 Service
+              #      在 default 命名空间,改成对应的 namespaceSelector,
+              #      还是不通,报一样的 ConnectionRefused。
+              #   3. `kubectl get endpoints kubernetes -n default` 查到真相:
+              #      k3s 的 API server 不是普通 pod,是 k3s 进程自己在节点上
+              #      起的,这个 Service 的 Endpoints 指向的是**节点 IP**
+              #      (172.22.9.16:6443),不是任何 pod IP——namespaceSelector/
+              #      podSelector 天然匹配不到一个节点 IP。
+              #   4. 改用 ipBlock 直接放行节点 IP(试过 172.22.9.16/32 配
+              #      443 和配 6443、以及 ClusterIP 10.43.0.1 配 /32 和
+              #      /16 几种组合),**全部还是 ConnectionRefused**,没有
+              #      查清具体原因——不排除是这台 k3s 内置 netpol 控制器
+              #      (kube-router)对 Service ClusterIP 类流量的已知限制,
+              #      需要上节点直接查 iptables/ipset 才能查清,这次没有
+              #      在这上面继续投入(云主机是按小时计费的验证环境)。
+              #   **已验证的事实**:submit_job() 这个函数本身完全正确——
+              #   从不受这条 NetworkPolicy 限制的环境(本机 kubeconfig)调用
+              #   端到端成功过(建 ConfigMap→建 Workflow→pod 里跑
+              #   `job.py`→查 Trino→记 MLflow,全部 Succeeded)。缺口窄:
+              #   只在"直接从 notebook pod 里调 submit_job()"这一种使用
+              #   方式上,不影响 query()/mlflow_setup() 这两个更常用的函数
+              #   (两个都已经在 notebook pod 里验证过)。当前的权宜做法是
+              #   用 `platform-submit job.yaml` 从终端/CI 这类不受此
+              #   NetworkPolicy 限制的环境提交,见
+              #   docs/BACKLOG.md 对应条目。
+              - to:
+                  - ipBlock:
+                      cidr: 172.22.9.16/32
+                ports:
+                  - port: 6443
+                    protocol: TCP
+          # platform_sdk 的 submit_job() 要能往 argo-workflows 命名空间建
+          # ConfigMap/Workflow,见
+          # apps/platform-image/manifests/submitter-rbac.yaml。
+          serviceAccountName: platform-sdk-submitter
+          memory:
+            # 这两个字段最终传进 KubeSpawner 自己的 mem_guarantee/mem_limit
+            # traitlet(ByteSpecification),只认 K/M/G/T(十进制)后缀,不认
+            # Kubernetes 资源规格常见的 Ki/Mi/Gi(二进制)后缀——写成
+            # "1536Mi" 会在用户登录、hub 要给这个用户建 spawner 时直接
+            # TraitError,500。和下面 cpu.guarantee 必须是纯数字是同一类
+            # "chart 里这个字段最终走 Python 校验,不是走 k8s 校验"的坑。
+            guarantee: 512M
+            limit: 1536M
+          cpu:
+            # chart 的 schema 要求这里是纯数字(CPU 核数),不是
+            # Kubernetes 常见的 "100m" 这种带单位字符串,0.1 = 100m。
+            guarantee: 0.1
+          storage:
+            capacity: 2Gi
+          # 2026-08-19 更正:上面这条"用户自己按需装"的旧注释已经不成立
+          # (见上面 image 那段)——scikit-learn/mlflow 这些包现在打进了
+          # 统一镜像。这里只保留 startTimeout 本身。
+          startTimeout: 300
+        # 数分/算法工程师开着 notebook 一段时间不用是常态,不显式配的话就是
+        # 依赖 chart 默认值(cull.enabled: true, timeout: 3600),这次改成
+        # 显式写出来,不是新加了这个能力——chart 自带的 jupyterhub-idle-culler
+        # 服务本来就在跑(hub pod 日志里能看到它定期调 /hub/api/users),只是
+        # 之前没在 git 里显式声明,配置真实生效的值应该让人一眼看到,不用去
+        # 翻 chart 默认值文档才知道超时是多久。
+        # timeout=7200(2 小时无活动就关,比 chart 默认的 1 小时宽松,给
+        # 数分/算法工程师留够思考/开会中途不动的余量)、every=600(每 10
+        # 分钟检查一次,chart 默认值)。
+        # 【可调参数,见 docs/operations/tuning.md】
+        cull:
+          enabled: true
+          timeout: 7200
+          every: 600
+          # 管理员的 server 也一起清,不搞特殊——admin 账号也可能是真的在用
+          # notebook 而不是常驻资源。
+          adminUsers: true
+        proxy:
+          # 前面已经有 ingress-nginx 做外部入口了,不需要 chart 默认的
+          # LoadBalancer 类型再单独暴露一次(k3s 上会占用 ServiceLB 的
+          # 另一个端口,没必要)。
+          service:
+            type: ClusterIP
+          chp:
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 256Mi
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts:
+            - jupyterhub.local-lite.test
+        scheduling:
+          userPlaceholder:
+            enabled: false
+          userScheduler:
+            enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jupyterhub
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
