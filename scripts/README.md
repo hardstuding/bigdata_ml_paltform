@@ -63,6 +63,7 @@
 | `23-pull-images-remote-via-mirror.sh` | 云主机直接走国内镜像源拉(通常比 22 快得多) |
 | `24-install-idle-shutdown-watchdog.sh` | 空闲自动关机看门狗(**不进 git**,是个人环境脚本) |
 | `26-stop-cloud-vm-economical.sh` | 停机并显式指定经济模式(`StoppedMode=StopCharging`) |
+| `32-start-cloud-vm.sh` | 开机 + 拿新公网 IP + 重建 SSH 隧道 + 刷新 kubeconfig,四件事一条命令 |
 
 > 注意:经济模式停机只停**计算**费用,**磁盘一直在计费**。
 
