@@ -101,10 +101,21 @@ root-apps、装各种 CRD、配 Keycloak)任何一步失败都会让脚本停下
 
 ```bash
 git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
-# 需要过代理才能出网的环境(比如本机 + colima):
-# NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
 ./scripts/bootstrap-all.sh
 ```
+
+装别的环境画像用 `TARGET_ENV`(默认 `cloud-full`):
+
+```bash
+TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
+```
+
+脚本第一步会校验这个工作区当前渲染的就是 `TARGET_ENV` 那个环境
+——`apps/definitions/` 和 `platform/apps/` 是渲染产物,同一时刻只能代表
+一个环境,拿着 local-lite 的渲染结果去部署 cloud-full,每个 Pod 都会
+Running、ArgoCD 全绿,但装出来的是错的那套。不一致时脚本会停下来告诉你
+该跑什么,不会自动帮你渲染(渲染改的是本地文件,ArgoCD 读的是 git 远端,
+不 commit+push 不生效,自动渲染只会制造"我明明渲染过了"的错觉)。
 
 完整执行日志在 `logs/bootstrap-all.log`(不进 git)。中途失败了直接重跑
 这份脚本就行——每一步各自的脚本本来就是幂等的,重跑不会产生副作用。

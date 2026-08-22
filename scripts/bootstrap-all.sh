@@ -12,15 +12,20 @@
 # 幂等逻辑),意外中断后重跑这份脚本是安全的。
 #
 # 用法:
-#   ./scripts/bootstrap-all.sh                        # cloud-full / 生产 IDC 这类直连公网的环境
-#   NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh     # local-lite(colima)这类需要过代理才能出网的环境
+#   ./scripts/bootstrap-all.sh                                            # cloud-full(默认)
+#   TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh  # local-lite(colima,要过代理才能出网)
+#   TARGET_ENV=prod ./scripts/bootstrap-all.sh                            # 生产 IDC
+#
+# TARGET_ENV 只用来**校验**这个工作区当前渲染的是不是这个环境(第 1 步),
+# 不会自动帮你渲染——渲染改的是本地文件,ArgoCD 读的是 git 远端,自动渲染
+# 只会制造"我明明渲染过了"的错觉。不一致时脚本会停下来告诉你该跑什么。
 #
 # 前提(和 README 一致,这份脚本不重新检查):已经有一个能用的
 # Kubernetes 集群,kubectl/helm 能连上它,本机装了 git。
 #
 # 组件专属初始化(05/06/12/14 这几步)是"尽力而为"——对应的组件当前如果
 # 是 park 状态(namespace/Deployment 还不存在),这份脚本会跳过并打印
-# 原因,不会因为某个非核心组件还没拉起来就让整个脚本失败退出;核心 7 步
+# 原因,不会因为某个非核心组件还没拉起来就让整个脚本失败退出;核心步骤
 # (00~03,含新增的 25)任何一步失败都会让脚本立即停止,因为后面的步骤
 # 大概率也会跟着失败,继续跑只会让日志更难看懂。
 set -uo pipefail
@@ -28,6 +33,10 @@ cd "$(dirname "$0")/.."
 
 mkdir -p logs
 LOG_FILE="logs/bootstrap-all.log"
+# 要部署哪个环境画像。默认 cloud-full——这是目前唯一真实跑过完整
+# 部署的环境;local-lite 用 `TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1
+# ./scripts/bootstrap-all.sh`。
+TARGET_ENV="${TARGET_ENV:-cloud-full}"
 STEP=0
 
 log() {
@@ -72,6 +81,20 @@ wait_healthy() {
   fi
 }
 
+step "确认这个工作区当前渲染的就是要部署的环境(${TARGET_ENV})"
+# 2026-08-22 补:这一步以前没有,是一键部署里一个很安静的坑。
+# `apps/definitions/` 和 `platform/apps/` 是渲染产物,**同一时刻只能代表
+# 一个环境**。如果这个工作区上一次跑的是 `render-environment-config.py
+# local-lite`,现在直接 bootstrap 到一台 cloud-full 机器上,ArgoCD 会照着
+# local-lite 的组件清单和域名去部署——每个 Pod 都 Running、ArgoCD 全绿,
+# 但装出来的是错的那套东西。这类"看起来成功了"正是这个项目反复踩的坑。
+#
+# 这里只校验、不自动渲染:渲染会改工作区文件,而 ArgoCD 读的是 git 远端,
+# 本地改完不 commit+push 根本不生效,自动渲染只会制造"我明明渲染过了"的
+# 错觉。不一致就停下来,让人自己渲染 + 提交 + 推送。
+run_required "scripts/render-environment-config.py ${TARGET_ENV} --check" \
+  python3 ./scripts/render-environment-config.py "${TARGET_ENV}" --check
+
 step "生成/确认管理员密码 Secret(幂等,已存在的不会被覆盖)"
 run_required "scripts/00-generate-secrets.sh" ./scripts/00-generate-secrets.sh
 
@@ -110,7 +133,7 @@ step "配置 Keycloak(platform realm + 各组件 OIDC client + 初始登录用�
 run_required "scripts/03-configure-keycloak.sh" ./scripts/03-configure-keycloak.sh
 
 log ""
-log "===== 核心 7 步(README 那份清单 + 补的 argo-workflows CRD)全部完成 ====="
+log "===== 核心步骤(环境校验 + README 那份清单 + 补的 argo-workflows CRD)全部完成 ====="
 log "接下来是组件专属初始化——对应组件现在如果没启用会自动跳过,"
 log "以后在 environments/<env>/config.yaml 的 enabled_components 里启用、"
 log "重新渲染 apps/definitions/ 之后,单独重跑对应的那一条命令就行,"
