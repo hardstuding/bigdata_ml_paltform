@@ -253,6 +253,33 @@ trino-liveness-fix/`(CronJob,每 5 分钟检查 livenessProbe 是不是已经是
 table-registration-app 29 + permission-request-app 60,后者这次从 52
 补到 60)。
 
+### 2.8 NetworkPolicy 白名单遗漏是个反复发作的 bug 类 —— 已加 CI 拦截(2026-08-21)
+
+同一类 bug 在 5 天内复发了 5 次:2026-08-13 Trino 连不上 Hive Metastore、
+08-14 Feast 连不上 Hive Metastore/MinIO、08-19 Argo Workflows 传 artifact
+到 MinIO 失败、08-20 train-from-feast-features 连 Hive Metastore 被拒、
+08-21 SeaTunnel 写 Iceberg 连 Hive Metastore 被拒。每次都是"新命名空间
+消费了共享服务,但中心化的白名单里忘了加一行"。
+
+**危险的地方在于发现得晚**:组件 ArgoCD 显示 Synced/Healthy,只有真的
+跑一次那条数据路径才暴露。SeaTunnel 那次因为 DAG 长期暂停,
+`docs/roles.md` 里"批量数据接入 ✅"这个结论挂了好几天,实际从来没通过。
+
+已加 `scripts/check-networkpolicy-consumers.py` 接进 CI:扫描仓库里引用
+共享服务 DNS 的文件,推断部署命名空间,和白名单对账。**自测过它真的会
+报警**(临时从白名单删掉 feast,检查确实报出来了),不是写完没验证的摆设。
+
+**但它有个必须说清楚的盲区**:只抓得到"直接引用"——某个命名空间的
+manifest 自己写着共享服务 DNS。抓不到"间接连接":调用方只是往服务 A 提交
+请求,真正去连共享服务的是 A 自己的 pod。**2026-08-21 SeaTunnel 那次恰恰
+是这类**(DAG 通过 REST API 提交给 seatunnel-0,真正连 Hive Metastore 的是
+seatunnel 命名空间的 pod,DAG 源码里没有 `namespace="seatunnel"`)——也就是
+说这个检查当初拦不住促成它诞生的那个 bug。**检查通过 ≠ 网络路径通**,
+真实端到端验证一次都不能少。
+
+想彻底解决间接连接这类,得换个思路(比如从"按命名空间名枚举"改成"按
+命名空间 label 选择",让消费方自己声明),那是架构级改动,单独评估。
+
 ### 2.5 扩大 CI
 
 **已迈出几步**(chart 渲染校验、DAG 单一源码、app ConfigMap 单一源码、

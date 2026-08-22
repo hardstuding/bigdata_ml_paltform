@@ -38,6 +38,9 @@ jobs:
       - name: 内嵌脚本单一源码校验(ConfigMap 里的脚本不能和 scripts/ 下的权威源漂移)
         run: python3 scripts/check-embedded-scripts.py
 
+      - name: NetworkPolicy 消费者白名单校验(新命名空间用共享服务不能漏加白名单)
+        run: python3 scripts/check-networkpolicy-consumers.py
+
       - name: 环境配置单一源码校验(cloud-full 部署文件不能和 templates/ + environments/cloud-full/config.yaml 渲染结果漂移)
         run: python3 scripts/render-environment-config.py cloud-full --check
 
