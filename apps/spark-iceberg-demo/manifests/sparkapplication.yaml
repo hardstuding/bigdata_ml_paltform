@@ -51,6 +51,21 @@ spec:
     spark.hadoop.fs.s3a.path.style.access: "true"
     spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
     spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    # 2026-08-21:**这两行以前完全没有,所以 Spark History Server 从部署那天
+    # 起就是空的**。History Server 读的是 s3a://spark-logs/(见
+    # apps/spark-history-server/manifests/deployment.yaml 的
+    # spark.history.fs.logDirectory),但从来没有任何作业往那里写过事件日志
+    # ——bucket 2026-08-16 就建好了,一直是空的。`docs/roles.md` 当时写着
+    # "作业可观测 ✅ 已部署并真实登录验证通过":能登录进去是真的,但进去
+    # 看到的是一个空列表,这个能力其实一直不成立。又一个"部署了 ≠ 能用"。
+    # S3A 的 endpoint/凭据上面已经配好了,这里只要打开开关 + 指目录。
+    spark.eventLog.enabled: "true"
+    # 用 /events 子目录而不是 bucket 根:根路径(s3a://spark-logs/)会让
+    # S3AFileSystem 的 S3Guard PathMetadata 直接抛
+    # "IllegalArgumentException: path must be absolute"(实测,栈在
+    # PathMetadata.<init> -> S3Guard.putAndReturn -> innerGetFileStatus),
+    # driver 起不来。History Server 那边的 logDirectory 同步改成一样的路径。
+    spark.eventLog.dir: s3a://spark-logs/events
     # 2026-08-21:这里原本有 spark.jars.packages + spark.jars.ivy 两行,
     # 现在都删了——三个 jar 已经在镜像构建期放进 $SPARK_HOME/jars/,driver 和
     # executor 都会自动加载,运行时完全不联网。删掉的两行各自解决过一个真实
