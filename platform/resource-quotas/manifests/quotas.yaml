@@ -77,9 +77,16 @@ metadata:
   namespace: spark-operator
 spec:
   hard:
-    requests.cpu: "2"
-    requests.memory: 4Gi
-    limits.memory: 6Gi
+    # 2026-08-22:原来的 4Gi/6Gi 只够 spark-history-server +
+    # spark-operator-{controller,webhook} 这几个常驻组件(实测占了
+    # requests.memory=3826Mi),给 spark-iceberg-demo 的 driver+executor
+    # (各请求 1024m -> 换算成 ~1433Mi,算上 overhead)完全没有余量——第
+    # 一次真实提交作业时直接被 quota 拒绝(ContainerCreating 后 driver pod
+    # 被 "exceeded quota: compute-quota" 拒绝创建)。加够一个 demo 作业的
+    # 量,不是给生产规模留的。
+    requests.cpu: "3"
+    requests.memory: 7Gi
+    limits.memory: 10Gi
 ---
 apiVersion: v1
 kind: ResourceQuota

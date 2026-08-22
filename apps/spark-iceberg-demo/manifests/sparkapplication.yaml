@@ -70,7 +70,11 @@ spec:
     coreRequest: "500m"
     cores: 1
     memory: "1024m"
-    serviceAccount: spark
+    # 2026-08-21:原本写的是 `spark`,那是已删除的 spark-rbac.yaml 建的
+    # ServiceAccount,集群里根本不存在(`kubectl -n spark-operator get sa`
+    # 确认过)。改用 spark-operator chart 自己建的这个,权限是 chart 按
+    # 官方设计配好的,不用我们自己维护一套。
+    serviceAccount: spark-operator-spark
     env:
       - name: MINIO_ACCESS_KEY
         valueFrom:

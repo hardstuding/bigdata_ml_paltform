@@ -292,7 +292,7 @@ data:
         OpenMetadata 里注册(比如还没通过 table-registration-app 建过),同样
         只记日志跳过,不是报错——这属于"目录信息滞后于实际数据"的正常过渡态,
         不是这个任务自己的 bug。"""
-        token = Variable.get("openmetadata_token", default_var="")
+        token = Variable.get("openmetadata_token", default="")
         if not token:
             print("openmetadata_token 未配置,跳过血缘推送")
             return
