@@ -13,7 +13,60 @@
 > 想知道"以前某个问题怎么解决的" → [`docs/journal/`](journal/) 和
 > [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 
-## CURRENT(2026-08-20,第二轮)
+## CURRENT(2026-08-22)
+
+用户目标一句话:**弄到生产可用**。协作方式是 multi-agent——Opus 统筹、
+验收、管 git,便宜模型跑云端执行和验证(边界见 `CLAUDE.md` 那一节)。
+
+用户 2026-08-22 明确的三条口径:
+1. **告警外部通知渠道**(企微/飞书/邮件):等真上生产再测,现在只要
+   "留好配置项、能生效"。
+2. **域名 + ICP 备案**:同上。→ 已做成 `tls_issuer_mode` 配置项,见
+   [ADR-060](decisions/060-conditional-rendering-and-tls-issuer.md)。
+3. **OpenMetadata bot token**:**明确允许**部署阶段自动创建,测试和生产
+   都一样;唯一要注意的是生产部署成功后收敛权限。→ 已做,见下。
+
+### 这一轮真实做完并验证过的
+
+- **规格分档铺开**(ADR-059 的后半段):Trino/Postgres 两个样本之外,
+  Superset/Airflow/MLflow/OpenSearch/MinIO 全部换成 `{{RES:...}}`,
+  29 个新可调键。local-lite/cloud-full 两档的值和改造前逐字节一致
+  (渲染后 `apps/definitions/` 的 diff 全是注释行),证明零行为变化。
+  顺带修了一个会让 prod 直接坏掉的问题:OpenSearch 的 `singleNode` 必须
+  和 `replicas` 绑定切换。
+- **TLS 签发方按环境切换**(ADR-060):新增通用的条件生成机制
+  (模板首行 `# render-if: <键> == <值>`),ClusterIssuer 三档同名
+  `platform-issuer`。**云上验证过**:重命名在活集群上收敛干净(旧
+  issuer 被 prune,新的 Ready=True,Trino 的 Certificate 仍然 Ready)。
+- **OpenMetadata bot token 自动化**(`scripts/27-configure-openmetadata-bot.sh`,
+  已接进 `bootstrap-all.sh`,排在脚本 14 之前):OpenMetadata 安装时自带
+  一个 unlimited 有效期的 ingestion-bot JWT(存在 Postgres `user_entity`
+  表、Fernet 加密),脚本直接读出解密,不用登录 UI 建 bot。**血缘因此
+  从 ❌ 变 ✅**,验证方式是直接查 `/api/v1/lineage/pipeline/...` 确认真实
+  存在血缘边,不是只看任务状态。
+- **Spark History Server 修好一个会破坏"从空环境可恢复"的问题**:原来
+  每次 Pod 启动都要从 Maven Central 现拉 280MB 的 aws-java-sdk-bundle,
+  今天 VM 重启后直接 CrashLoopBackOff(`curl: (28) timed out ... 44908902
+  out of 280645251 bytes`)。改用已有的 `spark-iceberg` 自建镜像
+  (构建期打好 jar),initContainer 整个删掉。**跑完 `scripts/13` 重新
+  端到端验证**:作业 COMPLETED,History Server `/api/v1/applications`
+  列出 `spark-iceberg-demo`。
+- **bootstrap-all.sh 补了两个一直漏掉的平台初始化步骤**:
+  `10-install-kserve-serving-runtimes.sh`(不装的话 KServe 起来了但一个
+  runtime 都没有)和 `20-configure-openmetadata-search-truststore.sh`
+  (不跑的话 OpenMetadata 连不上 OpenSearch,但首页能打开,容易被误判成
+  部署成功)。
+
+### 下一步
+
+1. **推倒重建验证**(用户明确要求放在最后统一做一次):从空环境跑
+   `bootstrap-all.sh`,验证这一轮所有改动没有破坏一键部署。参考
+   [ADR-039](decisions/039-teardown-rebuild-test.md) 上一次怎么做的。
+2. 剩下的生产缺口(还没做,不是忘了):Postgres 之外的真 HA(MinIO
+   分布式需要先做磁盘布局规划)、凭据接密钥管理系统、告警外部渠道、
+   真实域名/TLS/备案——后两条按用户口径押后。
+
+## 上一轮 CURRENT(2026-08-20,第二轮,已完成,存档)
 
 用户明确授权连续自主工作(先 3h,后又延到至少 4h),这是当天第二轮
 session,BACKLOG 2.1/2.3/2.6 + P1.7 的进展都在这轮做的,全部已在
@@ -197,7 +250,11 @@ cloud-full 云主机上真实验证,不是只写完代码。
     自愈逻辑
   - `docs/roles.md`、`docs/BACKLOG.md` 已同步更新反映这些变化
 
-## 下一步唯一动作
+## 下一步唯一动作(2026-08-19 那一版,已过期,存档)
+
+> **真正的下一步在最上面 CURRENT 那节**。这一节是 2026-08-19 写的,里面
+> 提到的 ADR-057 第三批(组件选择层)和 ADR-058 剩余部分都已经做完,留着
+> 只是因为中间夹着几段有价值的排障结论(MLflow 配额卡死、PyPI 限速等)。
 
 **2026-08-19 晚些时候补充:ADR-058 第一批(platform_sdk + 统一开发镜像)
 已实现并端到端验证,详见 ADR-058 全文,这里只记结论**——`platform_sdk`
@@ -366,10 +423,11 @@ openmetadata.yaml` 里的配置问题。删掉这条脏数据、走一遍完整�
 
 ## 正在运行的后台任务
 
-**没有。**
+**没有后台任务,但 cloud-full 云主机 2026-08-22 这一轮是开着的**(在
+上面 CURRENT 那些验证里持续使用中)。
 
-- cloud-full 云主机(`i-0jlbped4h1959tp591pe`)**本次会话结束前会停机**,
-  用 `scripts/26-stop-cloud-vm-economical.sh`,经济模式
+- cloud-full 云主机(`i-0jlbped4h1959tp591pe`)不用了就要停,用
+  `scripts/26-stop-cloud-vm-economical.sh`,经济模式
   (`StoppedMode=StopCharging`),停机期间不产生计算费用。
 - 重新开机后 SSH 隧道要重新建(公网 IP 不是固定 EIP,这次会话期间就
   变过两次),命令见 `environments/cloud-full/STATUS.md`。
