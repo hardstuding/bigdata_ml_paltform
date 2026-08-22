@@ -1,0 +1,91 @@
+# 这个文件是 templates/ 下的**源文件**,渲染产物在
+# apps/flink-streaming-demo/manifests/flinkdeployment.yaml(ArgoCD 读的
+# 还是那个路径,Application 的 path: 没变)。改动改这里,不要改生成产物。
+# 见 environments/resource-profiles.yaml 顶部说明和 ADR-059。
+#
+# PyFlink 在 Application Mode 下的标准提交方式(jarURI 指向 Flink 发行包
+# 自带的 flink-python-<version>.jar(Flink 1.16 起这个模块的 Maven 坐标从 flink-python_2.12 改名成不带 Scala 后缀的 flink-python,查过 Maven Central 版本列表确认——1.20.5 这一版必须用新名字,不能照抄网上一些还在用旧命名的 1.16 之前的示例),entryClass 是
+# org.apache.flink.client.python.PythonDriver,用 -py 参数指到真正的作业
+# 脚本)——这是 Flink 官方文档和 flink-kubernetes-operator 仓库自己的
+# examples/flink-python-example 用的同一个模式,不是这个仓库自己摸索出来
+# 的用法。jar 文件名里的版本号必须和镜像里实际打包的 Flink 版本一致(见
+# apps/flink-iceberg-image/Dockerfile 选的 1.20.5)。
+#
+# S3A/Hive Metastore 配置见 apps/flink-streaming-demo/manifests/
+# core-site-configmap.yaml 和 script-configmap.yaml 里的说明——照抄
+# Spark/Hive Metastore 那一套,不是另配一份。
+#
+# 依赖 flink-kubernetes-operator 先把 FlinkDeployment 这个 CRD 装好,和
+# kafka-cluster 依赖 kafka-operator 是同一个处理方式(CR 会自动重试直到
+# CRD 就绪,不需要手动排队)。serviceAccount: flink 是操作符 chart 自己
+# 建的(watchNamespaces 包含 flink 这个命名空间时,chart 会在这个命名空间
+# 里建好 flink 这个 ServiceAccount + Role + RoleBinding,不用我们自己
+# 另外写 RBAC)。
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: device-events-stream
+  namespace: flink
+spec:
+  # 2026-08-22:第一次 CI 构建完成、拿到真实 digest 之前先用 tag 占位——
+  # 见 docs/decisions/062-flink-streaming-pipeline.md,这一轮完全没有真实
+  # 集群可以跑 CI/推送验证。
+  image: ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg:latest
+  imagePullPolicy: IfNotPresent
+  flinkVersion: v1_20
+  serviceAccount: flink
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "1"
+    # Iceberg sink 靠 checkpoint 提交,见 script-configmap.yaml 里
+    # device_events_stream.py 顶部注释——这里的间隔和作业代码里
+    # t_env.get_config() 设的是同一个值,写两处是因为 flinkConfiguration
+    # 这里管的是集群级默认值,作业代码里那份是显式覆盖,两边保持一致避免
+    # 出现"以为改了配置,实际作业代码里那份没跟着改"的漂移。
+    execution.checkpointing.interval: "30s"
+  podTemplate:
+    spec:
+      containers:
+        - name: flink-main-container
+          env:
+            - name: HADOOP_CONF_DIR
+              value: /opt/flink/hadoop-conf
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: minio-root, key: rootUser}
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: minio-root, key: rootPassword}
+          volumeMounts:
+            - name: hadoop-conf
+              mountPath: /opt/flink/hadoop-conf
+            - name: job-script
+              mountPath: /opt/flink/usrlib
+      volumes:
+        - name: hadoop-conf
+          configMap:
+            name: flink-hadoop-core-site
+        - name: job-script
+          configMap:
+            name: flink-device-events-stream-script
+  jobManager:
+    resource:
+      # 规格分档,见 environments/resource-profiles.yaml。注意这两个字段
+      # 的单位和 K8s 原生 resources 块不一样——memory 是 Flink 自己的
+      # MemorySize 字符串格式("1024m"这种),cpu 是纯数字(不带 "m"
+      # 毫核后缀),这是 FlinkDeployment CRD 自己定义的 schema,不是笔误。
+      memory: "768m"
+      cpu: 0.3
+  taskManager:
+    resource:
+      memory: "768m"
+      cpu: 0.3
+  job:
+    jarURI: local:///opt/flink/opt/flink-python-1.20.5.jar
+    entryClass: "org.apache.flink.client.python.PythonDriver"
+    args: ["-pyclientexec", "/usr/bin/python3", "-py", "/opt/flink/usrlib/device_events_stream.py"]
+    parallelism: 1
+    # stateless:这个 demo 作业每次重新提交都是从 Kafka
+    # scan.startup.mode=earliest-offset 重新读,不依赖从 savepoint 恢复
+    # state——数据量很小,不需要为了一个 demo 引入 savepoint 存储的运维
+    # 负担(cluster 内也还没有为此配好持久化 savepoint 路径)。
+    upgradeMode: stateless

@@ -41,11 +41,14 @@ enabled_components:
   - cloudnative-pg-operator.yaml
   - dbt-demo.yaml
   - feast.yaml
+  - flink-kubernetes-operator.yaml
+  - flink-streaming-demo.yaml
   - hive-metastore.yaml
   - iam-sync.yaml
   - jupyterhub.yaml
   - kafka-cluster.yaml
   - kafka-operator.yaml
+  - kafka-producer-device-events.yaml
   - keycloak-db-init.yaml
   - kserve-crd.yaml
   - kserve-resources.yaml

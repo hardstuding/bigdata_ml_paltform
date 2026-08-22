@@ -104,6 +104,15 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: platform-sdk-demo
+        # flink(2026-08-22 新增,docs/decisions/062-flink-streaming-pipeline.md):
+        # Flink 流式作业的 JobManager/TaskManager 直连 MinIO(S3A)写
+        # Iceberg warehouse——和 spark-operator 是同一类需求,提前加上,
+        # 不等实测报错才发现(这个仓库已经因为"等实测才发现"在
+        # feast/dbt/argo-workflows/jupyterhub/platform-sdk-demo 上踩过
+        # 五次同样的坑,见上面几条注释)。
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: flink
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: minio

@@ -33,6 +33,8 @@ PAIRS = [
     ("apps/argo-workflows-training-image/manifests/script-configmap.yaml", "materialize_features.py", "scripts/materialize_features.py"),
     ("apps/argo-workflows-training-image/manifests/script-configmap.yaml", "validate_registered_model.py", "scripts/validate_registered_model.py"),
     ("apps/spark-iceberg-demo/manifests/script-configmap.yaml", "spark_iceberg_demo.py", "scripts/spark_iceberg_demo.py"),
+    ("apps/flink-streaming-demo/manifests/script-configmap.yaml", "device_events_stream.py", "scripts/flink_device_events_stream.py"),
+    ("apps/kafka-producer/manifests/script-configmap.yaml", "producer.py", "scripts/kafka_device_events_producer.py"),
 ]
 
 

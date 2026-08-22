@@ -1,0 +1,35 @@
+# Kafka(device-events topic)-> Flink -> Iceberg 的流式作业,见
+# docs/decisions/062-flink-streaming-pipeline.md 和
+# docs/decisions/056-flink-role-design.md(角色定位设计)。
+#
+# 和 apps/kafka/manifests(kafka-cluster Application)是同一个模式:裸
+# manifest,不是 Helm chart。这个 Application 依赖
+# flink-kubernetes-operator 先把 FlinkDeployment 这个 CRD 装好——和
+# kafka-cluster 依赖 kafka-operator 是同一个处理方式,CR 会自动重试直到
+# CRD 就绪,不需要手动排队,也不需要给两个 Application 之间加 sync wave。
+#
+# **这份文件没有加进任何环境的 enabled_components,需要人工确认后再加**,
+# 同一个理由见 flink-kubernetes-operator.yaml 顶部说明。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: flink-streaming-demo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/flink-streaming-demo/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: flink
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

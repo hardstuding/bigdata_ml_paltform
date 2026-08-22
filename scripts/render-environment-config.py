@@ -81,6 +81,13 @@ DIR_MAP = {
     "platform-cert-manager-issuers": REPO_ROOT / "platform" / "cert-manager-issuers" / "manifests",
     "platform-alertmanager-notification": REPO_ROOT / "platform" / "alertmanager-notification" / "manifests",
     "apps-kafka-manifests": REPO_ROOT / "apps" / "kafka" / "manifests",
+    # 2026-08-22 新增(docs/decisions/062-flink-streaming-pipeline.md):
+    # FlinkDeployment 的 resources/并行度、CronJob 的 resources 三个环境
+    # 不同,同样走"源文件挪进 templates/,渲染产物落回 ArgoCD 原本读的
+    # 路径"这条已经验证过的路(见上面 Postgres/cert-manager-issuers 那几条
+    # 的注释,这次不是新机制,是同一个机制第三/四次使用)。
+    "apps-flink-streaming-demo-manifests": REPO_ROOT / "apps" / "flink-streaming-demo" / "manifests",
+    "apps-kafka-producer-manifests": REPO_ROOT / "apps" / "kafka-producer" / "manifests",
 }
 
 # 模板文件第一行可以写 `# render-if: <config键> == <值>`,表示"只有当前

@@ -54,6 +54,8 @@ on:
       - "apps/argo-workflows-training-image/Dockerfile"
       - "apps/feast/feature-server-image/Dockerfile"
       - "apps/spark-iceberg-image/Dockerfile"
+      - "apps/flink-iceberg-image/Dockerfile"
+      - "apps/kafka-producer-image/Dockerfile"
       - ".github/workflows/build-images.yml"
 
 jobs:
@@ -81,6 +83,10 @@ jobs:
             image: feast-feature-server
           - context: apps/spark-iceberg-image
             image: spark-iceberg
+          - context: apps/flink-iceberg-image
+            image: flink-iceberg
+          - context: apps/kafka-producer-image
+            image: kafka-device-events-producer
     steps:
       - uses: actions/checkout@v4
 

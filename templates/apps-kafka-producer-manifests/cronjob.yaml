@@ -1,0 +1,58 @@
+# 用 CronJob 而不是常驻 Deployment——这是一个 demo/验证用的数据源,不是真实
+# 业务系统的生产者,持续常驻一个 Deployment 空转没有意义。每隔几分钟灌一批
+# 事件,足够让下游 Flink 作业(scan.startup.mode=earliest-offset + 持续
+# 运行)有真实数据可读,也方便验证脚本按需触发一次性执行(见
+# scripts/29-run-kafka-flink-streaming-demo.sh 用 `kubectl create job
+# --from=cronjob` 手动触发,不用等 schedule 到点)。
+#
+# 镜像来自 apps/kafka-producer-image/(GHCR,接进
+# .github/workflows/build-images.yml),脚本走 ConfigMap 挂载(见
+# script-configmap.yaml)。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: device-events-producer
+  namespace: kafka
+spec:
+  # 每 5 分钟一批,不需要更密——这个 demo 验证的是"链路通、数据真的流过
+  # 去",不是吞吐压测。
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: producer
+              # 2026-08-22:第一次 CI 构建完成、拿到真实 digest 之前先用 tag
+              # 占位——和这个仓库其它自建镜像最终都会切到 digest pin
+              # (@sha256:...)是同一个流程,这次没有真实集群可以跑 CI/推送,
+              # 见 docs/decisions/062-flink-streaming-pipeline.md 里的说明。
+              image: ghcr.io/hardstuding/bigdata_ml_paltform/kafka-device-events-producer:latest
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/app/producer.py"]
+              env:
+                - name: KAFKA_BOOTSTRAP_SERVERS
+                  value: platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
+                - name: KAFKA_TOPIC
+                  value: device-events
+                - name: EVENTS_PER_RUN
+                  value: "20"
+              volumeMounts:
+                - name: producer-script
+                  mountPath: /app
+              resources:
+                requests:
+                  # 规格分档,见 environments/resource-profiles.yaml
+                  cpu: {{RES:kafka_producer_cpu}}
+                  memory: {{RES:kafka_producer_memory_request}}
+                limits:
+                  memory: {{RES:kafka_producer_memory_limit}}
+          volumes:
+            - name: producer-script
+              configMap:
+                name: device-events-producer-script

@@ -1,0 +1,29 @@
+# 给流式接入 demo 用的 topic。apiVersion 是 v1(不是 v1beta2)——
+# 这个仓库的 Strimzi 是 1.1.0,查过它随包的 CRD 源码
+# (043-Crd-kafkatopic.yaml)确认这一版 KafkaTopic 只有 v1 一个存量版本,
+# 和 apps/kafka/manifests/kafka-cluster.yaml 里 Kafka/KafkaNodePool 用的
+# apiVersion 一致,不是猜的。
+#
+# 单节点 KRaft 集群,分区数和副本数的取舍和 kafka-cluster.yaml 是同一个
+# 道理:副本数只能是 1(可用 broker 只有 1 个)。分区数给 3——这个 demo
+# 数据量很小,3 个分区不是为了吞吐,是为了让 Flink 消费端的并行度设置
+# (parallelism > 1 时)有实际意义,不然单分区下加并行度是摆设。
+#
+# 这份文件直接放在 apps/kafka/manifests/ 下(kafka-cluster 这个
+# Application 的 path,已经在 enabled_components 里启用),不需要额外注册
+# 新组件——建 topic 这件事概念上属于 Kafka 集群自己的资源,不是消费者的
+# 资源。entityOperator.topicOperator(kafka-cluster.yaml 里已经开了)会
+# 监听这个 CR 并在 broker 上创建对应 topic。
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: device-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: platform-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    min.insync.replicas: 1

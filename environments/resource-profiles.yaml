@@ -95,6 +95,30 @@ local-lite:
   minio_memory_request: "256Mi"
   minio_memory_limit: "512Mi"
 
+  # 2026-08-22 新增(docs/decisions/062-flink-streaming-pipeline.md):
+  # Kafka 流式接入的 demo 生产者 + Flink Kubernetes Operator + Flink
+  # 流式作业本身。本机 colima 单节点,给能跑起来就行的最小值——和 Trino/
+  # Kafka 那批一样不追求性能,只追求"能装下、能跑通"。
+  kafka_producer_cpu: "50m"
+  kafka_producer_memory_request: "64Mi"
+  kafka_producer_memory_limit: "128Mi"
+
+  # Operator 本身很轻(和 kafka-operator 同一个量级),常驻但空闲时几乎不
+  # 吃资源。
+  flink_operator_cpu: "100m"
+  flink_operator_memory_request: "256Mi"
+  flink_operator_memory_limit: "512Mi"
+
+  # JobManager/TaskManager 的 resource 字段是 FlinkDeployment CRD 自己的
+  # schema(cpu 是纯数字,memory 是 Flink MemorySize 字符串),不是 K8s
+  # 原生 resources 块的格式,见 flinkdeployment.yaml 里的注释。
+  flink_jobmanager_cpu: 0.3
+  flink_jobmanager_memory: "768m"
+  flink_taskmanager_cpu: 0.3
+  flink_taskmanager_memory: "768m"
+  # 单节点机器,并行度 1 就够,提高了也排不上更多 slot。
+  flink_job_parallelism: 1
+
 cloud-full:
   # 阿里云 ECS 16 vCPU / 64 GiB,当前实际在跑的就是这一档
   trino_coordinator_cpu: "300m"
@@ -160,6 +184,22 @@ cloud-full:
   minio_cpu: "100m"
   minio_memory_request: "256Mi"
   minio_memory_limit: "512Mi"
+
+  # 和 local-lite 完全一样——同为单节点机器,同样的道理(见上面 Trino/
+  # Kafka 那批注释),这次新增的 Flink/Kafka 生产者也不例外。
+  kafka_producer_cpu: "50m"
+  kafka_producer_memory_request: "64Mi"
+  kafka_producer_memory_limit: "128Mi"
+
+  flink_operator_cpu: "100m"
+  flink_operator_memory_request: "256Mi"
+  flink_operator_memory_limit: "512Mi"
+
+  flink_jobmanager_cpu: 0.3
+  flink_jobmanager_memory: "768m"
+  flink_taskmanager_cpu: 0.3
+  flink_taskmanager_memory: "768m"
+  flink_job_parallelism: 1
 
 prod:
   # 6 台物理机(见 environments/prod/README.md 的目标硬件)。下面的数字是
@@ -256,3 +296,23 @@ prod:
   minio_cpu: "300m"
   minio_memory_request: "768Mi"
   minio_memory_limit: "1024Mi"
+
+  # 2026-08-22 新增(docs/decisions/062-flink-streaming-pipeline.md)。
+  # 和这个文件里其它 prod 数值一样,**方向性起步值,不是实测容量规划**
+  # ——真正吞吐取决于以后真实的流数据量,现在只是给一个能跑起来、比
+  # local-lite/cloud-full 大一档的起点。
+  kafka_producer_cpu: "200m"
+  kafka_producer_memory_request: "128Mi"
+  kafka_producer_memory_limit: "256Mi"
+
+  flink_operator_cpu: "300m"
+  flink_operator_memory_request: "512Mi"
+  flink_operator_memory_limit: "1024Mi"
+
+  flink_jobmanager_cpu: 1
+  flink_jobmanager_memory: "2048m"
+  flink_taskmanager_cpu: 1
+  flink_taskmanager_memory: "2048m"
+  # 6 台物理机,给 2 个并行度起步——真正该给多少要看 Kafka 分区数和真实
+  # 流量,这里只是不再像 local-lite 那样固定卡在 1。
+  flink_job_parallelism: 2

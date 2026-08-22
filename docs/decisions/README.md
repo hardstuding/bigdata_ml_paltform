@@ -42,6 +42,7 @@
 | [036](036-spark-iceberg-pipeline.md) | Spark 读写 Iceberg 端到端验证 | 已验证 |
 | [037](037-data-engineering-pipeline.md) | SeaTunnel → Iceberg → Airflow → Superset 端到端 | 已验证 |
 | [056](056-flink-role-design.md) | Flink 在这套架构里的角色 | **设计完成,没有部署任何东西** |
+| [062](062-flink-streaming-pipeline.md) | Flink 流式计算实现:Kafka -> Flink -> Iceberg | 代码/manifest 完成,**未在真实集群验证** |
 
 ## 数据目录、血缘与分析师工具
 

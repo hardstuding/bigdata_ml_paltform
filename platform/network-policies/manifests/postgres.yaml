@@ -175,6 +175,13 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: seatunnel
+        # 2026-08-22 新增(docs/decisions/062-flink-streaming-pipeline.md):
+        # Flink 流式作业读写 Iceberg 表要连 Hive Metastore 拿元数据,和
+        # trino/spark-operator/airflow/feast/argo-workflows/seatunnel 是
+        # 同一类需求,这次提前加上,不等实测报错才发现。
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: flink
       ports:
         - protocol: TCP
           port: 9083

@@ -1,0 +1,30 @@
+# 往 Kafka device-events topic 灌数据的 demo 生产者(CronJob),见
+# docs/decisions/062-flink-streaming-pipeline.md。装在 kafka 命名空间
+# (和 kafka-cluster 同一个命名空间,不是另起一个)——这个组件本身就是
+# Kafka 集群的一个数据源,不是独立的业务系统,没有理由单独开命名空间。
+#
+# **这份文件没有加进任何环境的 enabled_components,需要人工确认后再加**,
+# 同一个理由见 flink-kubernetes-operator.yaml 顶部说明。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kafka-producer-device-events
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/kafka-producer/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kafka
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

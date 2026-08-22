@@ -1,0 +1,133 @@
+# device_events_stream.py 的内容和 scripts/flink_device_events_stream.py
+# 保持同步——ConfigMap 是运行时真正挂载进 JobManager/TaskManager pod 的那份,
+# scripts/ 下的是给人看/方便本地阅读的那份。见
+# docs/decisions/062-flink-streaming-pipeline.md。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flink-device-events-stream-script
+  namespace: flink
+data:
+  device_events_stream.py: |
+    """
+    Kafka(device-events topic)-> Flink 流式计算 -> Iceberg——验证"流处理引擎"
+    这条能力,见 docs/decisions/056-flink-role-design.md 和
+    docs/decisions/062-flink-streaming-pipeline.md。
+
+    ADR-056 明确说过 Flink 在这套架构里的定位是"对着流数据做实时计算",不是
+    "另一个数据搬运工具"(纯搬运场景已经有 SeaTunnel/未来的 Kafka Connect)。
+    所以这个作业不是简单的 Kafka -> Iceberg 透传:
+
+      1. 明细表 demo.device_events_stream:逐条落地(用于验证"消费到的每一条
+         消息都真的进了 Iceberg",行数应该能和 Kafka 里发过的消息数对上)。
+      2. 聚合表 demo.device_events_stream_agg:按 device_id 做 1 分钟滚动
+         窗口计数——这是"数据经过时顺便算点什么"的真实体现,是只有 Flink
+         这类流计算引擎才顺手做的事,SeaTunnel/Kafka Connect 做不到。
+
+    两条 INSERT 用 StatementSet 一起提交,共用同一个 Kafka 读取,不用起两个
+    作业重复消费。
+
+    Iceberg/S3A 配置照抄 apps/spark-iceberg-demo/ 和
+    apps/hive-metastore/manifests/core-site-configmap.yaml 的那一套(同一个
+    Hive Metastore + 同一个 MinIO warehouse,不是另配一份不一样的)——S3A
+    凭据走 Hadoop 的 core-site.xml(挂载进 HADOOP_CONF_DIR,Flink 的
+    HadoopUtils 会自动读取这个环境变量指向的目录去加载 core-site.xml,这是
+    Flink 官方文档说明的机制,不是这个仓库发明的),不是走 Iceberg 自己的
+    原生 S3FileIO——这个选择是刻意的,为了和 Spark/Hive Metastore 用同一套
+    S3A 属性名和同一份连接方式,不给这个平台再引入第三种 S3 接入方式。
+
+    这份文件是给人看/方便本地阅读的那份,和
+    apps/flink-streaming-demo/manifests/script-configmap.yaml 里的内容保持
+    同步。不要直接跑这个文件——用
+    scripts/30-run-flink-streaming-demo.sh 通过 FlinkDeployment 提交。
+    """
+    from pyflink.table import EnvironmentSettings, TableEnvironment
+
+    KAFKA_BOOTSTRAP_SERVERS = "platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+    KAFKA_TOPIC = "device-events"
+    HIVE_METASTORE_URI = "thrift://hive-metastore.data.svc.cluster.local:9083"
+    ICEBERG_WAREHOUSE = "s3a://lakehouse/warehouse"
+
+
+    def main() -> None:
+        env_settings = EnvironmentSettings.in_streaming_mode()
+        t_env = TableEnvironment.create(env_settings)
+
+        # Iceberg sink 靠 checkpoint 触发提交(commit),没有 checkpoint,数据
+        # 永远只停留在 Flink 内部的 in-progress 文件里,Trino/Spark 永远读不到
+        # ——这是这个仓库"部署了不等于能用"的教训在 Flink 这里的对应版本,
+        # 必须显式打开,不能假设默认值够用(Flink 默认不开 checkpoint)。
+        t_env.get_config().set("execution.checkpointing.interval", "30 s")
+        t_env.get_config().set("execution.checkpointing.mode", "EXACTLY_ONCE")
+
+        t_env.execute_sql(f"""
+            CREATE TABLE kafka_device_events (
+                event_id    BIGINT,
+                device_id   STRING,
+                event_type  STRING,
+                value       DOUBLE,
+                event_time  TIMESTAMP(3),
+                WATERMARK FOR event_time AS event_time - INTERVAL '10' SECOND
+            ) WITH (
+                'connector' = 'kafka',
+                'topic' = '{KAFKA_TOPIC}',
+                'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP_SERVERS}',
+                'properties.group.id' = 'flink-device-events-stream',
+                'scan.startup.mode' = 'earliest-offset',
+                'format' = 'json',
+                'json.timestamp-format.standard' = 'ISO-8601',
+                'json.ignore-parse-errors' = 'true'
+            )
+        """)
+
+        t_env.execute_sql(f"""
+            CREATE CATALOG iceberg_catalog WITH (
+                'type' = 'iceberg',
+                'catalog-type' = 'hive',
+                'uri' = '{HIVE_METASTORE_URI}',
+                'warehouse' = '{ICEBERG_WAREHOUSE}'
+            )
+        """)
+        t_env.execute_sql("CREATE DATABASE IF NOT EXISTS iceberg_catalog.demo")
+
+        t_env.execute_sql("""
+            CREATE TABLE IF NOT EXISTS iceberg_catalog.demo.device_events_stream (
+                event_id    BIGINT,
+                device_id   STRING,
+                event_type  STRING,
+                value       DOUBLE,
+                event_time  TIMESTAMP(3)
+            )
+        """)
+
+        t_env.execute_sql("""
+            CREATE TABLE IF NOT EXISTS iceberg_catalog.demo.device_events_stream_agg (
+                window_start TIMESTAMP(3),
+                window_end   TIMESTAMP(3),
+                device_id    STRING,
+                event_count  BIGINT
+            )
+        """)
+
+        statement_set = t_env.create_statement_set()
+
+        statement_set.add_insert_sql("""
+            INSERT INTO iceberg_catalog.demo.device_events_stream
+            SELECT event_id, device_id, event_type, value, event_time
+            FROM kafka_device_events
+        """)
+
+        statement_set.add_insert_sql("""
+            INSERT INTO iceberg_catalog.demo.device_events_stream_agg
+            SELECT window_start, window_end, device_id, COUNT(*) AS event_count
+            FROM TABLE(
+                TUMBLE(TABLE kafka_device_events, DESCRIPTOR(event_time), INTERVAL '1' MINUTE)
+            )
+            GROUP BY window_start, window_end, device_id
+        """)
+
+        statement_set.execute()
+
+
+    if __name__ == "__main__":
+        main()
