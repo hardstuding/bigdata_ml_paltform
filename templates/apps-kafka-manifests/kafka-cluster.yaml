@@ -34,7 +34,7 @@ metadata:
     strimzi.io/cluster: platform-kafka
 spec:
   # 规格分档,见 environments/resource-profiles.yaml
-  replicas: 1
+  replicas: {{RES:kafka_replicas}}
   roles:
     - controller
     - broker
@@ -43,7 +43,7 @@ spec:
     volumes:
       - id: 0
         type: persistent-claim
-        size: 5Gi
+        size: {{RES:kafka_storage_size}}
         kraftMetadata: shared
   resources:
     requests:
@@ -76,11 +76,11 @@ spec:
         type: internal
         tls: false
     config:
-      offsets.topic.replication.factor: 1
-      transaction.state.log.replication.factor: 1
-      transaction.state.log.min.isr: 1
-      default.replication.factor: 1
-      min.insync.replicas: 1
+      offsets.topic.replication.factor: {{RES:kafka_replication_factor}}
+      transaction.state.log.replication.factor: {{RES:kafka_replication_factor}}
+      transaction.state.log.min.isr: {{RES:kafka_min_insync_replicas}}
+      default.replication.factor: {{RES:kafka_replication_factor}}
+      min.insync.replicas: {{RES:kafka_min_insync_replicas}}
   entityOperator:
     topicOperator: {}
     userOperator: {}

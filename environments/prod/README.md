@@ -39,8 +39,10 @@
 - Trino worker 数:**已经做成配置项**(`trino_workers`,prod 档是 3)。
 - OpenSearch:**已经做成配置项**(`opensearch_replicas` 3 +
   `opensearch_single_node` false,这两个必须一起切,原因见组件文件注释)。
-- Kafka 从单节点 KRaft 换成真正的多 broker 集群,评估副本因子
-  (replication factor)配置。
+- Kafka:**已经做成配置项**(`kafka_replicas` 3 + `kafka_replication_factor`
+  3 + `kafka_min_insync_replicas` 2)。这四个键必须一起切:单节点下
+  replication factor 写 3,topic 根本建不出来;3 broker 却留着 factor 1,
+  等于白搭了三台机器。isr 取 2 而不是 3,是为了挂一台还能继续写。
 
 ### 2. TLS 证书从自签换成真实证书
 

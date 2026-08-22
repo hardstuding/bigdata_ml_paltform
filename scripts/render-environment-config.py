@@ -80,6 +80,7 @@ DIR_MAP = {
     "apps-postgres-manifests": REPO_ROOT / "apps" / "postgres" / "manifests",
     "platform-cert-manager-issuers": REPO_ROOT / "platform" / "cert-manager-issuers" / "manifests",
     "platform-alertmanager-notification": REPO_ROOT / "platform" / "alertmanager-notification" / "manifests",
+    "apps-kafka-manifests": REPO_ROOT / "apps" / "kafka" / "manifests",
 }
 
 # 模板文件第一行可以写 `# render-if: <config键> == <值>`,表示"只有当前

@@ -34,6 +34,12 @@ local-lite:
   # 0 = coordinator 兼职干 worker 的活,单机不值得再起独立 worker
   trino_workers: "0"
   # 单节点机器,多副本没有意义(ADR-038 记录过这个结论)
+  # Kafka 单节点 KRaft:副本数 1 时三个 replication factor 只能是 1,
+  # 否则 topic 建不出来(可用 broker 不够)。
+  kafka_replicas: "1"
+  kafka_replication_factor: "1"
+  kafka_min_insync_replicas: "1"
+  kafka_storage_size: "5Gi"
   postgres_instances: "1"
 
   # --- 下面这批(Superset/Airflow/MLflow/OpenSearch/MinIO)是
@@ -95,6 +101,11 @@ cloud-full:
   trino_query_max_memory_per_node: "1GB"
   trino_workers: "0"
   # 也是单节点 ECS,同上
+  # 同上,单节点 ECS。
+  kafka_replicas: "1"
+  kafka_replication_factor: "1"
+  kafka_min_insync_replicas: "1"
+  kafka_storage_size: "5Gi"
   postgres_instances: "1"
 
   # 和 local-lite 完全一样的数字——渲染 cloud-full 之后 apps/definitions/
@@ -157,6 +168,13 @@ prod:
   # prod 真的拆出独立 worker,不再让 coordinator 兼职
   trino_workers: "3"
   # 6 台物理机才谈得上真 HA:1 主 2 备,见 environments/prod/README.md
+  # 3 broker + 3 副本 + min.insync 2:允许挂一台还能继续写(isr 取 3 的话
+  # 挂一台就直接停写)。存储容量同样是方向性起步值,真实容量要按消息量和
+  # 保留期算,不是这里能定的。
+  kafka_replicas: "3"
+  kafka_replication_factor: "3"
+  kafka_min_insync_replicas: "2"
+  kafka_storage_size: "200Gi"
   postgres_instances: "3"
 
   # 下面这批同样是**方向性起步值,不是实测容量规划**——请求值×3、限制值×2,
