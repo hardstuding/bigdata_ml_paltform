@@ -32,7 +32,7 @@ spec:
               # 占位——和这个仓库其它自建镜像最终都会切到 digest pin
               # (@sha256:...)是同一个流程,这次没有真实集群可以跑 CI/推送,
               # 见 docs/decisions/062-flink-streaming-pipeline.md 里的说明。
-              image: ghcr.io/hardstuding/bigdata_ml_paltform/kafka-device-events-producer@sha256:883408b54c7fbda9cf3754d95cdeabceedd3abb9142c9fc9cb358c2af9558bed
+              image: ghcr.io/hardstuding/bigdata_ml_paltform/kafka-device-events-producer:35232df151cf0a662eddf3886c53b7b7afa5ee27
               imagePullPolicy: IfNotPresent
               command: ["python3", "/app/producer.py"]
               env:

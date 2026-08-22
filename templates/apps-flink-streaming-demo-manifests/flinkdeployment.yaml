@@ -27,10 +27,22 @@ metadata:
   name: device-events-stream
   namespace: flink
 spec:
-  # digest 固定,不用 tag(ADR-010)。这个镜像**只有 linux/amd64**——
+  # **为什么用 commit-SHA 标签而不是 digest**(2026-08-22 实测逼出来的):
+  # 这个镜像压缩后 1244MB,从境内云主机直连 ghcr.io 实测约 80KB/s ——
+  # 要 4 个多小时。加速手段是 scripts/23(走国内镜像站拉,再 `docker tag`
+  # 打回原名),但**`docker tag` 没法给 digest 引用打标签**,所以
+  # digest 固定的镜像用不了这条加速路径。docker 的 `registry-mirrors`
+  # 又只对 Docker Hub 生效,对 ghcr 无效(containerd 支持按 registry 配
+  # mirror,docker 不支持)。
+  #
+  # commit SHA 标签是 CI 和 :latest 一起推的,一个 build 对应一个 SHA、
+  # 事实上不可变,满足"不用浮动 tag"的要求(ADR-010),同时能走镜像站。
+  # 这是在"可复现"和"这个网络环境下装得上"之间的取舍,不是忘了钉 digest。
+  # 完整背景见 docs/BACKLOG.md 2.10。
+  # 这个镜像**只有 linux/amd64**——
   # apache-flink 在 PyPI 上没有 linux/arm64 wheel,原因和约束见
   # docs/decisions/062-flink-streaming-pipeline.md 末尾。
-  image: ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg@sha256:2c49693fdd10dbba3ee7a33b55e711c20a473801b2e2e659a7ed3c9d486b488e
+  image: ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg:35232df151cf0a662eddf3886c53b7b7afa5ee27
   imagePullPolicy: IfNotPresent
   flinkVersion: v1_20
   serviceAccount: flink
