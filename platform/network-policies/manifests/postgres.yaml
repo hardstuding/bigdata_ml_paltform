@@ -164,6 +164,17 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: argo-workflows
+        # 2026-08-21 新增:SeaTunnel 写 Iceberg 表时要连 Hive Metastore 拿
+        # 元数据。**这条一直是缺的,而且从来没被发现过**——seatunnel_device_events
+        # 这个 DAG 长期处于暂停状态,没人真的触发过,组件本身 ArgoCD
+        # Synced/Healthy,`docs/roles.md` 就一直写着"批量数据接入 ✅"。
+        # 2026-08-21 第一次真的把这条链路跑起来才暴露:SeaTunnel 提交作业时
+        # 报 `Failed to connect to Hive Metastore / Connection refused`。
+        # 这正是这个项目自己反复强调的那条教训——"组件部署了、ArgoCD 绿了"
+        # 不等于"这条路真的通",只有真的跑一次才算数。
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: seatunnel
       ports:
         - protocol: TCP
           port: 9083
