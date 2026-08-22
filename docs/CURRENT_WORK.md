@@ -15,7 +15,7 @@
 
 ## CURRENT(2026-08-22 夜 → 08-23)
 
-### Flink 流式链路:真实部署中,已抓出 4 个 bug 并修掉
+### Flink 流式链路:**端到端验证通过**,过程中修了 9 个 bug
 
 **这一节是活的进度,不是结论。** Flink/Kafka 那条链路的代码 08-22 白天
 写完(ADR-062),当晚上云真部署,**每往前走一步就露出一个新问题**——这
@@ -40,10 +40,15 @@
 3 和 4 是同一类教训:**跨引擎复用同一套 schema / 元数据服务,但每个引擎
 缺的依赖、保留字集合都不一样**。
 
-**当前卡在哪**:第 4 个 bug 的修复(补 hive connector jar)已提交,CI 正在
-重建镜像。下一步是拉新镜像 → 重建 FlinkDeployment → 跑
-`scripts/31-run-flink-streaming-demo.sh` 做端到端验证(它会用 Trino 查
-Iceberg 明细表和聚合表的行数,不是只看作业状态)。
+**结果**:`FLINK_STREAMING_DEMO_OK: 明细表行数从 0 增加到 100,聚合表
+25 行`——判定依据是**用 Trino 独立查 Iceberg 表的实际行数**,不是看作业
+状态。`docs/roles.md` 里"流处理引擎"和"流式数据接入"两格都转 ✅,
+"大数据开发"这个角色从 🟡 升到 🟢(批和流两条链路都真实跑通了)。
+
+9 个 bug 的完整清单和三条教训见
+[ADR-062](decisions/062-flink-streaming-pipeline.md) 末尾。最值得记的一条:
+**代码写完时 validate-charts / render --check / YAML 解析 / Python 语法
+检查全部通过**,然后真部署一个接一个炸出 9 个问题。
 
 **还没验证的**:OpenMetadata 的 Trino 自动采集(`scripts/29`/`30`)——
 这一轮云主机时间都花在 Flink 上了,没轮到它。
