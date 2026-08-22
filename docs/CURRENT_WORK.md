@@ -13,7 +13,49 @@
 > 想知道"以前某个问题怎么解决的" → [`docs/journal/`](journal/) 和
 > [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 
-## CURRENT(2026-08-22)
+## CURRENT(2026-08-22 夜 → 08-23)
+
+### Flink 流式链路:真实部署中,已抓出 4 个 bug 并修掉
+
+**这一节是活的进度,不是结论。** Flink/Kafka 那条链路的代码 08-22 白天
+写完(ADR-062),当晚上云真部署,**每往前走一步就露出一个新问题**——这
+正是"代码写完 ≠ 能用"最直接的证据。已抓到并修掉的:
+
+1. **TaskManager 内存 768m,Flink 直接拒绝启动**。Flink 的 memory 是进程
+   总内存,扣掉 JVM overhead 和 metaspace 后,框架自己固定要 448m,768m
+   扣完只剩 320m。改成 1792m。
+2. **自建镜像境内拉不下来**。DaoCloud 镜像站有白名单、盖不住我们自己的
+   GHCR 包;而 digest 固定的镜像又没法用"镜像站拉了再 docker tag 打回
+   原名"这条加速路。改用 commit-SHA 标签 + `ghcr.nju.edu.cn`(实测
+   5.5MB/s,1244MB 三分四十五秒,**digest 与官方一致**)。
+   ⚠️ 顺带更正:此前记的"直连 80KB/s"是我量错了目录(Docker 29 用
+   containerd 存储),见 BACKLOG 2.10 的更正说明。
+3. **`value` 是 Flink SQL 保留字**,建表 DDL 没加反引号,SQL 解析失败。
+   字段名沿用 SeaTunnel 那条批量链路的 schema,在 Spark/SeaTunnel 那边
+   没问题,换到 Flink 就炸。
+4. **镜像缺 Hive Metastore 客户端 jar**,Iceberg 的 HiveCatalog 初始化
+   不了。iceberg-flink-runtime 不含这些类,而 apache/spark 官方镜像自带
+   ——所以 Spark 那条链路不用加。
+
+3 和 4 是同一类教训:**跨引擎复用同一套 schema / 元数据服务,但每个引擎
+缺的依赖、保留字集合都不一样**。
+
+**当前卡在哪**:第 4 个 bug 的修复(补 hive connector jar)已提交,CI 正在
+重建镜像。下一步是拉新镜像 → 重建 FlinkDeployment → 跑
+`scripts/31-run-flink-streaming-demo.sh` 做端到端验证(它会用 Trino 查
+Iceberg 明细表和聚合表的行数,不是只看作业状态)。
+
+**还没验证的**:OpenMetadata 的 Trino 自动采集(`scripts/29`/`30`)——
+这一轮云主机时间都花在 Flink 上了,没轮到它。
+
+### 云主机账单教训(2026-08-22 夜)
+
+云主机 14:41 开机,期间我卡在用量限制上,**它空转了将近 4 小时,约 ¥16**。
+`scripts/24-install-idle-shutdown-watchdog.sh` 那个看门狗本来是干这个的,
+但显然没有兜住这次——需要回头查它是不是没装/没生效。**教训:开机之后
+应该立刻确认兜底关机机制是活的,而不是假设它在。**
+
+## 上一轮 CURRENT(2026-08-22 白天)
 
 用户目标一句话:**弄到生产可用**。协作方式是 multi-agent——Opus 统筹、
 验收、管 git,便宜模型跑云端执行和验证(边界见 `CLAUDE.md` 那一节)。
