@@ -232,6 +232,29 @@ def main():
     check_only = "--check" in sys.argv
     config = load_config(env)
 
+    # **先把 config 校验完整,再动任何文件。** 2026-08-21 真实踩到:
+    # environments/prod/config.yaml 有 domain_suffix 但没有 enabled_components,
+    # 跑 `render-environment-config.py prod` 时第一步 render_templates 已经
+    # 把 platform/apps/*.yaml 里的域名全替换成了 prod 的占位域名,第二步
+    # render_components 才因为缺 enabled_components 失败——工作区被留在
+    # "一半 prod 一半 cloud-full"的混合状态,而且没有任何提示。对着一个正在
+    # 服务 cloud-full 的工作区,这等于悄悄把部署配置改脏了。
+    # 校验前置之后,配置不完整就在写任何文件之前直接退出。
+    missing = [k for k in ("domain_suffix", "http_port_suffix", "https_port_suffix",
+                           "external_scheme") if k not in config]
+    if missing:
+        print(f"!! environments/{env}/config.yaml 缺这些必填项: {missing}", file=sys.stderr)
+        sys.exit(1)
+    if config.get("enabled_components") is None:
+        print(
+            f"!! environments/{env}/config.yaml 里没有 enabled_components 这个列表,"
+            "不知道这个环境要启用哪些组件。\n"
+            "   **没有写任何文件就退出了**——不会把工作区留在半渲染的混合状态。\n"
+            "   参考 environments/cloud-full/config.yaml 的写法补上这个列表。",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     templates_ok, _ = render_templates(config, check_only)
     components_ok = render_components(config, check_only)
 
