@@ -180,7 +180,8 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 | `scripts/05-configure-airflow.sh` | 建 Airflow 初始管理员账号 | Airflow 从 `enabled_components` 里启用、Deployment 第一次起来之后 |
 | `scripts/06-configure-superset-datasources.sh` | 给 Superset 注册 Trino 数据源(服务账号认证) | Superset 或 Trino 任一个被重建之后 |
 | `scripts/07-fix-trino-liveness-probe.sh` | 修 Trino chart 里硬编码错的 livenessProbe(见 ADR-017) | 可选的立即手动修复快捷方式——`apps/trino-liveness-fix/` 这个 CronJob(2026-08-20 起)每 5 分钟自动巡检并修复,`trino-coordinator` 被重新创建后不手动跑这个脚本也会在几分钟内自愈,见 docs/BACKLOG.md 2.3 |
-| `scripts/10-install-kserve-serving-runtimes.sh` | 装 KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等,官方 chart 不带) | KServe 装完之后跑一次;这些是集群级资源,自身不占用运行时资源,不需要跟着组件重建反复重跑 |
+| `scripts/10-install-kserve-serving-runtimes.sh` | 装 KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等,官方 chart 不带) | **2026-08-21 起已并入 `bootstrap-all.sh`,不用单独跑**。不装的话 KServe 起来了但一个 runtime 都没有,要等真去上线模型才发现 |
+| `scripts/20-configure-openmetadata-search-truststore.sh` | 让 OpenMetadata 信任 OpenSearch 的自签证书 | **2026-08-21 起已并入 `bootstrap-all.sh`**。不跑的话 OpenMetadata 连不上 OpenSearch,搜索/目录是坏的,但首页能打开,容易被误判成部署成功 |
 | `scripts/14-configure-airflow-seatunnel-variable.sh` | 给 `seatunnel_device_events` 这个 DAG 写 MinIO 凭据(Airflow Variable) | Airflow 从 `enabled_components` 里启用、webserver 第一次起来之后 |
 
 ### Demo / 演示脚本(可选,验证平台端到端能力用)
