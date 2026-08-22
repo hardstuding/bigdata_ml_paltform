@@ -42,7 +42,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 |---|---|---|
 | 运维 | ✅ 基本可以 | 缺统一控制面/Runbook;告警没有外部通知渠道 |
 | 数据分析师 | ✅ 基本可以 | OpenMetadata 已部署验证,"找数据"卡点解除 |
-| 大数据开发 | 🟡 能开工 | **接数据→批处理→作业历史→血缘整条链路 2026-08-22 已真实跑通**;剩余缺口:Kafka 没接进真实管道、Flink 未实现 |
+| 大数据开发 | 🟢 可用 | **批和流两条链路都已真实端到端跑通**:批(接数据→批处理→作业历史→血缘,2026-08-22)+ 流(Producer→Kafka→Flink→Iceberg,2026-08-22 夜,ADR-062) |
 | 算法工程师 | 🟡 能开工 | 主链路 + 多步骤 DAG(特征物化→训练→模型门禁)都已端到端跑通;缺模型灰度/审批回滚 |
 | 管理 | ❌ 不行 | 驾驶舱从未开始 |
 
@@ -108,10 +108,10 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 环节 | 状态 | 说明 |
 |---|---|---|
 | 批量数据接入 | ✅ | **2026-08-21 第一次真实端到端验证通过**:触发 `seatunnel_device_events` DAG,SeaTunnel 日志确认 `Committed snapshot ... addedRecords=20`,20 条数据真的写进了 `seatunnel.demo.device_events` 这张 Iceberg 表,DAG 三个任务(提交/等待/推血缘)全绿。**此前这一行写的 ✅ 是假的**——依据只是"已部署 + ArgoCD Synced/Healthy",而真实数据路径其实一直不通(`seatunnel` 命名空间不在 Hive Metastore 的 NetworkPolicy 白名单里),因为那个 DAG 长期暂停、没人触发过所以一直没暴露。教训见 `docs/BACKLOG.md` 2.8 |
-| 流式数据接入 | 🟡 | Kafka 已部署验证(2026-08-19,真实生产/消费一条消息跑通),但**至今没有一条端到端验证过的流式管道**。2026-08-22 写完了 Producer CronJob(灌 device event 进 `device-events` topic,schema 和 SeaTunnel 那条批量链路一致)——**但云主机停机,一次都没跑过**,所以这一格不动 |
+| 流式数据接入 | ✅ | **2026-08-22 夜真实端到端验证通过**:Producer CronJob 灌 device event 进 `device-events` topic(schema 和 SeaTunnel 那条批量链路一致,不是另发明一套),Flink 消费后写进 Iceberg,Trino 查得到。这是这个平台**第一条端到端验证过的流式管道**——此前 Kafka 只验证过"能生产/消费一条消息",从没接进真实管道。剩余:SeaTunnel/Kafka Connect 这类现成接入组件还没接进流式链路(现在的 Producer 是自建 demo 应用) |
 | 湖仓存储 | ✅ | Iceberg on MinIO + Hive Metastore(ADR-002) |
 | 批处理引擎 | ✅ | **2026-08-21 真实跑通**:`spark-iceberg-demo` 作业 COMPLETED——读到 Trino 建的 `iceberg.demo.orders` 10 行、聚合后写出 `orders_by_region_spark` 新表、再读回确认真的落盘(`SPARK_ICEBERG_DEMO_OK`)。修好之前它坏了 10 天没人发现:`scripts/13` 引用的 `spark-rbac.yaml` 在 commit a7f2833 就被删了、`serviceAccount: spark` 指向不存在的 SA、运行时拉 Maven jar 在云主机上必卡死(改成构建期打进 `apps/spark-iceberg-image/`) |
-| 流处理引擎 | 🟡 | 2026-08-22 实现完成(ADR-062):Flink Kubernetes Operator 1.15.0 + PyFlink 作业,Kafka → Iceberg 明细表 + 1 分钟滚动窗口聚合表,checkpoint 触发提交。版本兼容性逐项查过上游核对的。**但全部没有在真实集群跑过**——镜像刚构建、PyFlink 能不能连上 Kafka/Hive Metastore/MinIO、checkpoint 提交是否真工作都待验证,开机后跑 `scripts/31-run-flink-streaming-demo.sh`。**不要因为代码齐了就当成能用** |
+| 流处理引擎 | ✅ | **2026-08-22 夜真实端到端验证通过**:Flink Kubernetes Operator 1.15.0 + PyFlink,Kafka → Iceberg。`scripts/31-run-flink-streaming-demo.sh` 输出 `FLINK_STREAMING_DEMO_OK: 明细表行数从 0 增加到 100,聚合表 25 行`——判定依据是**用 Trino 独立查 Iceberg 表的实际行数**,不是看作业状态。从"代码写完"到"真的跑通"一共修了 9 个 bug,全部只有真部署才会暴露,清单见 ADR-062 |
 | 调度 | ✅ | Airflow 已部署,DAG 单一源码 + CI 防漂移 |
 | 作业可观测 | ✅ | **2026-08-21 真实跑通**:History Server 的 `/api/v1/applications` 列出了刚跑完的作业(`name=spark-iceberg-demo, completed=True`),不再是空数组。修好之前**从部署那天起就是空的**——作业压根没开 `eventLog`,`s3a://spark-logs/` 一直没有任何内容;补上后又发现不能指 bucket 根路径(S3Guard 报 `path must be absolute`),改用 `events/` 子目录,并把这个前缀的创建做成声明式(MinIO chart 的 `customCommands`,验证过 hook 真的会重建它) |
 | 血缘 | ✅ | **2026-08-22 真实端到端验证通过**:此前一直卡在"bot token 要人工去 OpenMetadata UI 建"这一步,`scripts/27-configure-openmetadata-bot.sh` 解除了这个卡点——OpenMetadata 安装时已经自动生成一个 unlimited 有效期的 ingestion-bot JWT(存在 Postgres `user_entity` 表,Fernet 加密),脚本直接从数据库读出解密,不用登录 UI、不用等人工建 bot,幂等地建成 `table-registration-app-openmetadata` / `permission-request-app-openmetadata` 两个 Secret。验证链路:配好 token 后触发 `seatunnel_device_events` DAG,`push_lineage` 任务 success,直接查 `GET /api/v1/lineage/pipeline/name/airflow-platform.seatunnel_device_events` 确认真实存在 `pipeline -> trino.iceberg.demo.device_events` 这条血缘边(不是只看任务状态)。Spark 血缘(ADR-014)仍仅设计,未验证 |

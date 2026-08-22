@@ -274,3 +274,52 @@ digest 一致),`ghcr.linkos.org` 也返回 200 可作备选,但引入第三方�
 凭据,已记进 `docs/BACKLOG.md` 2.10 等确认。
 
 **这条是多节点演练的硬前置**:3 台新机器 × 全量镜像,按当前速度不可行。
+
+## 2026-08-22 夜:端到端验证**通过**,以及从"代码写完"到"真的跑通"踩的 9 个坑
+
+```
+FLINK_STREAMING_DEMO_OK: 明细表行数从 0 增加到 100,聚合表 25 行
+```
+
+判定依据是 `scripts/31-run-flink-streaming-demo.sh` **用 Trino 独立查
+Iceberg 表的实际行数**(明细表 `demo.device_events_stream` 100 行、
+1 分钟滚动窗口聚合表 `demo.device_events_stream_agg` 25 行),不是看
+FlinkDeployment 的状态字段。
+
+### 9 个 bug,全部只有真部署才会暴露
+
+代码写完时,`validate-charts.py`、`render-environment-config.py --check`、
+YAML 解析、Python 语法检查**全部通过**。然后真部署,一个接一个:
+
+| # | 问题 | 静态检查为什么查不出来 |
+|---|---|---|
+| 1 | TaskManager 内存 768m,Flink 直接拒绝启动 | Flink 运行时的内存语义校验(框架固定占 448m) |
+| 2 | 自建镜像 1244MB 境内拉不动 | 环境问题,不在代码里 |
+| 3 | `value` 是 Flink SQL 保留字 | Calcite 解析期才报 |
+| 4 | 镜像缺 Hive Metastore 客户端 jar | 运行时 ClassNotFound |
+| 5 | 缺 commons-logging / antlr-runtime / libfb303 | 同上,connector 依赖链 |
+| 6 | 设了 `HADOOP_CONF_DIR` 触发 Flink 自己的 ConfigMap 挂载机制 | K8s 调度期才暴露 |
+| 7 | `SimpleAWSCredentialsProvider` 不读环境变量 | 配置项名字合法、语义不对 |
+| 8 | Producer 时间格式和 Flink 解析标准对不上 | 数据格式,跨组件契约 |
+| 9 | `json.ignore-parse-errors=true` 把解析失败**静默转成 null** | 配置是"合法"的,后果在两个算子之后 |
+
+### 三条值得单独记住的教训
+
+**跨引擎复用 schema / 元数据服务,每个引擎缺的东西不一样。** 3、4、5、8
+都是这一类:字段名沿用 SeaTunnel 那条批量链路(刻意保持一致),但
+`value` 在 Spark 没事、在 Flink 是保留字;Hive Metastore 客户端
+apache/spark 官方镜像自带、Flink 镜像不带;时间格式 Spark 宽松、Flink 按
+`json.timestamp-format.standard` 严格匹配。**"和现有链路保持一致"是对的
+决定,但不等于不用重新验证。**
+
+**静默兜底比直接失败更难查。** 第 9 个花的时间最多:
+`json.ignore-parse-errors=true` 让时间戳解析失败不报错、变成 null,然后在
+两个算子之后以 `RowTime field should not be null` 炸出来。我为此反复 dump
+Kafka topic 验证数据格式(确认 20 条全是正确格式),一直在怀疑数据本身,
+而真正的问题是解析器被配置成了"吞掉错误"。已改成 `false`。这和这个仓库
+一贯的"不用默认值悄悄兜底"是同一条原则,这次是在数据管道上又验证一遍。
+
+**报错位置和根因可以隔好几层。** 第 6 个的表现是 JobManager 那边
+checkpoint 一直失败(`Not all required tasks are currently running`),
+真正原因是 TaskManager 因为一个不存在的 ConfigMap 起不来。只盯着
+checkpoint 的报错永远查不到,必须去看 TaskManager 的 Pod 事件。
