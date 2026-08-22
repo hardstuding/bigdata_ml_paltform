@@ -153,3 +153,15 @@ with mlflow.start_run():
         f"accuracy={accuracy:.3f},已注册进 MLflow Model Registry"
         f"({registered_model_name})。"
     )
+    # demo 数据只有 10 行(scripts/08-create-demo-data.sh 里写死的 10 笔
+    # 订单)、region 有 4 个取值,测试集固定切 1 条——这个规模下 accuracy
+    # 只有 0 或 1 两种可能,是个没有统计意义的数字。**不加这句提示的话,
+    # 在 MLflow UI 上看到 accuracy=0.000 很容易被误读成"平台坏了"**,
+    # 实际上链路是通的,只是数据量决定了这个指标没法看。真要评估模型好坏,
+    # 得先有真实规模的数据集,不是调这个脚本的参数。
+    if len(features_df) < 100:
+        print(
+            f"  ⚠️  注意:训练集只有 {len(features_df)} 行(demo 数据规模),"
+            f"上面这个 accuracy 没有统计意义——它只反映\"链路跑通了\","
+            f"不反映\"模型好不好\"。这是预期行为,不是故障。"
+        )
