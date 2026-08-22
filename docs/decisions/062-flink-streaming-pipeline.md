@@ -211,3 +211,55 @@ M2),而 Flink 相关的三个组件**没有出现在
 顺带一条:这次也顺手核实了 Dockerfile 里全部 6 个 jar 下载 URL 都是
 HTTP 200(ADR 正文里那个 `flink-python` 坐标改名的坑修对了),失败**不是**
 jar 地址问题。
+
+
+## 2026-08-22 第二个补充:真实部署抓到的两个问题
+
+### 1. TaskManager 内存 768m,Flink 直接拒绝启动
+
+第一次真正部署到 cloud-full,FlinkDeployment 卡在 `UPGRADING` /
+`jobManagerDeploymentStatus: MISSING`,operator 日志里的根因:
+
+```
+IllegalConfigurationException: TaskManager memory configuration failed:
+Sum of configured Framework Heap Memory (128.000mb), Framework Off-Heap
+Memory (128.000mb), Task Off-Heap Memory (0 bytes), Managed Memory
+(128.000mb) and Network Memory (64.000mb) exceed configured Total Flink
+Memory (320.000mb).
+```
+
+**这是"照着别的组件的规格分档习惯给小值"踩的坑**:Flink 的
+`taskManager.resource.memory` 是**进程总内存**,要先扣掉 JVM overhead
+(10%,下限 192m)和 metaspace(默认 256m),剩下的才叫 "Total Flink
+Memory";而框架自己固定要占 128+128+128+64 = 448m。768m 扣完只剩 320m,
+连框架都不够,更别说跑任务。
+
+实际下限大约 900m 出头。local-lite/cloud-full 改成 jobmanager 1024m /
+taskmanager 1792m(留出真正的 task heap),prod 的 taskmanager 提到
+4096m。
+
+**这个 bug 只有真部署才会暴露**——`helm template`、`validate-charts.py`、
+YAML 解析全都查不出来,它是 Flink 运行时的语义校验。
+
+### 2. 自建镜像在境内拉不动,digest 固定和镜像站加速互斥
+
+`flink-iceberg` 压缩后 **1244MB**。境内云主机直连 `ghcr.io` 实测约
+80KB/s,要 4 个多小时。而已有的加速手段
+`scripts/23-pull-images-remote-via-mirror.sh` 用的是"经国内镜像站拉 →
+`docker tag` 打回原名",**digest 引用没法 `docker tag`**,所以 digest
+固定的镜像用不了这条路;docker 的 `registry-mirrors` 又只对 Docker Hub
+生效,对 ghcr 无效。
+
+更麻烦的是:DaoCloud 镜像站有**白名单**,只代理知名上游镜像,我们自己的
+GHCR 包直接被拒(`this image is not in the allowlist`)。
+
+临时处理:这两个自建镜像改用 CI 同时推的 **commit-SHA 标签**(事实不可变,
+满足 ADR-010 的"不用浮动 tag",而且能 `docker tag`)。
+
+**但这只是绕过,不是解决。** 探测到 `ghcr.nju.edu.cn` / `ghcr.linkos.org`
+这类无白名单的公开代理对我们的仓库返回 200,可以作为候选,但引入第三方
+代理需要核对 digest 一致性,而且可靠性不由我们控制。真正的生产解法应该是
+**把自建镜像推一份到境内 registry(比如阿里云 ACR)**,这需要用户提供
+凭据,已记进 `docs/BACKLOG.md` 2.10 等确认。
+
+**这条是多节点演练的硬前置**:3 台新机器 × 全量镜像,按当前速度不可行。

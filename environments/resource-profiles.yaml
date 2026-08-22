@@ -112,10 +112,20 @@ local-lite:
   # JobManager/TaskManager 的 resource 字段是 FlinkDeployment CRD 自己的
   # schema(cpu 是纯数字,memory 是 Flink MemorySize 字符串),不是 K8s
   # 原生 resources 块的格式,见 flinkdeployment.yaml 里的注释。
+  # **这四个值不能按"够小就行"随便给**——2026-08-22 在 cloud-full 上真实
+  # 撞到:taskmanager 给 768m,Flink 直接拒绝启动,报
+  # `IllegalConfigurationException: Sum of configured Framework Heap
+  # Memory (128mb), Framework Off-Heap (128mb), Managed (128mb) and
+  # Network (64mb) exceed configured Total Flink Memory (320mb)`。
+  #
+  # 原因:Flink 的 memory 是**进程总内存**,要先扣掉 JVM overhead(10%,
+  # 下限 192m)和 metaspace(默认 256m),剩下的才是 "Total Flink Memory",
+  # 而框架自己就要占掉 128+128+128+64 = 448m。768m 扣完只剩 320m,不够。
+  # 实际下限大约是 900m 出头,给 1792m 留出真正跑任务的 task heap。
   flink_jobmanager_cpu: 0.3
-  flink_jobmanager_memory: "768m"
+  flink_jobmanager_memory: "1024m"
   flink_taskmanager_cpu: 0.3
-  flink_taskmanager_memory: "768m"
+  flink_taskmanager_memory: "1792m"
   # 单节点机器,并行度 1 就够,提高了也排不上更多 slot。
   flink_job_parallelism: 1
 
@@ -195,10 +205,20 @@ cloud-full:
   flink_operator_memory_request: "256Mi"
   flink_operator_memory_limit: "512Mi"
 
+  # **这四个值不能按"够小就行"随便给**——2026-08-22 在 cloud-full 上真实
+  # 撞到:taskmanager 给 768m,Flink 直接拒绝启动,报
+  # `IllegalConfigurationException: Sum of configured Framework Heap
+  # Memory (128mb), Framework Off-Heap (128mb), Managed (128mb) and
+  # Network (64mb) exceed configured Total Flink Memory (320mb)`。
+  #
+  # 原因:Flink 的 memory 是**进程总内存**,要先扣掉 JVM overhead(10%,
+  # 下限 192m)和 metaspace(默认 256m),剩下的才是 "Total Flink Memory",
+  # 而框架自己就要占掉 128+128+128+64 = 448m。768m 扣完只剩 320m,不够。
+  # 实际下限大约是 900m 出头,给 1792m 留出真正跑任务的 task heap。
   flink_jobmanager_cpu: 0.3
-  flink_jobmanager_memory: "768m"
+  flink_jobmanager_memory: "1024m"
   flink_taskmanager_cpu: 0.3
-  flink_taskmanager_memory: "768m"
+  flink_taskmanager_memory: "1792m"
   flink_job_parallelism: 1
 
 prod:
@@ -312,7 +332,9 @@ prod:
   flink_jobmanager_cpu: 1
   flink_jobmanager_memory: "2048m"
   flink_taskmanager_cpu: 1
-  flink_taskmanager_memory: "2048m"
+  # prod 的 taskmanager 给更多:上面那条注释里算过,1792m 只是"能启动"的
+  # 舒适下限,真实负载的 task heap 要靠这个数字撑。
+  flink_taskmanager_memory: "4096m"
   # 6 台物理机,给 2 个并行度起步——真正该给多少要看 Kafka 分区数和真实
   # 流量,这里只是不再像 local-lite 那样固定卡在 1。
   flink_job_parallelism: 2

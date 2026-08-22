@@ -85,11 +85,11 @@ spec:
       # 的单位和 K8s 原生 resources 块不一样——memory 是 Flink 自己的
       # MemorySize 字符串格式("1024m"这种),cpu 是纯数字(不带 "m"
       # 毫核后缀),这是 FlinkDeployment CRD 自己定义的 schema,不是笔误。
-      memory: "768m"
+      memory: "1024m"
       cpu: 0.3
   taskManager:
     resource:
-      memory: "768m"
+      memory: "1792m"
       cpu: 0.3
   job:
     jarURI: local:///opt/flink/opt/flink-python-1.20.5.jar
