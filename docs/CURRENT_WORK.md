@@ -77,8 +77,28 @@
 
 **已经做过的动作和当前状态**:执行了一次 `k3s-uninstall.sh`(集群短暂
 中断,Codex 那个项目也跟着中断了),随后用
-`scripts/21-bootstrap-cloud-vm.sh` 原样装回去,集群状态因为 data-dir 没被
-删所以完整恢复,`data-ai-platform-v2` 命名空间也在。**没有发生数据丢失。**
+`scripts/21-bootstrap-cloud-vm.sh` 原样装回去。**已经完整恢复并逐项核实
+过,不是"看着好了"**:
+
+- 56 个 ArgoCD Application 全部回到 Synced/Healthy(和中断前的基线一致)。
+- Codex 的 `data-ai-platform-v2` 命名空间 7 个 Pod 全部 1/1 Running,
+  **没有数据丢失**。
+- 功能抽查:跑 `scripts/13-run-spark-iceberg-demo.sh`,读到 10 行、写回
+  `iceberg.demo.orders_by_region_spark`、`SPARK_ICEBERG_DEMO_OK`;
+  History Server `/api/v1/applications` 列出两次作业。
+
+**恢复过程中要手动介入的三件事**(下次在 cloud-full 上重启 k3s 会再遇到,
+不是一次性偶发):
+
+1. k3s 重启后,重启前就存在的 Pod 会**丢掉 projected serviceaccount
+   token**(`/var/run/secrets/.../token: no such file or directory`,
+   还有 `kube-root-ca.crt not registered`),自己不会自愈,必须
+   `kubectl delete pod` 让 kubelet 重新投一次。Postgres 是关键路径
+   (所有组件都依赖它),先修它,其余大部分跟着自愈。
+2. `airflow-migrate-db` 这个 Job 在 Postgres 还没起来的窗口里失败并
+   `BackoffLimitExceeded`,Job 失败之后不会自己重试,要 `kubectl delete
+   job` 让 ArgoCD 重建(重建后 9 秒完成)。
+3. SSH 隧道会断,要重建。
 
 **需要用户回答的**:要不要真的删掉 `/data/k3s` 做一次货真价实的从空重建?
 如果要,Codex 那个项目的数据怎么办(它自己能不能重建/需不需要先备份)。
@@ -449,8 +469,10 @@ openmetadata.yaml` 里的配置问题。删掉这条脏数据、走一遍完整�
 
 ## 正在运行的后台任务
 
-**没有后台任务,但 cloud-full 云主机 2026-08-22 这一轮是开着的**(在
-上面 CURRENT 那些验证里持续使用中)。
+**没有后台任务。cloud-full 云主机 2026-08-22 这一轮结束时仍然开着**,
+按 ¥4/时 计费。**没有自作主张停机的原因**:这台机器上还跑着 Codex 那个
+并行项目(`data-ai-platform-v2`,和这个平台共用同一个 k3s 集群),停机会
+把它一起停掉,不知道对方是不是还在用——需要用户确认之后再停。
 
 - cloud-full 云主机(`i-0jlbped4h1959tp591pe`)不用了就要停,用
   `scripts/26-stop-cloud-vm-economical.sh`,经济模式
