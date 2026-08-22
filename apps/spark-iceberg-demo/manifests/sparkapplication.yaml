@@ -2,8 +2,11 @@
 # 这个一次性验证用的资源,不是常驻组件,不走 GitOps 管理(和
 # kserve-demo/scripts/08 建的 Superset demo 是同一类东西)。
 #
-# 官方 apache/spark 镜像(不自己 build),Iceberg/S3A 支持通过
-# `spark.jars.packages` 在提交时从 Maven Central 现拉,不打进镜像。
+# 2026-08-21 起用自建镜像(apps/spark-iceberg-image/),Iceberg/S3A 的三个
+# jar 在**构建期**就打进 $SPARK_HOME/jars/。此前是官方 apache/spark 镜像 +
+# `spark.jars.packages` 运行时从 Maven Central 现拉——那条路在 cloud-full
+# 上会卡死(实测:aws-java-sdk-bundle 下载进度停在 0 字节 8 分钟以上),
+# 也是"批处理引擎"这条链路一直没法重新验证的直接原因。
 #
 # hadoop-aws 版本特意不跟 Trino/Hive Metastore 那边保持一致(那两处是
 # 3.4.1/3.1.0,各自匹配自己镜像内置的 hadoop-common)——这里必须匹配
@@ -29,7 +32,11 @@ metadata:
 spec:
   type: Python
   mode: cluster
-  image: apache/spark:3.5.9-python3
+  # 2026-08-21:从官方 apache/spark:3.5.9-python3 换成自建镜像——Iceberg/
+  # hadoop-aws/aws-sdk 三个 jar 已经在构建期打进 $SPARK_HOME/jars/,不再靠
+  # spark.jars.packages 在运行时拉(那条路在这台云主机上会卡死,见
+  # apps/spark-iceberg-image/Dockerfile 里的完整说明和实测数据)。
+  image: ghcr.io/hardstuding/bigdata_ml_paltform/spark-iceberg@sha256:afbf3cd189045744417d1dc5813fdb31d8664f2e8d080ef512ec947c2012de5b
   imagePullPolicy: IfNotPresent
   mainApplicationFile: local:///opt/spark-demo/spark_iceberg_demo.py
   sparkVersion: "3.5.9"
@@ -44,21 +51,16 @@ spec:
     spark.hadoop.fs.s3a.path.style.access: "true"
     spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
     spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
-    # iceberg-spark-runtime 特意不用 Maven Central 上最新的 1.11.0——实测
-    # 1.11.0 这个 jar 是用 Java 17 编译的(class file version 61),但
-    # apache/spark:3.5.9-python3 这个官方镜像自带的是 Temurin JDK 11
-    # (`java -version` 实测确认),driver 启动时直接
-    # UnsupportedClassVersionError。逐个版本下载实测二分定位:1.10.0 还是
-    # Java 11 编译(class file version 55),1.11.0 才跳到 Java 17,分界点
-    # 在这两个版本之间,选最新的、还兼容当前镜像 JDK 的 1.10.0。
-    spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
-    # spark.jars.packages 触发的 Maven/Ivy 依赖解析是 spark-operator
-    # controller 自己在它的 pod 里跑 spark-submit 完成的(不是在
-    # driver/executor pod 里),controller 这个 pod 跑在一个没有可写
-    # $HOME 的受限用户下(Ivy 默认缓存路径 /nonexistent/.ivy2.5.2/... 报
-    # FileNotFoundException,实测确认过)。显式把 Ivy 缓存指到一个肯定
-    # 可写的路径,不依赖 controller pod 的默认 $HOME。
-    spark.jars.ivy: "/tmp/.ivy2"
+    # 2026-08-21:这里原本有 spark.jars.packages + spark.jars.ivy 两行,
+    # 现在都删了——三个 jar 已经在镜像构建期放进 $SPARK_HOME/jars/,driver 和
+    # executor 都会自动加载,运行时完全不联网。删掉的两行各自解决过一个真实
+    # 问题,理由都搬进了 apps/spark-iceberg-image/Dockerfile,没有丢:
+    #   - iceberg-spark-runtime 锁 1.10.0 不用 1.11.0:后者用 Java 17 编译
+    #     (class file version 61),Spark 镜像自带 JDK 11,driver 直接
+    #     UnsupportedClassVersionError(逐版本二分定位过)。
+    #   - Ivy 缓存路径要显式指定:spark-operator controller 跑在没有可写
+    #     $HOME 的受限用户下。**这条现在自然消失了**,因为压根不再做 Ivy
+    #     依赖解析——不是绕过去,是这个问题的前提没有了。
   restartPolicy:
     type: Never
   driver:
