@@ -110,26 +110,28 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 批量数据接入 | ✅ | **2026-08-21 第一次真实端到端验证通过**:触发 `seatunnel_device_events` DAG,SeaTunnel 日志确认 `Committed snapshot ... addedRecords=20`,20 条数据真的写进了 `seatunnel.demo.device_events` 这张 Iceberg 表,DAG 三个任务(提交/等待/推血缘)全绿。**此前这一行写的 ✅ 是假的**——依据只是"已部署 + ArgoCD Synced/Healthy",而真实数据路径其实一直不通(`seatunnel` 命名空间不在 Hive Metastore 的 NetworkPolicy 白名单里),因为那个 DAG 长期暂停、没人触发过所以一直没暴露。教训见 `docs/BACKLOG.md` 2.8 |
 | 流式数据接入 | 🟡 | Kafka 已部署验证(2026-08-19,真实生产/消费一条消息跑通),但**从没接进端到端数据管道**(没有真实的 Producer/Consumer 应用,SeaTunnel/Kafka Connect 都还没接) |
 | 湖仓存储 | ✅ | Iceberg on MinIO + Hive Metastore(ADR-002) |
-| 批处理引擎 | 🟡 | Spark Operator 已部署,但 **demo 作业从 2026-08-12 起就跑不起来了,一直没人发现**:`scripts/13-run-spark-iceberg-demo.sh` 引用的 `spark-rbac.yaml` 在 commit a7f2833 就被删了(改用 chart 自带 SA),脚本没跟着改,第一步就退出;`sparkapplication.yaml` 里的 `serviceAccount: spark` 也指向那个已不存在的 SA。2026-08-21 两处都修好了,并把运行时拉 Maven jar 换成构建期打进镜像(那条路在云主机上会卡死)。**但仍未跑通一次真实作业**——卡在新镜像(~2GB)从 ghcr.io 拉到这台云主机极慢/中断,是网络问题不是设计问题,还在重试 |
+| 批处理引擎 | ✅ | **2026-08-21 真实跑通**:`spark-iceberg-demo` 作业 COMPLETED——读到 Trino 建的 `iceberg.demo.orders` 10 行、聚合后写出 `orders_by_region_spark` 新表、再读回确认真的落盘(`SPARK_ICEBERG_DEMO_OK`)。修好之前它坏了 10 天没人发现:`scripts/13` 引用的 `spark-rbac.yaml` 在 commit a7f2833 就被删了、`serviceAccount: spark` 指向不存在的 SA、运行时拉 Maven jar 在云主机上必卡死(改成构建期打进 `apps/spark-iceberg-image/`) |
 | 流处理引擎 | ❌ | Flink 只有角色设计(ADR-056),没有实现 |
 | 调度 | ✅ | Airflow 已部署,DAG 单一源码 + CI 防漂移 |
-| 作业可观测 | 🟡 | Spark History Server 已部署、登录验证过(2026-08-19),`/api/v1/applications` 接口 2026-08-21 实测可达、返回合法 JSON——**但返回的是空数组**,因为至今没有任何 Spark 作业真正跑完过(见上面"批处理引擎")。接口通 ≠ 这个能力可用,等批处理跑通后才能算数 |
+| 作业可观测 | ✅ | **2026-08-21 真实跑通**:History Server 的 `/api/v1/applications` 列出了刚跑完的作业(`name=spark-iceberg-demo, completed=True`),不再是空数组。修好之前**从部署那天起就是空的**——作业压根没开 `eventLog`,`s3a://spark-logs/` 一直没有任何内容;补上后又发现不能指 bucket 根路径(S3Guard 报 `path must be absolute`),改用 `events/` 子目录,并把这个前缀的创建做成声明式(MinIO chart 的 `customCommands`,验证过 hook 真的会重建它) |
 | 血缘 | ❌ | **OpenMetadata 已部署并登录验证过(2026-08-19),但没有任何血缘数据在往里流**(2026-08-21 修正:这一行之前写的"OpenMetadata 没部署"是过期信息,和本文档"数据分析师"那一行自相矛盾);SeaTunnel 血缘(ADR-052)只验证过 API 机制;Spark 血缘(ADR-014)仅设计 |
 | 数据质量 / 契约 | ❌ | 未开始(B 线) |
 | 作业模板 / CI-CD | ❌ | 未开始(A 线) |
 
-**结论(2026-08-21 更新):**这次真的去跑"接数据→批处理→查看作业历史"
-这条链路,结果是**三步里只有第一步真的通了**,而且过程中发现前面标的
-✅ 有两个是假的:
+**结论(2026-08-21,已全部修通):****"接数据→批处理→查看作业历史"这条
+完整链路第一次真实端到端跑通**,三步都有可复核的证据(不是"组件 Running")。
+但值得记住的是**开跑之前这三步里有三处标着 ✅ 其实都是假的**,全靠真的
+跑一遍才暴露:
 
 - **接数据 ✅ 真通了**:20 条数据真实落进 Iceberg。但修之前它是不通的
   ——NetworkPolicy 白名单漏了 `seatunnel` 命名空间,加上 DAG 里
   `Variable.get(..., default_var=)` 用了 Airflow 3.x 已经不存在的参数名,
   每跑必 TypeError。两个 bug 都是"存在很久但没人触发过所以没暴露"。
-- **批处理 🟡 还没跑通**:demo 脚本从 2026-08-12 起就是坏的(引用了当天
-  被删除的 spark-rbac.yaml),整整 10 天没人发现,因为没人跑过。已修好,
-  但卡在新镜像拉取慢,仍未跑出一次成功作业。
-- **作业可观测 🟡**:接口通,但列表是空的——没有作业跑完过,自然没东西看。
+- **批处理 ✅ 现在真通了**:但 demo 脚本从 2026-08-12 起就是坏的(引用了
+  当天被删除的 spark-rbac.yaml),整整 10 天没人发现,因为没人跑过。
+- **作业可观测 ✅ 现在真通了**:此前 History Server 从部署那天起列表就是
+  空的——作业压根没配 `eventLog`,没有任何东西写进 `s3a://spark-logs/`。
+  "能登录进去"被当成了"这个能力可用"。
 
 **这段经历本身就是这份文档存在的理由**:三处 ✅ 里两处站不住,共同点都是
 "部署了 + ArgoCD 绿了"就被当成了"能用"。凡是没有真实跑过一次的能力,
