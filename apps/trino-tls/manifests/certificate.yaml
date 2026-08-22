@@ -18,7 +18,7 @@ spec:
   # Empty issuer DN not allowed in X509Certificates。实测踩过,不是猜的。
   commonName: trino.local-lite.test
   issuerRef:
-    name: local-lite-selfsigned
+    name: platform-issuer
     kind: ClusterIssuer
   dnsNames:
     - trino.local-lite.test

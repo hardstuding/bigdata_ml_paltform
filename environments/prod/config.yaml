@@ -11,6 +11,25 @@ http_port_suffix: ""
 https_port_suffix: ""
 external_scheme: https
 
+# TLS 证书由哪个 ClusterIssuer 签发:selfsigned | acme。
+# prod 走 acme——真实域名 + 真实 CA。ClusterIssuer 的名字和另外两个环境
+# 一样是 `platform-issuer`,所以引用它的 Certificate 资源不用跟着改。
+#
+# **这一档还没有在真实环境验证过**(没有真实域名,也还没做 ICP 备案),
+# 属于"配置结构就位、改配置就能生效",不是"已经跑通过"。上生产的顺序是:
+#   1. 域名解析指到集群入口 + 80 端口从公网可达(HTTP-01 挑战要用)
+#   2. tls_acme_server 先保持下面的 staging 地址,跑通一次签发
+#   3. 确认没问题再换成 https://acme-v02.api.letsencrypt.org/directory
+# 直接上 production 地址反复试错会打光 Let's Encrypt 的每周签发限额,
+# 被限流之后只能等一周。
+# 用公司内部 CA 而不是 Let's Encrypt 的话,见
+# templates/platform-cert-manager-issuers/clusterissuer-acme.yaml 顶部注释。
+tls_issuer_mode: acme
+tls_acme_server: https://acme-staging-v02.api.letsencrypt.org/directory
+# 占位邮箱,上生产前必须换成真实运维邮箱——Let's Encrypt 用它发证书过期
+# 提醒,填错了等于放弃唯一的过期预警渠道。
+tls_acme_email: platform-ops@your-real-domain.example.com
+
 # 2026-08-21 补:之前这份文件**没有 enabled_components**,导致
 # `render-environment-config.py prod` 跑一半失败——模板替换那步已经把
 # platform/apps/*.yaml 的域名改成 prod 占位域名了,组件选择那步才报错,

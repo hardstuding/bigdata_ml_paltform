@@ -1,0 +1,17 @@
+# 自签 ClusterIssuer——local-lite / cloud-full 用这一档。
+#
+# **注意 ClusterIssuer 的名字在三个环境里是同一个 `platform-issuer`**,
+# 换环境时变的是它背后是自签还是 ACME,不是名字。这样引用它的 Certificate
+# 资源(apps/trino-tls/manifests/certificate.yaml 等)完全不用跟着改环境——
+# 以前叫 `local-lite-selfsigned`,名字里写死了环境,等于把"这是哪一档"这个
+# 信息泄漏给了所有引用方。
+#
+# 自签证书只够集群内部一跳用(比如 ingress-nginx → Trino 的 HTTPS 监听器,
+# Trino 的 OAuth2 认证硬性要求它自己的 https 打开)。浏览器可见的证书要
+# 走 ACME 那一档,见同目录的 clusterissuer-acme.yaml 模板。
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: platform-issuer
+spec:
+  selfSigned: {}

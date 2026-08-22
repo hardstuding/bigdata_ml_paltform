@@ -1,0 +1,35 @@
+# render-if: tls_issuer_mode == acme
+# 真实 CA(ACME)ClusterIssuer——prod 用这一档。
+#
+# 和自签那一档同名(`platform-issuer`),所以从自签切到真实证书,**引用方
+# 一行都不用改**,只改 environments/<env>/config.yaml 里的 tls_issuer_mode。
+#
+# **这一档还没有在真实环境验证过**(没有真实域名,ACME HTTP-01 挑战需要
+# Let's Encrypt 能从公网访问到 http://<域名>/.well-known/acme-challenge/,
+# 这依赖域名解析 + 80 端口可达 + 国内还要 ICP 备案)。这里给的是"配置结构
+# 就位、改配置就能生效",不是"已经跑通过"——这个项目对这两者的区别很敏感,
+# 不要把它当成验证过的东西。
+#
+# 上生产前要确认的:
+#   - tls_acme_email 换成真实的运维邮箱(Let's Encrypt 用它发证书过期提醒,
+#     填错了等于放弃了唯一的过期预警渠道)
+#   - tls_acme_server 先用 staging 跑通一次再换 production——Let's Encrypt
+#     production 有每周签发限额,配错了反复重试会把额度打光,被限流之后
+#     只能等一周
+#   - 公司内部 CA 而不是 Let's Encrypt 的话,这个文件整个换成 CA 类型的
+#     ClusterIssuer(spec.ca.secretName 指向根证书 Secret),名字保持
+#     `platform-issuer` 不变
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: platform-issuer
+spec:
+  acme:
+    server: {{TLS_ACME_SERVER}}
+    email: {{TLS_ACME_EMAIL}}
+    privateKeySecretRef:
+      name: platform-issuer-acme-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx

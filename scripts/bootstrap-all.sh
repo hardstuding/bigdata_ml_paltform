@@ -157,6 +157,17 @@ else
   log "--> openmetadata 还没起来,跳过"
 fi
 
+step "拿 OpenMetadata 的 ingestion-bot token,给 table-registration-app / permission-request-app / 血缘推送用"
+# 2026-08-22 补进来的:此前这一步要人工去 OpenMetadata UI 建 bot、抄 JWT、
+# 手动 kubectl create secret,导致血缘功能长期是 ❌。OpenMetadata 装好时
+# 已经自动生成一个 ingestion-bot 的 unlimited JWT(存在 Postgres 里,Fernet
+# 加密),这个脚本直接读出来解密用,不用人工介入。
+if kubectl get deploy openmetadata -n openmetadata >/dev/null 2>&1; then
+  run_optional "scripts/27-configure-openmetadata-bot.sh" ./scripts/27-configure-openmetadata-bot.sh
+else
+  log "--> openmetadata 还没起来,跳过"
+fi
+
 step "同步 platform/iam/ 里的组织架构/角色数据进 Keycloak"
 run_optional "scripts/12-sync-iam.py --no-create-users" python3 ./scripts/12-sync-iam.py --no-create-users
 

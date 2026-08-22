@@ -8,6 +8,14 @@ http_port_suffix: ""
 https_port_suffix: ""
 external_scheme: http
 
+# TLS 证书由哪个 ClusterIssuer 签发:selfsigned | acme。
+# 三个环境里 ClusterIssuer 的名字统一是 `platform-issuer`,换环境变的是它
+# 背后接自签还是真实 CA,**引用它的 Certificate 资源一行都不用改**。
+# 这一档是自签:没有真实域名,ACME 的 HTTP-01 挑战根本走不通;而且这里的
+# 证书只用于集群内部一跳(ingress-nginx → Trino 的 https 监听器),不需要
+# 被浏览器信任。
+tls_issuer_mode: selfsigned
+
 # 2026-08-20 新增(ADR-057 第三批):**这份清单是按 docs/architecture.md
 # 组件表里"local-lite(设计归属)"这一列的 ✅/⚠️ 推出来的,不是对着这台
 # 机器当前真实状态核对过的**——写这份清单的时候 colima 没有在跑,没办法

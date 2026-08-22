@@ -28,13 +28,17 @@
 记录过:local-lite 单节点机器上,CloudNativePG 只能跑 `instances: 1`,
 "换 operator 管理"带来的是运维能力(自动备份、更规范升级),不是真的
 高可用。**prod 阶段、有多节点可用时,这是补齐真正 HA 的窗口**:
-- `apps/postgres/manifests/cluster.yaml` 的 `spec.instances` 从 1
-  改成 3(CNPG 官方建议的最小 HA 副本数,支持自动故障转移)。
-- MinIO 从 `mode: standalone` 换成 `mode: distributed`(chart 原生
-  支持,`platform/apps/minio` 的 values 需要重写,不是简单加副本数——
-  分布式模式对磁盘布局有要求,得提前规划)。
-- Trino 从 `server.workers: 0`(coordinator 单打独斗)拆出真正独立的
-  worker 节点,给多副本。
+- Postgres 副本数:**已经做成配置项**(ADR-059,
+  `environments/resource-profiles.yaml` 的 `postgres_instances`,prod 档
+  已经是 3),不用再手改 manifest。
+- MinIO 从 `mode: standalone` 换成 `mode: distributed`:**这一条还没做,
+  是有意留着的**。chart 原生支持,但分布式模式的副本数和纠删码、磁盘布局
+  绑死,不是把 `minio_replicas` 从 1 改成 4 就行——猜一个数字比留在单节点
+  更危险。prod 档目前只放大了 MinIO 的资源和存储容量,副本数仍然是 1,
+  需要先做磁盘布局规划再动。
+- Trino worker 数:**已经做成配置项**(`trino_workers`,prod 档是 3)。
+- OpenSearch:**已经做成配置项**(`opensearch_replicas` 3 +
+  `opensearch_single_node` false,这两个必须一起切,原因见组件文件注释)。
 - Kafka 从单节点 KRaft 换成真正的多 broker 集群,评估副本因子
   (replication factor)配置。
 
@@ -44,8 +48,27 @@
 `*.local-lite.test` 自造域名 + cert-manager 自签证书是 local-lite
 专用方案。prod 需要:真实域名 + cert-manager 接真实的 CA(Let's
 Encrypt 或企业内部 CA,看有没有公网出口决定用哪种 ACME 方式)。
+
+**2026-08-22 更新:切换机制已经做好了**(见
+[ADR-060](../../docs/decisions/060-conditional-rendering-and-tls-issuer.md))
+——`config.yaml` 里的 `tls_issuer_mode` 从 `selfsigned` 改成 `acme`,渲染
+之后 ClusterIssuer 就从自签换成 ACME,**引用它的 Certificate 资源一行
+都不用改**(三个环境的 issuer 同名 `platform-issuer`)。
+
+**但这只是"配置结构就位",不是"跑通过"。** ACME 这一档还没有在真实
+环境验证过,真正生效还依赖三件这个仓库控制不了的事:
+
+1. 真实域名解析指到集群入口
+2. 80 端口从公网可达(HTTP-01 挑战要用)
+3. 国内公网服务还要 ICP 备案
+
+另外 `tls_acme_server` 默认给的是 Let's Encrypt **staging** 地址,先用它
+跑通一次签发再换 production——production 有每周签发限额,配错了反复重试
+会把额度打光,被限流之后只能等一周。
+
 `platform/coredns-custom/` 这个自定义 DNS 解析在 prod 阶段应该整个
-删掉(见那个 ConfigMap 顶部注释,是 local-lite 专用的临时方案)。
+删掉(见那个 ConfigMap 顶部注释,是 local-lite 专用的临时方案)。这一条
+还没做,是 `render-if` 机制的下一个适用场景。
 
 ### 3. 备份目标从本地 MinIO 换成真正异地的存储
 

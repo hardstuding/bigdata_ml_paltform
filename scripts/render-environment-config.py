@@ -78,7 +78,21 @@ DIR_MAP = {
     # `path:` 完全不用改**。ADR-059 一开始判断"裸 manifest 覆盖不到、需要
     # 架构级改动",后来发现现有机制这样扩展就够了,那个判断过重,已修正。
     "apps-postgres-manifests": REPO_ROOT / "apps" / "postgres" / "manifests",
+    "platform-cert-manager-issuers": REPO_ROOT / "platform" / "cert-manager-issuers" / "manifests",
 }
+
+# 模板文件第一行可以写 `# render-if: <config键> == <值>`,表示"只有当前
+# 环境的 config.yaml 里这个键等于这个值时才生成这个文件,否则把目标文件
+# 删掉"。存在的理由是有些东西不是"同一份内容换几个数字"(那用占位符就够
+# 了),而是**互斥的几选一**——cert-manager 的 ClusterIssuer 就是典型:
+# local-lite 要自签、prod 要 ACME,两个 spec 结构完全不同,没法用占位符
+# 拼出来,而且同时存在是错的(ACME issuer 在没有真实域名的环境里会一直
+# 报错重试)。
+#
+# 条件不成立时**主动删除**目标文件,而不是放着不管——放着不管的话,从
+# prod 切回 cloud-full 会留下一个 ACME issuer 的残留文件,ArgoCD 照样
+# 会把它同步上去,正是这个项目最忌讳的"看起来切干净了其实没有"。
+_RENDER_IF_RE = re.compile(r"^# render-if:\s*([a-z0-9_]+)\s*==\s*(\S+)\s*$")
 
 
 def load_config(env: str) -> dict:
@@ -135,6 +149,23 @@ def render_text(text: str, config: dict) -> str:
         .replace("{{EXTERNAL_SCHEME}}", config["external_scheme"])
     )
 
+    # TLS/ACME 相关的占位符只有走 ACME 那一档的环境才用得上,所以**不放进
+    # 顶部那份"每个环境都必须有"的必填校验**——local-lite 的 config.yaml 里
+    # 塞一个假的 ACME 邮箱纯属噪音。代价是缺键要在这里报错,报错信息里要
+    # 说清楚该去哪补,不能只抛一个 KeyError。
+    for key in ("tls_acme_server", "tls_acme_email"):
+        token = "{{" + key.upper() + "}}"
+        if token not in text:
+            continue
+        if key not in config:
+            print(
+                f"!! 模板里用了 {token},但 environments/{config['_env']}/config.yaml "
+                f"里没有 `{key}`(走 ACME 签发真实证书的环境才需要这两个键)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        text = text.replace(token, str(config[key]))
+
     # 规格分档占位符 {{RES:key}}。用不存在的 key 直接报错退出,不静默留着
     # 原样——那样会渲染出一个字面量是 "{{RES:xxx}}" 的 YAML,部署上去才
     # 发现,正是这个项目最忌讳的"看起来成功了"。
@@ -171,12 +202,50 @@ def render_templates(config: dict, check_only: bool) -> tuple[bool, int]:
                 continue
             rel = template_file.relative_to(template_root)
             target_file = target_dir / rel
-            rendered = render_text(template_file.read_text(), config)
+            raw = template_file.read_text()
+
+            # 条件生成(见 _RENDER_IF_RE 上面的注释)
+            conditional = False
+            first_line = raw.split("\n", 1)[0]
+            m = _RENDER_IF_RE.match(first_line)
+            if m:
+                conditional = True
+                key, want = m.group(1), m.group(2)
+                if key not in config:
+                    print(
+                        f"!! {template_file.relative_to(REPO_ROOT)} 的 render-if 用了 `{key}`,"
+                        f"但 environments/{config['_env']}/config.yaml 里没有这个键",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                if str(config[key]) != want:
+                    if target_file.exists():
+                        if check_only:
+                            print(f"!! {target_file.relative_to(REPO_ROOT)}: 当前环境不该有这个文件,漂移了")
+                            ok = False
+                        else:
+                            target_file.unlink()
+                            print(f"{target_file.relative_to(REPO_ROOT)}: 当前环境不适用,已删除")
+                    continue
+                raw = raw.split("\n", 1)[1] if "\n" in raw else ""
+
+            rendered = render_text(raw, config)
             rendered_count += 1
 
             if not target_file.exists():
-                print(f"!! {target_file} 不存在,先手动确认这是不是要新建的文件", file=sys.stderr)
-                ok = False
+                if not conditional:
+                    print(f"!! {target_file} 不存在,先手动确认这是不是要新建的文件", file=sys.stderr)
+                    ok = False
+                    continue
+                # 条件生成的文件"不存在"是正常的(上一次渲染的是别的环境),
+                # 直接建出来,不当成错误。
+                if check_only:
+                    print(f"!! {target_file.relative_to(REPO_ROOT)}: 当前环境应该有这个文件但缺了,漂移了")
+                    ok = False
+                    continue
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                target_file.write_text(rendered)
+                print(f"{target_file.relative_to(REPO_ROOT)}: 已生成(条件生成)")
                 continue
 
             current = target_file.read_text()
@@ -304,9 +373,16 @@ def main():
     # 服务 cloud-full 的工作区,这等于悄悄把部署配置改脏了。
     # 校验前置之后,配置不完整就在写任何文件之前直接退出。
     missing = [k for k in ("domain_suffix", "http_port_suffix", "https_port_suffix",
-                           "external_scheme") if k not in config]
+                           "external_scheme", "tls_issuer_mode") if k not in config]
     if missing:
         print(f"!! environments/{env}/config.yaml 缺这些必填项: {missing}", file=sys.stderr)
+        sys.exit(1)
+    if config["tls_issuer_mode"] not in ("selfsigned", "acme"):
+        print(
+            f"!! environments/{env}/config.yaml 的 tls_issuer_mode 只能是 selfsigned 或 acme,"
+            f"现在是 `{config['tls_issuer_mode']}`",
+            file=sys.stderr,
+        )
         sys.exit(1)
     if config.get("enabled_components") is None:
         print(

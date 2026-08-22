@@ -42,7 +42,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 |---|---|---|
 | 运维 | ✅ 基本可以 | 缺统一控制面/Runbook;告警没有外部通知渠道 |
 | 数据分析师 | ✅ 基本可以 | OpenMetadata 已部署验证,"找数据"卡点解除 |
-| 大数据开发 | 🟡 能开工 | **接数据→批处理→作业历史整条链路 2026-08-21 已真实跑通**;剩余缺口:血缘没有数据在流、Kafka 没接进真实管道、Flink 未实现 |
+| 大数据开发 | 🟡 能开工 | **接数据→批处理→作业历史→血缘整条链路 2026-08-22 已真实跑通**;剩余缺口:Kafka 没接进真实管道、Flink 未实现 |
 | 算法工程师 | 🟡 能开工 | 主链路 + 多步骤 DAG(特征物化→训练→模型门禁)都已端到端跑通;缺模型灰度/审批回滚 |
 | 管理 | ❌ 不行 | 驾驶舱从未开始 |
 
@@ -114,7 +114,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 流处理引擎 | ❌ | Flink 只有角色设计(ADR-056),没有实现 |
 | 调度 | ✅ | Airflow 已部署,DAG 单一源码 + CI 防漂移 |
 | 作业可观测 | ✅ | **2026-08-21 真实跑通**:History Server 的 `/api/v1/applications` 列出了刚跑完的作业(`name=spark-iceberg-demo, completed=True`),不再是空数组。修好之前**从部署那天起就是空的**——作业压根没开 `eventLog`,`s3a://spark-logs/` 一直没有任何内容;补上后又发现不能指 bucket 根路径(S3Guard 报 `path must be absolute`),改用 `events/` 子目录,并把这个前缀的创建做成声明式(MinIO chart 的 `customCommands`,验证过 hook 真的会重建它) |
-| 血缘 | ❌ | **OpenMetadata 已部署并登录验证过(2026-08-19),但没有任何血缘数据在往里流**(2026-08-21 修正:这一行之前写的"OpenMetadata 没部署"是过期信息,和本文档"数据分析师"那一行自相矛盾);SeaTunnel 血缘(ADR-052)只验证过 API 机制;Spark 血缘(ADR-014)仅设计 |
+| 血缘 | ✅ | **2026-08-22 真实端到端验证通过**:此前一直卡在"bot token 要人工去 OpenMetadata UI 建"这一步,`scripts/27-configure-openmetadata-bot.sh` 解除了这个卡点——OpenMetadata 安装时已经自动生成一个 unlimited 有效期的 ingestion-bot JWT(存在 Postgres `user_entity` 表,Fernet 加密),脚本直接从数据库读出解密,不用登录 UI、不用等人工建 bot,幂等地建成 `table-registration-app-openmetadata` / `permission-request-app-openmetadata` 两个 Secret。验证链路:配好 token 后触发 `seatunnel_device_events` DAG,`push_lineage` 任务 success,直接查 `GET /api/v1/lineage/pipeline/name/airflow-platform.seatunnel_device_events` 确认真实存在 `pipeline -> trino.iceberg.demo.device_events` 这条血缘边(不是只看任务状态)。Spark 血缘(ADR-014)仍仅设计,未验证 |
 | 数据质量 / 契约 | ❌ | 未开始(B 线) |
 | 作业模板 / CI-CD | ❌ | 未开始(A 线) |
 
