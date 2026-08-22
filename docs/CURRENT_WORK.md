@@ -451,10 +451,17 @@ openmetadata.yaml` 里的配置问题。删掉这条脏数据、走一遍完整�
 
 ## 正在运行的后台任务
 
-**没有后台任务。cloud-full 云主机 2026-08-22 这一轮结束时仍然开着**,
-按 ¥4/时 计费。**没有自作主张停机的原因**:这台机器上还跑着 Codex 那个
-并行项目(`data-ai-platform-v2`,和这个平台共用同一个 k3s 集群),停机会
-把它一起停掉,不知道对方是不是还在用——需要用户确认之后再停。
+**没有后台任务。cloud-full 云主机 2026-08-22 这一轮结束时已经停机**
+(`scripts/26-stop-cloud-vm-economical.sh`,经济模式,不产生计算费用;
+磁盘照常保留,包括 `/data/k3s.pre-teardown-20260822` 那份备份)。
+
+停机前用户明确说过 "codex暂时没在用,如果你们同步工作,我会告诉你一声的,
+你自己决定就好"。以后再停之前仍然要按 `CLAUDE.md` 那条先确认一次。
+
+重新开机后 SSH 隧道要重建,而且**公网 IP 不是固定 EIP,每次开机都可能变**
+(这一轮就换过)。重建隧道之后如果集群是全新装的,本机 kubeconfig 里的
+CA 也要重新从 `/etc/rancher/k3s/k3s.yaml` 取一份(server 改成
+`https://127.0.0.1:16443`)。
 
 - cloud-full 云主机(`i-0jlbped4h1959tp591pe`)不用了就要停,用
   `scripts/26-stop-cloud-vm-economical.sh`,经济模式
