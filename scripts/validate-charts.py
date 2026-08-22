@@ -27,6 +27,7 @@ enabled_components 目前是全部 43 个组件,覆盖面和直接扫 apps/compo
 
 退出码:0 = 全部渲染成功;1 = 至少一个 Application 渲染失败,详情打印到 stderr。
 """
+import os
 import re
 import subprocess
 import sys
@@ -62,6 +63,31 @@ KNOWN_CLUSTER_API_VERSIONS = [
 _repo_added = set()
 
 
+def _helm_template_local(chart_dir, source):
+    """对 vendor 进仓库的本地 chart 目录跑 helm template。"""
+    values_obj = source.get("helm", {}).get("valuesObject")
+    values_file = None
+    extra_args = []
+    if values_obj:
+        fd = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+        yaml.safe_dump(values_obj, fd)
+        fd.close()
+        values_file = fd.name
+        extra_args = ["-f", values_file]
+    try:
+        cmd = ["helm", "template", "validate", str(chart_dir)]
+        for av in KNOWN_CLUSTER_API_VERSIONS:
+            cmd += ["--api-versions", av]
+        cmd += extra_args
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            return False, result.stderr.strip()
+        return True, "OK(vendor 进仓库的本地 chart)"
+    finally:
+        if values_file:
+            os.unlink(values_file)
+
+
 def ensure_helm_repo(repo_url: str) -> str:
     if repo_url.startswith("oci://"):
         return None
@@ -91,6 +117,16 @@ def validate_app(path: Path) -> tuple[bool, str]:
 
     source = app.get("spec", {}).get("source", {})
     chart = source.get("chart")
+
+    # vendor 进仓库的 chart(见 scripts/28-vendor-helm-chart.sh / ADR-061):
+    # 没有 chart 字段,但 path 指向的是一个真的 Helm chart 目录(有
+    # Chart.yaml),而且带 helm.valuesObject。这类必须真的 helm template
+    # 一遍——否则 vendor 之后 CI 覆盖反而比原来变弱了,正好丢掉的是"我们
+    # 自己的 values 和这个 chart 版本对不对得上"这一层。
+    local_path = source.get("path")
+    if not chart and local_path and (REPO_ROOT / local_path / "Chart.yaml").is_file():
+        return _helm_template_local(REPO_ROOT / local_path, source)
+
     if not chart:
         # 纯 git manifest 来源(不是 Helm chart),没有 chart 可 render,
         # 退而求其次把它引用的 manifests 目录下所有 YAML 都做语法检查。
@@ -158,7 +194,10 @@ def main():
             checked += 1
             rel = f.relative_to(REPO_ROOT)
             if ok:
-                print(f"{'OK' if msg == 'OK' else 'SKIP':5} {rel}  {'' if msg == 'OK' else msg}")
+                # msg 以 "OK" 开头的都算真的渲染过了(vendor 进来的本地
+                # chart 会带一句括号说明),只有 SKIP 才是真没检查。
+                really_ok = msg.startswith("OK")
+                print(f"{'OK' if really_ok else 'SKIP':5} {rel}  {'' if msg == 'OK' else msg}")
             else:
                 print(f"FAIL  {rel}: {msg}", file=sys.stderr)
                 failures.append((rel, msg))

@@ -28,9 +28,26 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://grafana.github.io/helm-charts
-    chart: alloy
-    targetRevision: 1.11.1
+    # 2026-08-22:chart 从"同步时去 grafana.github.io 拉"改成 vendor 进
+    # 这个仓库(platform/alloy-chart/,由 scripts/28-vendor-helm-chart.sh 生成)。
+    #
+    # 原因是实测出来的硬限制:从境内云主机拉 grafana.github.io 的
+    # index.yaml(1.4MB+)只有约 12KB/s,而 **helm 自己有一个写死的 120 秒
+    # HTTP 超时**(repo-server 日志 time_ms=120030,而 ARGOCD_EXEC_TIMEOUT
+    # 明明配的是 180s)——**这个问题没法靠调大 ArgoCD 的超时解决**,helm
+    # 会先自己放弃。后果不只是"状态显示 Unknown":在一个全新集群上,这个
+    # Application 根本装不起来,一键部署直接断在这里。
+    #
+    # kube-prometheus-stack 靠换官方 OCI 仓库绕过去了(OCI 不需要 index),
+    # 但 Grafana 目前没发 OCI(ghcr.io 下三个候选路径实测全是
+    # 403/not found),只剩 vendor 这条路。见 ADR-061。
+    #
+    # 升级 chart 版本:改 scripts/28-vendor-helm-chart.sh 的调用参数重跑,
+    # 不是改这里的 targetRevision——targetRevision 现在指的是这个 git 仓库
+    # 的分支,不是 chart 版本。chart 版本记在 platform/alloy-chart/VENDORED.md。
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/alloy-chart
     helm:
       valuesObject:
         alloy:

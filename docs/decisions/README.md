@@ -110,6 +110,7 @@
 | [039](039-teardown-rebuild-test.md) | 推倒重建测试:验证"一键部署"是真的 | 已完成 |
 | [041](041-queue-resource-management.md) | ResourceQuota + LimitRange + PriorityClass | 已验证 |
 | [022](022-ci-chart-validation.md) | CI:push/PR 前跑 `helm template` | 已采纳 |
+| [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 机制已实现并在 cloud-full 验证;ACME 和告警外推两档未在真实环境验证 |
 
 ## 产品与门户
