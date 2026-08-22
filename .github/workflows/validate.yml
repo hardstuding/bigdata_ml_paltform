@@ -35,6 +35,9 @@ jobs:
       - name: Airflow DAG 单一源码校验(ConfigMap 里的内容不能和 apps/airflow/dags/*.py 漂移)
         run: python3 scripts/sync-airflow-dags-configmap.py --check
 
+      - name: 内嵌脚本单一源码校验(ConfigMap 里的脚本不能和 scripts/ 下的权威源漂移)
+        run: python3 scripts/check-embedded-scripts.py
+
       - name: 环境配置单一源码校验(cloud-full 部署文件不能和 templates/ + environments/cloud-full/config.yaml 渲染结果漂移)
         run: python3 scripts/render-environment-config.py cloud-full --check
 

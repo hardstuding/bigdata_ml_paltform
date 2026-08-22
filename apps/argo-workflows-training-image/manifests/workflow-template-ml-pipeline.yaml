@@ -1,0 +1,120 @@
+# 多步骤 ML 流水线:特征物化 → 训练 → 模型门禁校验。
+#
+# 补的是 docs/roles.md"算法工程师"那一节点名的最后一个缺口:"多步骤 DAG
+# (特征工程→训练→评估),现在这两个模板各自都只有训练一步"。
+# train-demo-model / train-from-feast-features 那两个模板是单步的,这份
+# 才真正用上 Argo 的 `dag` + `dependencies` 做多步骤编排。
+#
+# **三步为什么是这三步**:
+#   1. materialize-features —— 把离线特征(Spark 读 Iceberg)物化进 Redis
+#      在线存储。真实场景里训练前刷新特征是常规动作,不是凑数的一步。
+#   2. train —— 从 Feast 取 point-in-time 正确的历史特征训练,注册进 MLflow。
+#   3. validate-model —— **上线门禁**:把刚注册的版本真的 load 出来、做一次
+#      真实推理、校验输出合法。不通过就整条流水线失败,后续(比如自动上线
+#      到 KServe)不会执行。
+#
+# **门禁为什么不卡 accuracy 阈值**:demo 数据只有 10 行、4 个 region、
+# 测试集 1 条,accuracy 只可能是 0 或 1,拿它当阈值是自欺欺人。这个规模下
+# 唯一诚实又真的有用的门禁是"模型能不能被加载、能不能做出形状正确的
+# 预测"——也就是"它到底能不能部署",恰好是 KServe 上线的真实前置条件。
+# 详见 scripts/validate_registered_model.py 顶部说明。
+#
+# 三个步骤复用同一个容器定义(下面的 run-script 模板),只有脚本名不同——
+# 环境变量/挂载/资源在一处维护,不用抄三遍容易漂移的配置。
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: ml-pipeline
+  namespace: argo-workflows
+spec:
+  entrypoint: pipeline
+  # 见 workflow-template.yaml 的说明:不显式指定会落到没有 workflowtaskresults
+  # 权限的 default SA,表现成"业务跑成功了但 Workflow 判定 Error"。
+  serviceAccountName: argo-workflow
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: materialize-features
+            template: run-script
+            arguments:
+              parameters:
+                - name: script
+                  value: materialize_features.py
+          - name: train
+            dependencies: [materialize-features]
+            template: run-script
+            arguments:
+              parameters:
+                - name: script
+                  value: train_from_feast_features.py
+          - name: validate-model
+            dependencies: [train]
+            template: run-script
+            arguments:
+              parameters:
+                - name: script
+                  value: validate_registered_model.py
+
+    - name: run-script
+      inputs:
+        parameters:
+          - name: script
+      container:
+        image: "ghcr.io/hardstuding/bigdata_ml_paltform/argo-workflows-training@sha256:95feb41657b00d5b701fb695ce9062b3f9aaf4cf9884b9648e4017d4a01a54ba"
+        imagePullPolicy: IfNotPresent
+        command: ["python3"]
+        args: ["/scripts/{{inputs.parameters.script}}"]
+        # 见 workflow-template-feast.yaml:Spark/Hadoop 的 UnixLoginModule
+        # 在精简基础镜像上可能查不到用户名,root 的 /etc/passwd 查找天然成功。
+        securityContext:
+          runAsUser: 0
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow-mlflow.mlflow.svc.cluster.local:5000"
+          - name: MLFLOW_S3_ENDPOINT_URL
+            value: "http://minio.minio.svc.cluster.local:9000"
+          # AWS_* 给 Feast/MLflow 自己的 boto3 客户端(registry、artifact),
+          # MINIO_* 给 feature_store.yaml 里 spark_conf 的 ${env.*} 替换,
+          # 是两条独立路径,都要给(2026-08-14 实测踩过)。
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom: { secretKeyRef: { name: minio-root, key: rootUser } }
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom: { secretKeyRef: { name: minio-root, key: rootPassword } }
+          - name: AWS_ENDPOINT_URL_S3
+            value: "http://minio.minio.svc.cluster.local:9000"
+          - name: AWS_DEFAULT_REGION
+            value: "us-east-1"
+          - name: MINIO_ACCESS_KEY
+            valueFrom: { secretKeyRef: { name: minio-root, key: rootUser } }
+          - name: MINIO_SECRET_KEY
+            valueFrom: { secretKeyRef: { name: minio-root, key: rootPassword } }
+          - name: HADOOP_USER_NAME
+            value: "feast"
+          - name: FEAST_REPO_PATH
+            value: "/feature_repo"
+        volumeMounts:
+          - name: train-script
+            mountPath: /scripts
+          # subPath 逐个文件挂,不要整目录挂——ConfigMap 卷靠 `..data` 软链
+          # 做原子更新,Feast 用 importlib 解析 definitions.py 时会把那层
+          # 时间戳目录误当成 Python 包路径,relative import 直接报错。
+          - name: feature-repo
+            mountPath: /feature_repo/feature_store.yaml
+            subPath: feature_store.yaml
+          - name: feature-repo
+            mountPath: /feature_repo/definitions.py
+            subPath: definitions.py
+        resources:
+          requests:
+            cpu: 300m
+            memory: 1Gi
+          limits:
+            memory: 2Gi
+      volumes:
+        - name: train-script
+          configMap:
+            name: train-demo-model-script
+        - name: feature-repo
+          configMap:
+            name: feast-feature-repo
