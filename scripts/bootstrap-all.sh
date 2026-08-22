@@ -95,6 +95,69 @@ step "确认这个工作区当前渲染的就是要部署的环境(${TARGET_ENV}
 run_required "scripts/render-environment-config.py ${TARGET_ENV} --check" \
   python3 ./scripts/render-environment-config.py "${TARGET_ENV}" --check
 
+# 等所有 ArgoCD Application 的目标 namespace 都被建出来。
+#
+# **为什么需要这一步**(2026-08-22 推倒重建验证抓到的):
+# `scripts/00-generate-secrets.sh` 往十几个 namespace 里塞 Secret,但那些
+# namespace 是 ArgoCD 同步各个 Application 时用 CreateNamespace=true 建的
+# ——在一个全新集群上,第 2 步跑 00 的时候它们一个都还不存在,脚本会逐个
+# 打印"跳过: xxx(namespace 还不存在)"然后过去。结果是 oauth2-proxy /
+# spark-history-server / table-registration-app / feast 这些组件起来之后
+# 一直 CreateContainerConfigError(`secret "minio-root" not found` 之类),
+# 而且**不会自愈**——没有任何东西会回头再建那些 Secret。
+#
+# 增量式开发永远碰不到这个问题(namespace 早就在了),只有真的从空集群
+# 拉起才暴露。这也是为什么这一步不能省:少了它,"一键部署"实际上要人
+# 手动重跑第二遍才能得到一个能用的平台。
+wait_for_namespaces() {
+  local timeout="${1:-600}"
+  local waited=0
+  log "--> 等各个 Application 的目标 namespace 被 ArgoCD 建出来(最多 ${timeout}s)"
+  while [ "$waited" -lt "$timeout" ]; do
+    local missing=""
+    for ns in $(kubectl -n argocd get applications \
+        -o jsonpath='{range .items[*]}{.spec.destination.namespace}{"\n"}{end}' 2>/dev/null | sort -u); do
+      [ -n "$ns" ] || continue
+      kubectl get namespace "$ns" >/dev/null 2>&1 || missing="${missing} ${ns}"
+    done
+    if [ -z "$missing" ]; then
+      log "--> 所有目标 namespace 都在了(等了 ${waited}s)"
+      return 0
+    fi
+    sleep 15
+    waited=$((waited + 15))
+  done
+  log "!! 等了 ${timeout}s 还有 namespace 没建出来:${missing}"
+  log "   不中止——后面重跑 00 时这些 namespace 对应的 Secret 会再次跳过,"
+  log "   等它们出现之后重跑一次这份脚本即可(幂等)。"
+  return 0
+}
+
+# 等 Application 收敛。超时只警告不中止:有些 Application 要等后面的组件
+# 专属初始化步骤(建账号、配数据源)跑完才会健康,在这里死等反而会卡死。
+wait_apps_converged() {
+  local timeout="${1:-1800}"
+  local waited=0
+  log "--> 等所有 Application 变成 Synced/Healthy(最多 ${timeout}s,超时只警告不中止)"
+  while [ "$waited" -lt "$timeout" ]; do
+    local n
+    n=$(kubectl -n argocd get applications \
+        -o custom-columns=S:.status.sync.status,H:.status.health.status --no-headers 2>/dev/null \
+        | grep -vc 'Synced *Healthy' || true)
+    if [ "$n" = "0" ]; then
+      log "--> 全部收敛(等了 ${waited}s)"
+      return 0
+    fi
+    [ $((waited % 120)) -eq 0 ] && log "    还有 ${n} 个没收敛(已等 ${waited}s)"
+    sleep 30
+    waited=$((waited + 30))
+  done
+  log "!! 等了 ${timeout}s 仍有 Application 没收敛,继续往下跑组件专属初始化。"
+  log "   跑完之后用 kubectl get applications -n argocd 看剩下哪些,大多数情况下"
+  log "   再重跑一次这份脚本就能收敛(幂等)。"
+  return 0
+}
+
 step "生成/确认管理员密码 Secret(幂等,已存在的不会被覆盖)"
 run_required "scripts/00-generate-secrets.sh" ./scripts/00-generate-secrets.sh
 
@@ -138,6 +201,17 @@ wait_healthy keycloak 300s
 
 step "配置 Keycloak(platform realm + 各组件 OIDC client + 初始登录用户)"
 run_required "scripts/03-configure-keycloak.sh" ./scripts/03-configure-keycloak.sh
+
+step "等 namespace 建出来,然后补建第一次漏掉的 Secret(全新集群必需,见 wait_for_namespaces 注释)"
+wait_for_namespaces 600
+run_required "scripts/00-generate-secrets.sh(第二遍,补 namespace 建好之后才能建的 Secret)" ./scripts/00-generate-secrets.sh
+
+step "等所有 Application 收敛,再做组件专属初始化"
+# 顺序很重要:下面那些"建 Airflow 账号""配 Superset 数据源"的步骤,前提是
+# 对应组件已经跑起来了。2026-08-22 之前这些步骤紧跟在配 Keycloak 后面,
+# 在一个全新集群上执行时组件一个都还没起来,于是全部打印"跳过"然后过去
+# ——脚本报"全部完成",实际上一件都没做。
+wait_apps_converged 1800
 
 log ""
 log "===== 核心步骤(环境校验 + README 那份清单 + 补的 argo-workflows CRD)全部完成 ====="
