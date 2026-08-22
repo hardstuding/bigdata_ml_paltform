@@ -32,6 +32,32 @@
 - local-lite/cloud-full/prod 未来要能通过改配置切换,不是维护三套手动
   漂移的副本(现状:还没有做到,见下面"已知差距")。
 
+## cloud-full 那台云主机不是我们独占的(2026-08-22 补,踩过才写进来)
+
+Codex 那个并行项目(`bigdata_ai_platform_v2`)**和这个平台跑在同一台云
+主机的同一个 k3s 集群里**,占 `data-ai-platform-v2` 这个命名空间。这不是
+"两台机器偶尔抢账号额度",是同一个 Kubernetes 控制面、同一份
+`/data/k3s`。
+
+所以下面这些动作**必须先停下来问用户**,不管看起来多像"清理我自己的
+东西":
+
+- 任何会让 k3s 本身停掉或重装的操作(`k3s-uninstall.sh`、
+  `k3s-killall.sh`、重装 k3s、`rm -rf /data/k3s`)
+- 云主机停机/释放
+- 集群级资源的增删改(CRD、ClusterRole、ingress controller、
+  cert-manager 这类跨 namespace 生效的东西)
+
+命名空间级别的东西(自己项目自己 namespace 里的 Deployment/Service)
+正常做,不用问。
+
+**这条为什么现在才写进 CLAUDE.md**:这个事实 2026-08-16 就发现了,但只
+记在 `docs/journal/2026-08.md` 和 Claude 的私有 memory 里。2026-08-22 做
+"推倒重建验证"时没被想起来,跑了一次 `k3s-uninstall.sh`,把 Codex 那边
+一起弄停了(数据没丢,已完整恢复,见
+[ADR-039](docs/decisions/039-teardown-rebuild-test.md) 末尾)。跨项目的
+硬约束躺在日记里等于不存在。
+
 ## 执行纪律
 
 - 任何时候只有一个 `CURRENT` 主线(见 `docs/CURRENT_WORK.md`)。做当前
