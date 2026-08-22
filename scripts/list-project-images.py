@@ -33,7 +33,16 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # 引号有的渲染成双引号,有的是单引号,不能只处理一种(踩过一次:漏了单引号
 # 处理,把引号本身当成镜像名的一部分,输出里出现 'xxx' 这种带引号的脏数据)。
-IMAGE_RE = re.compile(r'^\s*-?\s*image:\s*[\'"]?([^\'"\s]+)[\'"]?\s*$')
+# 除了标准的 `image:`,也认 `xxxImage:` 这种驼峰变体(chart 自己定义的字段
+# 名)。2026-08-22 踩到的具体例子:OpenMetadata 的
+# `pipelineServiceClientConfig.k8s.ingestionImage` —— 一个 1.5GB 的镜像,
+# 只在 OpenMetadata 运行时自己创建采集 Job 时才被引用,不出现在任何静态
+# manifest 的 `image:` 字段里。扫不到它意味着镜像缓存里没有它,而这台境内
+# 云主机上"运行时现拉大镜像"已经栽过两次。
+#
+# 只匹配"键名正好以 image/Image 结尾"的,所以 `imagePullPolicy` /
+# `imagePullSecrets` 这类不会被误当成镜像。
+IMAGE_RE = re.compile(r'^\s*-?\s*[a-zA-Z0-9_]*[iI]mage:\s*[\'"]?([^\'"\s]+)[\'"]?\s*$')
 
 # 明确知道跟这个项目无关的镜像(这台 Mac 的 colima 上跑过其他工具留下的缓存),
 # 不是本项目任何 Application 引用的,helm template 扫描本来就不会扫到它们,
@@ -210,6 +219,39 @@ def kserve_serving_runtime_images() -> set[str]:
     return images
 
 
+def helm_values_images(dirs) -> set[str]:
+    """直接扫 Application 文件本身的 `helm.valuesObject` 里写死的镜像。
+
+    **为什么 `helm template` 那条路径覆盖不到**:有些 chart 不会把镜像值
+    渲染成 manifest 里的 `image:` 字段,而是塞进 ConfigMap/环境变量。典型
+    例子是 OpenMetadata 的
+    `pipelineServiceClientConfig.k8s.ingestionImage` —— 它渲染出来是一个
+    环境变量,OpenMetadata **运行时**自己创建采集 Job 时才拿它去拉镜像。
+    结果就是:一个 1.5GB 的镜像,`helm template` 扫不到、裸 manifest 里也
+    没有,镜像缓存清单里当然也没有它。
+
+    这台境内云主机上"运行时现拉大镜像"已经栽过两次(Spark History Server
+    的 280MB jar 超时崩溃、Maven 拉包卡死,见 ADR-061),所以这类"藏在
+    values 里的运行时镜像"必须扫出来。
+
+    做法很朴素:把 Application 文件当纯文本扫一遍同一个 IMAGE_RE。会扫到
+    一些 `helm template` 那边已经扫到的重复项,不要紧——最后是 set 求并。
+    """
+    images = set()
+    for d in dirs:
+        if not d.exists():
+            continue
+        for f in sorted(d.glob("*.yaml")):
+            for line in f.read_text().splitlines():
+                m = IMAGE_RE.match(line)
+                if m and "/" in m.group(1):
+                    # 要求带 "/",过滤掉 `image: {}`、`pullPolicy` 附近的
+                    # 噪声,以及 `image: busybox` 这种无仓库前缀的短名
+                    # (那种 helm template 那条路径本来就能扫到)。
+                    images.add(m.group(1))
+    return images
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--include-pending", action="store_true")
@@ -222,6 +264,7 @@ def main():
     all_images = set()
     for d in dirs:
         all_images |= scan_dir(d)
+    all_images |= helm_values_images(dirs)
     all_images |= argocd_bootstrap_images()
     all_images |= kserve_serving_runtime_images()
 

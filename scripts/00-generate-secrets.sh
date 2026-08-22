@@ -217,6 +217,15 @@ ensure_trino_service_account table_registration_service
 # 权限边界和只读的 Superset、只建表的 table-registration-app 都不一样,
 # 需要能单独追溯这个身份具体做了哪些 DDL。
 ensure_trino_service_account dbt_demo_service
+# OpenMetadata 的 Trino 元数据采集专用账号(scripts/29-configure-
+# openmetadata-trino-ingestion.sh 消费),同样不复用其它账号——这个身份要
+# 能读 information_schema/所有 catalog 的表结构,权限面比只读单个 catalog
+# 的 Superset 更宽,单独开一个方便以后单独收窄/吊销。这个密码不需要复制到
+# 别的命名空间(不像 superset_service/table_registration_service 那几个):
+# scripts/29 是在本机(能访问 kubectl 的地方)读出密码后直接塞进
+# OpenMetadata 的 DatabaseService 连接配置里,由 OpenMetadata 自己的
+# Postgres 加密保存,不需要哪个 Pod 挂载这个 Secret。
+ensure_trino_service_account openmetadata_service
 
 ensure_secret data superset-db username=superset password=RANDOM
 
@@ -385,7 +394,11 @@ echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 # argo-workflows: 训练 WorkflowTemplate 的 pod 要把模型 artifact 存进
 # MinIO(和 scripts/09-train-demo-model.sh 手动跑时用的是同一个 MinIO
 # 凭据),见 apps/argo-workflows-training-image/manifests/。
-MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt argo-workflows platform-sdk-demo"
+# flink(2026-08-22 新增,docs/decisions/062-flink-streaming-pipeline.md):
+# Flink 流式作业的 JobManager/TaskManager 直连 MinIO(S3A)写 Iceberg
+# warehouse,和 spark-operator 是同一个坑——SparkApplication 当初就是这么
+# 发现漏配的(ADR-036),这次照着同一个模式提前加上,不用等实测报错。
+MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt argo-workflows platform-sdk-demo flink"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done

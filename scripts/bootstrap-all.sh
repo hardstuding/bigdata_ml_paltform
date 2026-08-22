@@ -272,6 +272,17 @@ else
   log "--> openmetadata 还没起来,跳过"
 fi
 
+step "配 OpenMetadata 的 Trino 元数据自动采集(不配的话数据目录里只有人工录入的表)"
+# 借 table-registration-app 的 Pod 跑(它容器里有 python3+requests,而且
+# 已经挂了 OPENMETADATA_TOKEN/OPENMETADATA_URL);OpenMetadata 自己的镜像
+# 里只有 wget 没有 python3,新起一次性 Pod 在这台云主机上又容易卡镜像拉取
+# (scripts/27 注释里记过)。
+if kubectl -n table-registration-app get pod -l app=table-registration-app >/dev/null 2>&1; then
+  run_optional "scripts/29-configure-openmetadata-trino-ingestion.sh" ./scripts/29-configure-openmetadata-trino-ingestion.sh
+else
+  log "--> table-registration-app 还没起来,跳过"
+fi
+
 step "同步 platform/iam/ 里的组织架构/角色数据进 Keycloak"
 run_optional "scripts/12-sync-iam.py --no-create-users" python3 ./scripts/12-sync-iam.py --no-create-users
 

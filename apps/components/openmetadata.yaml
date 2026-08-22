@@ -86,6 +86,22 @@ spec:
               type: "k8s"
               k8s:
                 namespace: openmetadata
+                # chart 默认是 `ingestion-base:latest`,这里锁死成和
+                # OpenMetadata 本体同一个版本。两个理由:
+                #
+                # 1. 这个仓库不用 latest(ADR-010),而且这个镜像特别隐蔽
+                #    ——它不出现在任何静态 manifest 里,是 OpenMetadata
+                #    运行时自己创建采集 Job 时才引用的。不写在这里的话,
+                #    `scripts/list-project-images.py` 扫不到它,镜像缓存
+                #    (`export-image-cache.sh` / `17-load-image-cache.sh`)
+                #    也就不会包含它。
+                # 2. **这个镜像有 1.5GB**。这台境内云主机上"运行时现拉大
+                #    镜像"已经栽过两次(Spark History Server 的 280MB
+                #    aws-java-sdk-bundle 直接超时崩溃,见那个 Deployment
+                #    顶部注释;Maven 拉 jar 卡死,见 ADR-061)。写在这里
+                #    让它进得了缓存清单,是这类问题的预防手段而不是事后
+                #    补救。
+                ingestionImage: "docker.getcollate.io/openmetadata/ingestion-base:1.13.3"
             authentication:
               enabled: true
               clientType: confidential
