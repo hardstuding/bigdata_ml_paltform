@@ -62,6 +62,20 @@
 日志——但不能只写"失败了"或者自己转述成"大概是网络问题",要有能让
 判断方独立复核的原文片段。
 
+**这条约定有个真实的坑,2026-08-21 实测撞到**:"执行方改仓库文件 +
+`kubectl apply` 立即验证,统筹方回头再 commit"——**这套流程对 ArgoCD 管着
+而且 selfHeal 生效中的资源根本走不通**。实测:改完 apply 上去,1-2 分钟内
+就被 self-heal 打回原值;而且 app-of-apps 结构下,连"临时把某个 Application
+的 selfHeal 关掉"这个动作本身也会被上层 `apps-root` 拉回 `true`。那次两个
+真实 bug 修复(Airflow DAG 的 `default_var`、spark-operator 的 quota)都卡在
+这里,执行方没有任何办法自己验证到底。
+
+**正确的做法**:执行方改完这类资源就**停下来报告**,由统筹方立刻 commit +
+push + 触发同步,再用 `SendMessage` 让同一个 agent 接着验证(它还带着上下文,
+不用重开)。不要让执行方在那里反复 apply 和 self-heal 打架。判断一个资源
+是不是这类:`kubectl -n argocd get applications` 里能找到管它的那个
+Application,且 `syncPolicy.automated.selfHeal: true`。
+
 **执行方不能碰的**:
 - git commit / push(提交历史由统筹方统一维护)
 - 计费资源开关机
