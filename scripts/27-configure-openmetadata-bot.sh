@@ -108,16 +108,22 @@ if [ -z "$JWT_TOKEN" ]; then
 fi
 
 log "解密成功,校验一下这个 JWT 真的能打通 OpenMetadata API(打 /api/v1/users/loggedInUser)..."
-kubectl -n "$OM_NS" run "om-bot-verify-$(date +%s)" --rm -i --restart=Never \
-  --image=curlimages/curl:latest --command --quiet -- \
-  curl -sf -H "Authorization: Bearer ${JWT_TOKEN}" \
-  "http://openmetadata.${OM_NS}.svc.cluster.local:8585/api/v1/users/loggedInUser" \
-  > /tmp/om-bot-verify.json 2>>"$LOG_FILE" || {
+# 不额外拉一个 curlimages/curl 的 Pod 校验(实测在这台云主机上 kubectl run
+# --rm 经常卡在镜像拉取/清理上,1 分钟超时都不够)——openmetadata 自己的
+# 容器镜像里带了 wget(没有 curl/python3),直接 kubectl exec 进去用 wget
+# 打自己的 localhost,不依赖额外调度一个新 Pod。
+VERIFY_JSON="$(kubectl -n "$OM_NS" exec deploy/openmetadata -- \
+  wget -q -O - --header="Authorization: Bearer ${JWT_TOKEN}" \
+  "http://localhost:8585/api/v1/users/loggedInUser" 2>>"$LOG_FILE")" || {
     log "错误:用解密出来的 token 调 API 校验失败,详情见 $LOG_FILE。"
     exit 1
   }
-BOT_NAME="$(python3 -c "import json;print(json.load(open('/tmp/om-bot-verify.json')).get('name'))" 2>/dev/null || echo "?")"
-log "校验通过:API 返回的登录用户是 ${BOT_NAME}(应为 ingestion-bot)。"
+BOT_NAME="$(echo "$VERIFY_JSON" | python3 -c "import json,sys;print(json.load(sys.stdin).get('name'))" 2>/dev/null || echo "?")"
+if [ "$BOT_NAME" != "ingestion-bot" ]; then
+  log "错误:API 校验返回的登录用户是 [${BOT_NAME}],不是预期的 ingestion-bot,原始返回:${VERIFY_JSON}"
+  exit 1
+fi
+log "校验通过:API 返回的登录用户是 ${BOT_NAME}。"
 
 for t in "${TARGETS[@]}"; do
   ns="${t%%:*}"; name="${t##*:}"

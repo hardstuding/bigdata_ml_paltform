@@ -4,10 +4,11 @@
 # python:3.12-slim 镜像那套——见 apps/permission-request-app/deployment.yaml
 # 顶部注释,同一个原因。
 #
-# 需要手动建的 Secret(和 permission-request-app 的 GIT_TOKEN 是同一类考虑
-# ——敏感凭据不该由自动化流程自己造):
-#   OPENMETADATA_TOKEN:去 OpenMetadata UI -> Settings -> Bots -> Add Bot
-#   建一个 table-registration-bot,生成 JWT token 后:
+# OPENMETADATA_TOKEN:2026-08-22 起由 scripts/27-configure-openmetadata-bot.sh
+# 自动建(部署阶段跑,不用人工去 OpenMetadata UI 建 bot)——复用
+# OpenMetadata 安装时自带的 ingestion-bot 那个 unlimited JWT,从 Postgres
+# 里读出来解密,建成 table-registration-app-openmetadata 这个 Secret(key
+# 是 token)。想手动建/覆盖:
 #     kubectl -n table-registration-app create secret generic table-registration-app-openmetadata \
 #       --from-literal=token=<token>
 #   没建这个 Secret 之前,表还是能正常建(Trino 建表这条路径不依赖它),

@@ -12,9 +12,10 @@
 # push,会在页面上提示需要哪一行手动加进 platform/iam/memberships.csv。
 #
 # OPENMETADATA_TOKEN(ADR-044,表访问分级审批要查表的安全等级/负责人):
-# 复用 table-registration-app 那个 table-registration-bot 的同一个 token
-# 值就行,不用在 OpenMetadata 里再建一个 bot——Secret 是按命名空间隔离的,
-# 这里要单独建一份(值一样,名字不一样):
+# 2026-08-22 起由 scripts/27-configure-openmetadata-bot.sh 自动建,和
+# table-registration-app-openmetadata 是同一个 ingestion-bot token 值,
+# Secret 按命名空间隔离所以这边单独存一份(名字不一样,值一样)。想手动
+# 建/覆盖:
 #   kubectl -n permission-request-app create secret generic permission-request-app-openmetadata \
 #     --from-literal=token=<和 table-registration-app-openmetadata 一样的 token>
 # 没建这个 Secret 之前,组权限申请(加入某个组)不受影响,只是表访问申请
