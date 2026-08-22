@@ -91,7 +91,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 权限到期回收 | ✅ | 自动回收(ADR-050) |
 | 查询 | ✅ | Trino Web UI 走 Keycloak SSO(本次会话修好并端到端验证);Iceberg 表读写正常 |
 | 建表 | ✅ | table-registration-app,建表 + 回写负责人/安全等级(ADR-043) |
-| SQL 数据转换 | 🟡 | dbt 最小骨架能在 Trino/Iceberg 上跑(ADR-053),但**没接 Airflow 编排(Cosmos)、没接 OpenMetadata 摄入**,等于"能手动跑 dbt",不是"分析师的生产工具" |
+| SQL 数据转换 | 🟡 | dbt 最小骨架能在 Trino/Iceberg 上跑(ADR-053),**已经接进 Airflow**(`dbt_demo` DAG,`dbt build` + 把 `manifest.json`/`catalog.json` 上传到 `s3://lakehouse/dbt-artifacts/`)。*2026-08-21 修正:这一行之前写的"没接 Airflow 编排"不准确。* **没用 Cosmos 是刻意的设计取舍不是缺口**(Cosmos 要在 DAG 解析阶段跑 dbt,得改 scheduler/dag-processor 的 Python 运行时,理由见 DAG 文件顶部注释)。**真正还缺的两件**:①`schedule=None`,只能手动触发,不是常驻定时任务;②OpenMetadata 的 dbt 摄入任务没配——artifacts 已经上传到连接器期望的位置了,但没有任何东西去消费它们 |
 | 看板 / BI | ✅ | Superset 接 Keycloak SSO(本次会话修好 `api_base_url` 并端到端验证),连 Trino 用服务账号(ADR-021) |
 | 中文界面 | ❌ | Superset 未汉化(zhenghe 2026-08-16 提出,不急) |
 
