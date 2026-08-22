@@ -57,52 +57,33 @@
   (不跑的话 OpenMetadata 连不上 OpenSearch,但首页能打开,容易被误判成
   部署成功)。
 
-### 推倒重建验证:开了个头,撞到一个必须用户拍板的前提
+### 推倒重建验证:2026-08-22 在 cloud-full 上真的做了一次,**通过**
 
-2026-08-22 真的动手做了,过程中发现两件此前没有记录过的事,**在用户回答
-之前不能继续**:
+用户明确授权(Codex 那边当时没在用)。完整记录见
+[ADR-039](decisions/039-teardown-rebuild-test.md) 末尾,这里只留结论。
 
-1. **`k3s-uninstall.sh` 清不掉自定义的 `--data-dir`。** cloud-full 的 k3s
-   是用 `--data-dir /data/k3s` 装的,卸载脚本只删默认路径——实测跑完
-   `k3s-uninstall.sh` 之后,`/data/k3s/server/db`(整个集群状态)和
-   `/data/k3s/storage`(13 个 local-path PV)原封不动。也就是说"卸载再装
-   一遍"根本不是从空集群开始,装回去之后 node 的 AGE 还是 6d1h,所有
-   Application 和数据都回来了——**这样测出来的"一键部署成功"是假的**。
-   真要从空开始,必须显式 `rm -rf /data/k3s`。
-2. **但那个目录里有别人的数据。** `/data/k3s/storage` 里有
-   `pvc-..._data-ai-platform-v2_control-api-data`——那是 Codex 那个并行
-   项目的 PV,它和这个平台**共用同一个 k3s 集群**(不只是共用一台机器
-   ——这件事 2026-08-16 在 `docs/journal/2026-08.md` 里记过,但没有进任何
-   一份"开工前必读"的文档,所以做推倒重建规划时没被想起来)。删 `/data/k3s` 会连它的数据一起删掉,
-   这不是我能替用户决定的事。
+**办法**:不是 `rm -rf`,而是 `mv /data/k3s /data/k3s.pre-teardown-20260822`
+——同一文件系统内改名,瞬间完成;集群状态和 13 个 PV(含 Codex 的)完整
+留在备份目录里,回滚就是把名字改回去;而 196G 镜像在
+`/data/containerd`+`/data/docker`,不在被移走的目录里,所以重建不用重新
+拉任何镜像。起点确认是真空的:只有 4 个默认 namespace,node AGE 8s。
 
-**已经做过的动作和当前状态**:执行了一次 `k3s-uninstall.sh`(集群短暂
-中断,Codex 那个项目也跟着中断了),随后用
-`scripts/21-bootstrap-cloud-vm.sh` 原样装回去。**已经完整恢复并逐项核实
-过,不是"看着好了"**:
+**结果**:`bootstrap-all.sh` **20 步全过、EXIT=0、零失败零跳过**;空集群
+到 56 个 Application 全绿用了 **13 分钟**;`scripts/08`(Trino 建 Iceberg
+表 + Superset 图表,4 行)和 `scripts/13`(Spark 读 10 行、写回、
+`SPARK_ICEBERG_DEMO_OK`)都通过;History Server 列出作业;OpenMetadata
+bot token 在部署阶段自动建成。
 
-- 56 个 ArgoCD Application 全部回到 Synced/Healthy(和中断前的基线一致)。
-- Codex 的 `data-ai-platform-v2` 命名空间 7 个 Pod 全部 1/1 Running,
-  **没有数据丢失**。
-- 功能抽查:跑 `scripts/13-run-spark-iceberg-demo.sh`,读到 10 行、写回
-  `iceberg.demo.orders_by_region_spark`、`SPARK_ICEBERG_DEMO_OK`;
-  History Server `/api/v1/applications` 列出两次作业。
+**抓到两个真实 bug,都已修并重新验证**:
+1. `airflow-migrate-db` 在 Postgres 还没起来的窗口里烧光 `backoffLimit`,
+   Job 永久 Failed 且不自愈。修法是先等依赖就绪再开始算重试。
+2. **更严重**:`bootstrap-all.sh` 跑一遍得不到能用的平台——`scripts/00` 建
+   Secret 时目标 namespace 还不存在(全部"跳过"且不会回头补),组件专属
+   初始化步骤也跑在组件起来之前(8 步全"跳过",脚本却报"全部完成")。
+   已插入 `wait_for_namespaces` + 重跑 00 + `wait_apps_converged` 两步。
 
-**恢复过程中要手动介入的三件事**(下次在 cloud-full 上重启 k3s 会再遇到,
-不是一次性偶发):
-
-1. k3s 重启后,重启前就存在的 Pod 会**丢掉 projected serviceaccount
-   token**(`/var/run/secrets/.../token: no such file or directory`,
-   还有 `kube-root-ca.crt not registered`),自己不会自愈,必须
-   `kubectl delete pod` 让 kubelet 重新投一次。Postgres 是关键路径
-   (所有组件都依赖它),先修它,其余大部分跟着自愈。
-2. `airflow-migrate-db` 这个 Job 在 Postgres 还没起来的窗口里失败并
-   `BackoffLimitExceeded`,Job 失败之后不会自己重试,要 `kubectl delete
-   job` 让 ArgoCD 重建(重建后 9 秒完成)。
-3. SSH 隧道会断,要重建。
-
-**需要用户回答的**:要不要真的删掉 `/data/k3s` 做一次货真价实的从空重建?
-如果要,Codex 那个项目的数据怎么办(它自己能不能重建/需不需要先备份)。
+**遗留**:`/data/k3s.pre-teardown-20260822`(1.4G)还在云主机上,里面有
+Codex 项目的 PV。**确认 Codex 那边不需要恢复之前不要删。**
 
 ### 其它下一步
 

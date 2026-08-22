@@ -127,3 +127,66 @@ AGE 还是 6d1h,所有 Application 和数据都回来了。
 （2026-08-22 那次执行了 `k3s-uninstall.sh`,集群短暂中断、Codex 项目也
 跟着中断,随后用 `scripts/21-bootstrap-cloud-vm.sh` 原样装回,数据因为
 data-dir 没被删而完整恢复,没有发生丢失。）
+
+
+## 2026-08-22:cloud-full 上真的做了一次,通过了
+
+用户明确授权(Codex 那边当时没在用)。用的办法不是 `rm -rf`,而是
+**`mv /data/k3s /data/k3s.pre-teardown-20260822`** —— 同一个文件系统内改名,
+瞬间完成、不占额外空间,而且:
+
+- 集群状态和 13 个 PV(含 Codex 项目的)完整保留在备份目录里,**回滚就是
+  把目录名改回去**;
+- 196G 的镜像在 `/data/containerd` + `/data/docker`,**不在被移走的目录里**,
+  所以重建不需要重新拉任何镜像(这是 cloud-full 上做这个测试可行的关键——
+  从境内重新拉 100+ 个镜像是几小时起步)。
+
+事后确认起点是真的空:`kubectl get ns` 只有 4 个默认命名空间,node AGE 8s。
+
+### 结果
+
+| | |
+|---|---|
+| `bootstrap-all.sh` | **20 步全过,EXIT=0,零失败零跳过** |
+| 空集群 → 56 个 Application 全部 Synced/Healthy | **13 分钟** |
+| `scripts/08`(Trino 建 Iceberg 表 + Superset 图表) | 通过,查询返回 4 行 |
+| `scripts/13`(Spark 读写 Iceberg) | 通过,读 10 行、写回、`SPARK_ICEBERG_DEMO_OK` |
+| Spark History Server | 列出 `spark-iceberg-demo`,eventLog 链路通 |
+| OpenMetadata bot token | 部署阶段自动创建成功(第 18 步) |
+
+### 抓到两个真实 bug,都是增量式开发永远碰不到的
+
+**1. `airflow-migrate-db` 会把重试次数烧光,而且不自愈。**
+全新集群上它和 Postgres(CNPG 建集群)、`airflow-create-db`(建库)是被
+ArgoCD 同时创建的。库还不存在的那一两分钟里 `airflow db migrate` 连着失败
+三次打满 `backoffLimit`,Job 变成永久 Failed —— **Job 一旦 Failed 就不会
+自己重试,ArgoCD 也不会重建它**(manifest 没变,在它看来已经 in-sync)。
+结果 airflow-db-init 永远 Degraded,必须人工 `kubectl delete job`。
+修法不是调大 backoffLimit(那只是把竞态窗口拉宽),是先等依赖就绪再开始
+算重试:加了一个有上限的 `airflow db check` 等待循环。
+
+**2. 更严重的一条:`bootstrap-all.sh` 跑一遍得不到一个能用的平台。**
+两个原因叠加:
+
+- `scripts/00-generate-secrets.sh` 往十几个 namespace 里塞 Secret,但那些
+  namespace 是 ArgoCD 同步各 Application 时用 `CreateNamespace=true` 建的。
+  第 2 步跑 00 时它们一个都不存在,脚本逐个打印"跳过"然后过去。于是
+  oauth2-proxy / spark-history-server / table-registration-app / feast 起来
+  之后一直 `CreateContainerConfigError`(`secret "minio-root" not found`
+  这类),**没有任何东西会回头补建**。
+- "建 Airflow 账号""配 Superset 数据源"这些组件专属初始化步骤紧跟在配
+  Keycloak 后面,那时候组件一个都没起来,8 个步骤全部打印"跳过"——**脚本
+  报"全部完成",实际一件都没做**。
+
+修法是插两步:`wait_for_namespaces`(目标 namespace 列表从 Application 的
+`destination.namespace` 自动推导,不用手工维护)之后重跑 `scripts/00` 补
+Secret;再 `wait_apps_converged` 等收敛,然后才做组件专属初始化。两个等待
+都是超时只警告不中止 —— 有些 Application 本来就要等后面的初始化步骤跑完
+才健康,死等会锁死。
+
+改完之后重跑一遍验证:20 步全过、零跳过,之前缺的 5 个 Secret 全部建上。
+
+### 遗留
+
+`/data/k3s.pre-teardown-20260822`(1.4G)还留在云主机上,里面有 Codex 项目
+的 PV。**确认 Codex 那边不需要恢复之前不要删。**
