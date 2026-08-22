@@ -53,6 +53,7 @@ on:
       - "apps/superset-image/Dockerfile"
       - "apps/argo-workflows-training-image/Dockerfile"
       - "apps/feast/feature-server-image/Dockerfile"
+      - "apps/spark-iceberg-image/Dockerfile"
       - ".github/workflows/build-images.yml"
 
 jobs:
@@ -78,6 +79,8 @@ jobs:
             image: argo-workflows-training
           - context: apps/feast/feature-server-image
             image: feast-feature-server
+          - context: apps/spark-iceberg-image
+            image: spark-iceberg
     steps:
       - uses: actions/checkout@v4
 
