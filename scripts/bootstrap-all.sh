@@ -99,7 +99,14 @@ step "生成/确认管理员密码 Secret(幂等,已存在的不会被覆盖)"
 run_required "scripts/00-generate-secrets.sh" ./scripts/00-generate-secrets.sh
 
 step "灌回本地镜像缓存(只对 local-lite 有意义,cloud-full 走另一套远程镜像准备流程)"
-if [ -d image-cache ] && [ -n "$(ls -A image-cache 2>/dev/null)" ]; then
+if [ "$TARGET_ENV" != "local-lite" ]; then
+  # 2026-08-22:加这个判断之前,从 Mac 上 bootstrap cloud-full 会去灌本机
+  # 的 image-cache/(那是给 local-lite 准备的),本机没开 docker 时会刷出
+  # 二十多行 "!! 加载失败: xxx",看着像一键部署坏了,其实完全无关。
+  # 这一步操作的是**跑脚本这台机器自己的本地 docker**,只有 local-lite
+  # (colima 就在这台机器上)才有意义。
+  log "--> TARGET_ENV=${TARGET_ENV} 不是 local-lite,跳过(这一步灌的是本机 docker,只对 local-lite 有意义)"
+elif [ -d image-cache ] && [ -n "$(ls -A image-cache 2>/dev/null)" ]; then
   # 这一步操作的是"跑这份脚本的机器自己的本地 docker 存储",不是
   # kubectl 当前指向的那个集群——对 local-lite(colima 就在这台机器上)
   # 有意义;对 cloud-full,镜像准备是在远端云主机上单独做的(见

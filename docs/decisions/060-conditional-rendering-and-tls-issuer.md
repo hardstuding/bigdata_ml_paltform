@@ -73,8 +73,23 @@ production。理由:production 有每周签发限额,配错了反复重试会打
 
 ## 后果
 
-- 现在有了一个通用的"互斥几选一"表达方式,不只服务 TLS 这一个场景。预计
-  后面会用到的地方:prod 专属的 nodeAffinity/taint 相关 manifest、
+- 现在有了一个通用的"互斥几选一"表达方式,不只服务 TLS 这一个场景。
+
+  **同一天就用上了第二次:告警外部通知渠道。** 用户对这一块的口径和域名
+  一样("等上生产再测,留好配置项、能够生效就好"),而原来的现状和 TLS
+  一模一样——`platform/apps/kube-prometheus-stack.yaml` 里有一大段"照抄
+  可用"的注释模板,但注释不会生效。现在
+  `environments/<env>/config.yaml` 的 `alert_notification_mode`
+  (none | webhook)决定要不要生成
+  `platform/alertmanager-notification/manifests/` 下那个
+  AlertmanagerConfig CR。
+
+  这里额外验证了一个边界情况:**条件不成立时目录里只剩一个 README.md**。
+  ArgoCD 的 directory 类型只认 YAML,这种情况下那个 Application 同步 0 个
+  资源、状态 Synced/Healthy(在 cloud-full 上实测确认)。README 本身是
+  必需的——git 不跟踪空目录,目录消失会让 ArgoCD 报 "path does not exist"。
+
+  预计后面还会用到的地方:prod 专属的 nodeAffinity/taint 相关 manifest、
   local-lite 专属的 `platform/coredns-custom/`(prod 阶段应该整个不生成,
   见 `environments/prod/README.md`)。
 - **ACME 这一档仍然是"结构就位、没跑通过"。** 真正生效还依赖三件这个
