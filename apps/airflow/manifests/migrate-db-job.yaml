@@ -20,6 +20,16 @@ metadata:
   namespace: airflow
 spec:
   ttlSecondsAfterFinished: 300
+  # 2026-08-22 推倒重建验证抓到的**唯一一个真实冷启动 bug**:全新集群上,
+  # 这个 Job 和 Postgres(CloudNativePG 建集群)、airflow-create-db(建库)
+  # 是同时被 ArgoCD 创建的。库还不存在的那一两分钟里,`airflow db migrate`
+  # 连着失败三次就把 backoffLimit 烧光,Job 变成永久 Failed——**而 Job 一旦
+  # Failed 就不会自己重试,ArgoCD 也不会重建它**(manifest 没变,在它看来
+  # 已经 in-sync)。结果是 airflow-db-init 这个 Application 永远 Degraded,
+  # Airflow 起不来,而且没有任何东西会自愈,必须人工 `kubectl delete job`。
+  #
+  # 光调大 backoffLimit 只是把竞态窗口拉宽,治标。真正的修法是**先等依赖
+  # 就绪再开始算重试次数**:下面 args 里加了一个有上限的等待循环。
   backoffLimit: 3
   template:
     metadata:
@@ -44,7 +54,21 @@ spec:
           args:
             - bash
             - -c
-            - "exec airflow db migrate"
+            - |
+              # 等 Postgres 和 airflow 这个库真的可连(见上面 backoffLimit
+              # 那段注释)。`airflow db check` 就是 chart 自己的
+              # wait-for-airflow-migrations initContainer 用的同一个命令,
+              # 不是自己发明的探测方式。
+              #
+              # 上限 60 次 × 5 秒 = 5 分钟,不是无限等——真的连不上要让 Job
+              # 失败、在 ArgoCD 上显示出来,而不是挂在那里假装还在初始化
+              # (这个仓库对"卡住看起来像在工作"的容忍度很低)。
+              for i in $(seq 1 60); do
+                if airflow db check; then break; fi
+                echo "[$i/60] 数据库还连不上(全新集群上 Postgres/建库可能还没好),5 秒后重试"
+                sleep 5
+              done
+              exec airflow db migrate
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
