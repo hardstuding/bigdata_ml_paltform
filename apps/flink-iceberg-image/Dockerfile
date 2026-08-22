@@ -63,4 +63,15 @@ RUN set -eux; \
     curl -fsSL -O https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.3.4/hadoop-client-runtime-3.3.4.jar; \
     curl -fsSL -O https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar; \
     curl -fsSL -O https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar; \
+    # Hive Metastore 客户端。2026-08-22 第一次真实部署漏了这个,作业启动时
+    # 报 `Cannot initialize Catalog implementation
+    # org.apache.iceberg.hive.HiveCatalog: ... NoClassDefFoundError:
+    # org/apache/hadoop/hive/metastore/api/NoSuchObjectException`。
+    #
+    # 容易漏的原因:iceberg-flink-runtime 里**不包含** Hive Metastore 的
+    # 客户端类,而这个平台的 Iceberg 表都注册在 Hive Metastore 上
+    # (Trino/Spark 那边也是同一个 HMS)——Spark 那条链路不用额外加是因为
+    # apache/spark 官方镜像自带 hive-metastore 客户端,Flink 镜像不带。
+    # 又一个"跨引擎复用同一套元数据服务,但每个引擎缺的东西不一样"的例子。
+    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-hive-3.1.3_2.12/1.20.5/flink-sql-connector-hive-3.1.3_2.12-1.20.5.jar; \
     chown -R flink:flink "${FLINK_HOME}/lib"
