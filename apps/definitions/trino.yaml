@@ -78,6 +78,7 @@ spec:
         # 见 docs/BACKLOG.md 483→480 那条),不值得为了这一点版本号换这个
         # 代价,维持 480。
         server:
+          # 规格分档,见 environments/resource-profiles.yaml
           workers: 0
           config:
             query:

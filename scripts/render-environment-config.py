@@ -58,6 +58,7 @@ git push/触发 ArgoCD 同步之前不会动到真实集群,但下一次 push �
 提交之前,记得跑一次 `... cloud-full --check` 确认没有把 cloud-full 的
 渲染结果带歪。
 """
+import re
 import sys
 from pathlib import Path
 
@@ -84,13 +85,68 @@ def load_config(env: str) -> dict:
         return yaml.safe_load(f)
 
 
+RESOURCE_PROFILES = REPO_ROOT / "environments" / "resource-profiles.yaml"
+_RES_RE = re.compile(r"\{\{RES:([a-z0-9_]+)\}\}")
+
+
+def load_resource_profile(env: str) -> dict:
+    """取这个环境的规格档(见 environments/resource-profiles.yaml 顶部说明)。
+
+    三个环境并排写在同一个文件里,缺键直接报错不给默认值兜底——和这个项目
+    其它地方"不用默认值悄悄兜底"的一贯做法一致。
+    """
+    if not RESOURCE_PROFILES.exists():
+        print(f"!! 找不到 {RESOURCE_PROFILES}", file=sys.stderr)
+        sys.exit(1)
+    profiles = yaml.safe_load(RESOURCE_PROFILES.read_text()) or {}
+    if env not in profiles:
+        print(
+            f"!! environments/resource-profiles.yaml 里没有 `{env}` 这一档。"
+            "每个环境都必须显式给出规格,不接受隐式默认值。",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # 三档的键集合必须完全一致。防的是"给 prod 加了个新可调项,忘了给
+    # local-lite/cloud-full 补"——那种情况下别的环境要等到真去渲染时才
+    # 报错,而 CI 只跑 cloud-full 一档,很可能一直发现不了。
+    keysets = {name: set((vals or {}).keys()) for name, vals in profiles.items()}
+    union = set().union(*keysets.values()) if keysets else set()
+    incomplete = {n: sorted(union - ks) for n, ks in keysets.items() if union - ks}
+    if incomplete:
+        print("!! environments/resource-profiles.yaml 三档的键不一致,缺的是:", file=sys.stderr)
+        for n, miss in incomplete.items():
+            print(f"   {n}: 缺 {miss}", file=sys.stderr)
+        sys.exit(1)
+
+    return profiles[env] or {}
+
+
 def render_text(text: str, config: dict) -> str:
-    return (
+    text = (
         text.replace("{{DOMAIN_SUFFIX}}", config["domain_suffix"])
         .replace("{{HTTP_PORT_SUFFIX}}", config["http_port_suffix"])
         .replace("{{HTTPS_PORT_SUFFIX}}", config["https_port_suffix"])
         .replace("{{EXTERNAL_SCHEME}}", config["external_scheme"])
     )
+
+    # 规格分档占位符 {{RES:key}}。用不存在的 key 直接报错退出,不静默留着
+    # 原样——那样会渲染出一个字面量是 "{{RES:xxx}}" 的 YAML,部署上去才
+    # 发现,正是这个项目最忌讳的"看起来成功了"。
+    profile = config.get("_resource_profile", {})
+
+    def _sub(m):
+        key = m.group(1)
+        if key not in profile:
+            print(
+                f"!! 组件里用了 {{{{RES:{key}}}}},但 environments/resource-profiles.yaml "
+                f"的 `{config.get('_env')}` 这一档里没有这个键",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return str(profile[key])
+
+    return _RES_RE.sub(_sub, text)
 
 
 def render_templates(config: dict, check_only: bool) -> tuple[bool, int]:
@@ -231,6 +287,8 @@ def main():
     env = sys.argv[1]
     check_only = "--check" in sys.argv
     config = load_config(env)
+    config["_env"] = env
+    config["_resource_profile"] = load_resource_profile(env)
 
     # **先把 config 校验完整,再动任何文件。** 2026-08-21 真实踩到:
     # environments/prod/config.yaml 有 domain_suffix 但没有 enabled_components,

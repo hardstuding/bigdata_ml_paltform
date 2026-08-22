@@ -71,10 +71,11 @@ spec:
         # 见 docs/BACKLOG.md 483→480 那条),不值得为了这一点版本号换这个
         # 代价,维持 480。
         server:
-          workers: 0
+          # 规格分档,见 environments/resource-profiles.yaml
+          workers: {{RES:trino_workers}}
           config:
             query:
-              maxMemory: "1GB"
+              maxMemory: "{{RES:trino_query_max_memory}}"
             authenticationType: OAUTH2,PASSWORD
             https:
               enabled: true
@@ -175,18 +176,18 @@ spec:
           # ArgoCD 的 ignoreDifferences(见下面 spec.ignoreDifferences)+
           # 一次性手动 patch,细节和取舍见 docs/decisions/017 的更新记录。
           jvm:
-            maxHeapSize: "1536m"
+            maxHeapSize: "{{RES:trino_jvm_max_heap}}"
           config:
             nodeScheduler:
               includeCoordinator: true
             query:
-              maxMemoryPerNode: "1GB"
+              maxMemoryPerNode: "{{RES:trino_query_max_memory_per_node}}"
           resources:
             requests:
-              cpu: 300m
-              memory: 1Gi
+              cpu: {{RES:trino_coordinator_cpu}}
+              memory: {{RES:trino_coordinator_memory_request}}
             limits:
-              memory: 2Gi
+              memory: {{RES:trino_coordinator_memory_limit}}
         env:
           - name: MINIO_ACCESS_KEY
             valueFrom:

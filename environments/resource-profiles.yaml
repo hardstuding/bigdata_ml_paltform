@@ -1,0 +1,61 @@
+# 规格分档:同一份组件定义,三个环境给不同的资源规格。
+#
+# **为什么需要这个**:`docs/BACKLOG.md` 1.1 把"组件选择"和"规格分档"拆成
+# 两半,前半在 2026-08-20 做完了(enabled_components),后半一直没做。后果是
+# 所有组件的 resources/副本数写死的是 local-lite 那套小规格(Trino
+# coordinator 300m CPU、server.workers: 0),**照搬到生产硬件上等于用一台
+# 笔记本的配置跑生产**——这是"改配置就能上生产"这条核心承诺最大的窟窿。
+#
+# **为什么三个环境并排写在同一个文件里**,而不是各自散在
+# environments/<env>/config.yaml:并排能一眼看出差异(prod 的 Trino 到底比
+# local-lite 大多少),也不容易出现"加了新键但漏配某个环境"——渲染时缺键
+# 直接报错,不给默认值兜底(和这个项目其它地方"不用默认值悄悄兜底"的
+# 一贯做法一致)。
+#
+# **用法**:组件文件里写 `{{RES:trino_coordinator_cpu}}`,渲染时按当前
+# 环境取值。新增一个可调项 = 这里加一行(三个环境都要给值)+ 组件文件里
+# 用占位符。
+#
+# **覆盖范围的诚实说明**:这套机制目前只能覆盖 **helm 类组件**(19 个,
+# 资源写在 `apps/components/<x>.yaml` 的 `helm.valuesObject` 里,会经过
+# 渲染)。**裸 manifest 类组件(25 个)覆盖不到**——它们的 Application 只是
+# 用 `path:` 指向 `apps/<x>/manifests/`,ArgoCD 直接从 git 读那些原始文件,
+# 不经过渲染管线。典型受影响的是 **Postgres 的 `instances: 1`(HA 副本数,
+# 见 apps/postgres/manifests/cluster.yaml)**,那是 prod 必须改的一项。
+# 要覆盖它们需要把 `apps/<x>/manifests/` 也纳入"源→生成产物"管线并改每个
+# Application 的 path,是架构级改动,单独立项(见 docs/BACKLOG.md 1.1)。
+
+local-lite:
+  # 本机 colima,6G/4vCPU,能跑起来就行
+  trino_coordinator_cpu: "300m"
+  trino_coordinator_memory_request: "1Gi"
+  trino_coordinator_memory_limit: "2Gi"
+  trino_jvm_max_heap: "1536m"
+  trino_query_max_memory: "1GB"
+  trino_query_max_memory_per_node: "1GB"
+  # 0 = coordinator 兼职干 worker 的活,单机不值得再起独立 worker
+  trino_workers: "0"
+
+cloud-full:
+  # 阿里云 ECS 16 vCPU / 64 GiB,当前实际在跑的就是这一档
+  trino_coordinator_cpu: "300m"
+  trino_coordinator_memory_request: "1Gi"
+  trino_coordinator_memory_limit: "2Gi"
+  trino_jvm_max_heap: "1536m"
+  trino_query_max_memory: "1GB"
+  trino_query_max_memory_per_node: "1GB"
+  trino_workers: "0"
+
+prod:
+  # 6 台物理机(见 environments/prod/README.md 的目标硬件)。下面的数字是
+  # **按 cloud-full README"请求值×3、限制值×2"那个方向性判断给的起步值,
+  # 不是实测容量规划**——真正上生产后要按 `kubectl top pods` 的真实数据
+  # 回调,不要把这几个数当成经过验证的推荐配置。
+  trino_coordinator_cpu: "2"
+  trino_coordinator_memory_request: "8Gi"
+  trino_coordinator_memory_limit: "16Gi"
+  trino_jvm_max_heap: "12g"
+  trino_query_max_memory: "20GB"
+  trino_query_max_memory_per_node: "8GB"
+  # prod 真的拆出独立 worker,不再让 coordinator 兼职
+  trino_workers: "3"
