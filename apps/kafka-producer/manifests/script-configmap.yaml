@@ -69,7 +69,18 @@ data:
                 "value": round(random.uniform(0, 100), 2),
                 # ISO-8601,和 Flink SQL 侧 'json.timestamp-format.standard'='ISO-8601'
                 # 配套,见 apps/flink-streaming-demo/manifests/script-configmap.yaml
-                "event_time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                # **时间格式必须是 `yyyy-MM-dd HH:mm:ss.SSS`,不能用 ISO 的
+                # `T` 分隔符和结尾的 `Z`。** 2026-08-22 夜实测:写成
+                # `2026-08-22T19:05:20.187Z` 之后,Flink 的 JSON format 默认按
+                # SQL 标准解析 TIMESTAMP(3),`T`/`Z` 解析失败得到 null,作业在
+                # 消费到第一条真实消息时就崩:
+                #   RuntimeException: RowTime field should not be null,
+                #   please convert it to a non-null long value.
+                # 而且报错发生在下游算子,和"格式不对"这个根因看着毫不相干。
+                # (另一条路是给 Kafka source 加
+                # `'json.timestamp-format.standard' = 'ISO-8601'`,但那个模式
+                # 也不接受结尾的 Z,还得再改一次格式,不如直接产出 SQL 标准。)
+                "event_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
             }
             producer.produce(
                 TOPIC,
