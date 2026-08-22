@@ -83,8 +83,18 @@ data:
                 'properties.group.id' = 'flink-device-events-stream',
                 'scan.startup.mode' = 'earliest-offset',
                 'format' = 'json',
-                'json.timestamp-format.standard' = 'ISO-8601',
-                'json.ignore-parse-errors' = 'true'
+                -- 时间格式必须和 Producer 产出的一致。Producer 写的是
+                -- `yyyy-MM-dd HH:mm:ss.SSS`(见
+                -- scripts/kafka_device_events_producer.py 里的说明),对应
+                -- Flink 的 SQL 标准;写成 ISO-8601 会解析不出来。
+                'json.timestamp-format.standard' = 'SQL',
+                -- **不要开 ignore-parse-errors。** 2026-08-22 夜被它坑惨:
+                -- 开着的时候,时间戳解析失败不会报错,而是**静默变成 null**,
+                -- 然后在两个算子之后以 `RowTime field should not be null` 的
+                -- 形式炸出来——报错信息和真正的原因(格式对不上)完全对不上号,
+                -- 排查时一直在怀疑数据本身有问题,反复 dump topic 验证格式。
+                -- 让它在解析失败的那一刻就失败,报错才有指向性。
+                'json.ignore-parse-errors' = 'false'
             )
         """)
 
