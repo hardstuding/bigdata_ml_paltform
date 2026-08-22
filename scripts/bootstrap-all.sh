@@ -137,6 +137,26 @@ else
   log "--> superset 或 trino 还没都起来,跳过"
 fi
 
+step "装 KServe 的 ClusterServingRuntime(官方 chart 不带,不装的话模型上线时没有 runtime 可用)"
+# 2026-08-21 补进来的:这一步以前不在 bootstrap 里,得人记得手动跑。
+# 后果是"全新部署出来的平台,KServe 装好了但一个 runtime 都没有,直到有人
+# 真的去上线模型才发现"——和这个仓库反复踩的"部署了 ≠ 能用"是同一类。
+if kubectl get crd clusterservingruntimes.serving.kserve.io >/dev/null 2>&1; then
+  run_optional "scripts/10-install-kserve-serving-runtimes.sh" ./scripts/10-install-kserve-serving-runtimes.sh
+else
+  log "--> KServe CRD 不存在(kserve 还没启用),跳过"
+fi
+
+step "配 OpenMetadata 连 OpenSearch 的自签证书信任"
+# 同样是 2026-08-21 补进来的,原因同上:不跑这一步 OpenMetadata 连不上
+# OpenSearch(https + 自签),搜索/目录功能是坏的,但首页能打开,很容易
+# 被当成"部署成功了"。
+if kubectl get deploy openmetadata -n openmetadata >/dev/null 2>&1; then
+  run_optional "scripts/20-configure-openmetadata-search-truststore.sh" ./scripts/20-configure-openmetadata-search-truststore.sh
+else
+  log "--> openmetadata 还没起来,跳过"
+fi
+
 step "同步 platform/iam/ 里的组织架构/角色数据进 Keycloak"
 run_optional "scripts/12-sync-iam.py --no-create-users" python3 ./scripts/12-sync-iam.py --no-create-users
 
