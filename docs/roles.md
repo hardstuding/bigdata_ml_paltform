@@ -13,7 +13,7 @@
 - 🟡 **部分**——能跑通但有明显缺口(要人工帮忙 / 只验证过 demo 路径 / 体验不成立)
 - ❌ **缺失**——今天做不到
 
-> 状态基准:2026-08-19,以 cloud-full 环境为准。
+> 状态基准:2026-08-21(部分行注明了各自的验证日期),以 cloud-full 环境为准。
 > "没部署"指组件定义写好了但不在 `environments/cloud-full/config.yaml`
 > 的 `enabled_components` 列表里,`apps-root` 不会同步它——**注意这不是
 > 资源不够**(cloud-full 是 16 vCPU / 64 GiB)。2026-08-20 起"哪些组件
@@ -43,7 +43,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 运维 | ✅ 基本可以 | 缺统一控制面/Runbook;告警没有外部通知渠道 |
 | 数据分析师 | ✅ 基本可以 | OpenMetadata 已部署验证,"找数据"卡点解除 |
 | 大数据开发 | 🟡 能开工 | 批处理引擎+Kafka 都已部署验证,血缘仍是部分,还没跑通一条完整链路 |
-| 算法工程师 | 🟡 能开工 | JupyterHub+MLflow 已部署验证,但"一键连好 Trino"的体验仍是缺口 |
+| 算法工程师 | 🟡 能开工 | 主链路(notebook→特征→训练→MLflow)已端到端跑通;缺多步骤 DAG、模型灰度/审批 |
 | 管理 | ❌ 不行 | 驾驶舱从未开始 |
 
 ---
@@ -114,7 +114,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 流处理引擎 | ❌ | Flink 只有角色设计(ADR-056),没有实现 |
 | 调度 | ✅ | Airflow 已部署,DAG 单一源码 + CI 防漂移 |
 | 作业可观测 | ✅ | Spark History Server 已部署并真实登录验证通过(2026-08-19)。过程中修了两个真实 bug:官方镜像不带 S3A 连接器 jar(补 initContainer)、oauth2-proxy 缺 scope 配置 |
-| 血缘 | ❌ | OpenMetadata 没部署;SeaTunnel 血缘(ADR-052)只验证过 API 机制;Spark 血缘(ADR-014)仅设计 |
+| 血缘 | ❌ | **OpenMetadata 已部署并登录验证过(2026-08-19),但没有任何血缘数据在往里流**(2026-08-21 修正:这一行之前写的"OpenMetadata 没部署"是过期信息,和本文档"数据分析师"那一行自相矛盾);SeaTunnel 血缘(ADR-052)只验证过 API 机制;Spark 血缘(ADR-014)仅设计 |
 | 数据质量 / 契约 | ❌ | 未开始(B 线) |
 | 作业模板 / CI-CD | ❌ | 未开始(A 线) |
 
@@ -131,7 +131,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 
 | 环节 | 状态 | 说明 |
 |---|---|---|
-| **交互式开发(Notebook)** | 🟡 | JupyterHub 已部署并真实登录验证通过(2026-08-19,SSO 登录成功跳转 `/hub/spawn`)。但仍然没有"打开就自动连好 Trino、自动带自己权限"的体验——要自己装 client、自己填连接串(`docs/usage-guide.md` 已如实记录这个差距,这次部署没有改变它) |
+| **交互式开发(Notebook)** | ✅ | JupyterHub 已部署并真实登录验证通过(2026-08-19)。**"打开就自动连好 Trino"这个差距 2026-08-19 晚已由 ADR-058 补上**:singleuser 用的是平台统一镜像(`apps/platform-image/`),自带 `platform_sdk`,notebook 里 `from platform_sdk import query` 直接可用,`query()`/`mlflow_setup()` 都在真实 notebook pod 里验证过成功——不用自己装 client、不用自己拼连接串(`docs/usage-guide.md` 已同步更新)。*2026-08-21 修正:这一行之前还写着"仍然没有这个体验",是过期信息。* |
 | 特征工程 | ✅ | Feast 全链路真实重新验证(2026-08-19):Iceberg → Spark 离线读取 → feast apply → materialize → Redis 在线存储 → Feature Server 在线查询,Alice/Bob 的 region/product/amount 都查出正确值。过程中修了两个真实 bug(见下面"当前最高性价比"那段),不只是组件都在 |
 | 训练执行 | ✅ | **Argo Workflows 编排训练已实现并真实验证**(2026-08-19,`apps/argo-workflows-training-image/`)——不是照抄参考项目 ysb/algo 的 notebook+papermill 模式,评估后改用纯 Python 脚本 + 专门镜像,复用 `scripts/train_demo_model.py`。真实提交 Workflow 跑通,Model Registry 查询确认 version READY。目前只有训练一步,没有 Spark 特征工程步骤 |
 | **实验跟踪 / 模型注册** | ✅ | MLflow 已部署并真实登录验证通过(2026-08-19,含按组授权)。部署时修了两个真实 bug:内存限制太小导致启动 36 秒内 OOMKill、oauth2-proxy 配置的后端 Service 名字写错(chart 生成的真实名字是 `mlflow-mlflow` 不是 `mlflow`) |
@@ -147,9 +147,21 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 status=READY)。**Feast 特征这一段也重新验证过**(2026-08-19,全链路
 真实跑通,见上面"特征工程"一行)。**"Argo Workflows 编排训练"这段
 之前的空白也已经补上**(2026-08-19 晚些时候,见上面"训练执行"一行,
-设计取舍详见 `docs/CURRENT_WORK.md`)。剩下没有连起来的只有"notebook
-里触发训练"——需要真实浏览器交互验证,还没做,以及多步骤 DAG(特征
-工程→训练→评估,现在只有训练一步)。
+设计取舍详见 `docs/CURRENT_WORK.md`)。
+
+**2026-08-20:整条链路已经串起来真实跑通,不再是"每段分别验证过"。**
+两件事补齐了最后的空白:①`platform_sdk.run_workflow_template()`——
+notebook 里一行代码触发已部署的 WorkflowTemplate,不用 `kubectl create`,
+云端真实触发验证过;②新增 `train-from-feast-features` 这个
+WorkflowTemplate,用 `FeatureStore.get_historical_features()` 取
+point-in-time 正确的历史特征来训练(不是合成数据),云端跑通、MLflow
+Model Registry 查询确认 `demo-region-classifier` v1 `status=READY`。
+过程中挖出并修好 4 个真实 bug(feast/pyspark 版本冲突、Feast 初始化
+eagerly import redis、Spark 依赖直连 Maven Central 卡死改成构建期打包
+jar、Hive Metastore NetworkPolicy 漏了 argo-workflows 命名空间)。
+
+**还真的没做的**:多步骤 DAG(特征工程→训练→评估串成一个 Workflow,
+现在这两个模板各自都只有训练一步)、模型灰度/审批/回滚。
 
 ---
 
