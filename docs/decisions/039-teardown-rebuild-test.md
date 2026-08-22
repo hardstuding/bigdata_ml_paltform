@@ -96,3 +96,32 @@ OpenMetadata/Superset/Airflow/Kafka/Trino/SeaTunnel)都验证过部署没问题
   核心骨架的一部分)——理论上它们的 create-db-job/NetworkPolicy 也应该
   经得住同样的"从零"检验,但这次测试没有把它们也拉起来验证,留给下次
   实际需要用到它们的时候顺带确认。
+
+
+## 2026-08-22 补充:这套办法搬到 cloud-full 上有两个坑
+
+这份 ADR 记的是 **local-lite(colima)** 上的推倒重建。2026-08-22 想在
+cloud-full 上照做一次,撞到两件当时不存在的问题:
+
+### 1. `k3s-uninstall.sh` 清不掉自定义的 `--data-dir`
+
+cloud-full 的 k3s 是 `--data-dir /data/k3s` 装的(见
+`scripts/21-bootstrap-cloud-vm.sh`),卸载脚本只处理默认路径。**实测**:
+跑完 `k3s-uninstall.sh` 之后 `/data/k3s/server/db` 和
+`/data/k3s/storage`(13 个 local-path PV)原封不动;重新装回去,node 的
+AGE 还是 6d1h,所有 Application 和数据都回来了。
+
+**这个坑的危险之处不是"没删干净"**,是它会让人得出一个假的结论:
+"卸载重装一遍,全部 Synced/Healthy,一键部署验证通过"——实际上一行
+新东西都没建。要从空开始必须显式 `rm -rf /data/k3s`。
+
+### 2. cloud-full 这个 k3s 集群不是这个项目独占的
+
+`/data/k3s/storage` 里有 `pvc-..._data-ai-platform-v2_control-api-data`
+——Codex 那个并行项目和这个平台**共用同一个 k3s 集群**,不只是共用一台
+云主机。所以在 cloud-full 上做推倒重建,不是"清掉我自己的东西"这么简单,
+必须先和用户确认另一个项目的数据怎么处理。
+
+（2026-08-22 那次执行了 `k3s-uninstall.sh`,集群短暂中断、Codex 项目也
+跟着中断,随后用 `scripts/21-bootstrap-cloud-vm.sh` 原样装回,数据因为
+data-dir 没被删而完整恢复,没有发生丢失。）
