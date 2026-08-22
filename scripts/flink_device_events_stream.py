@@ -30,6 +30,14 @@ apps/flink-streaming-demo/manifests/script-configmap.yaml 里的内容保持
 同步。不要直接跑这个文件——用
 scripts/30-run-flink-streaming-demo.sh 通过 FlinkDeployment 提交。
 """
+# 注意:`value` 是 Flink SQL(Calcite)的保留字,建表 DDL 和 SELECT 里都必须
+# 用反引号包起来,否则 SQL 解析直接失败:
+#   SqlParserException: SQL parse failed. Encountered "value" at line N
+# 2026-08-22 第一次真实部署就撞到这个——字段名沿用的是 SeaTunnel 那条批量
+# 链路的 schema(见 apps/airflow/dags/seatunnel_device_events.py),在
+# SeaTunnel/Spark 那边 `value` 没问题,换到 Flink 就炸。**跨引擎复用 schema
+# 时,保留字集合是不一样的**,这一点值得记住。
+
 from pyflink.table import EnvironmentSettings, TableEnvironment
 
 KAFKA_BOOTSTRAP_SERVERS = "platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
@@ -54,7 +62,7 @@ def main() -> None:
             event_id    BIGINT,
             device_id   STRING,
             event_type  STRING,
-            value       DOUBLE,
+            `value`     DOUBLE,
             event_time  TIMESTAMP(3),
             WATERMARK FOR event_time AS event_time - INTERVAL '10' SECOND
         ) WITH (
@@ -84,7 +92,7 @@ def main() -> None:
             event_id    BIGINT,
             device_id   STRING,
             event_type  STRING,
-            value       DOUBLE,
+            `value`     DOUBLE,
             event_time  TIMESTAMP(3)
         )
     """)
@@ -102,7 +110,7 @@ def main() -> None:
 
     statement_set.add_insert_sql("""
         INSERT INTO iceberg_catalog.demo.device_events_stream
-        SELECT event_id, device_id, event_type, value, event_time
+        SELECT event_id, device_id, event_type, `value`, event_time
         FROM kafka_device_events
     """)
 
