@@ -243,8 +243,19 @@ YAML 解析全都查不出来,它是 Flink 运行时的语义校验。
 
 ### 2. 自建镜像在境内拉不动,digest 固定和镜像站加速互斥
 
-`flink-iceberg` 压缩后 **1244MB**。境内云主机直连 `ghcr.io` 实测约
-80KB/s,要 4 个多小时。而已有的加速手段
+`flink-iceberg` 压缩后 **1244MB**。
+
+**⚠️ 更正**:这一节最初写的"直连 ghcr.io 实测约 80KB/s、要 4 个多小时"
+**是错的**——那个数字是看 `/data/docker` 的增长量出来的,但这台机器的
+Docker 29 用 containerd 镜像存储,层数据落在 `/data/containerd`,量错了
+目录。重新测过的真实数据:**`ghcr.nju.edu.cn` 南大镜像站 5.5 MB/s,1244MB
+三分四十五秒拉完,digest 和 GHCR 官方完全一致**。直连 ghcr.io 确实慢
+(Flink Operator 镜像 wall-clock 约 14 分钟)但没有 80KB/s 那么夸张。
+
+留下这段更正而不是直接改掉数字,是因为"用错误的观测指标得出看起来很确定
+的结论"本身值得记一笔。
+
+已有的加速手段
 `scripts/23-pull-images-remote-via-mirror.sh` 用的是"经国内镜像站拉 →
 `docker tag` 打回原名",**digest 引用没法 `docker tag`**,所以 digest
 固定的镜像用不了这条路;docker 的 `registry-mirrors` 又只对 Docker Hub
@@ -256,9 +267,9 @@ GHCR 包直接被拒(`this image is not in the allowlist`)。
 临时处理:这两个自建镜像改用 CI 同时推的 **commit-SHA 标签**(事实不可变,
 满足 ADR-010 的"不用浮动 tag",而且能 `docker tag`)。
 
-**但这只是绕过,不是解决。** 探测到 `ghcr.nju.edu.cn` / `ghcr.linkos.org`
-这类无白名单的公开代理对我们的仓库返回 200,可以作为候选,但引入第三方
-代理需要核对 digest 一致性,而且可靠性不由我们控制。真正的生产解法应该是
+**但这只是绕过,不是解决。** `ghcr.nju.edu.cn` 已经实测可用(5.5MB/s,
+digest 一致),`ghcr.linkos.org` 也返回 200 可作备选,但引入第三方代理的
+可用性不由我们控制。真正的生产解法应该是
 **把自建镜像推一份到境内 registry(比如阿里云 ACR)**,这需要用户提供
 凭据,已记进 `docs/BACKLOG.md` 2.10 等确认。
 
