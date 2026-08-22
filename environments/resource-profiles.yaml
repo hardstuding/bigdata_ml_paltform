@@ -36,6 +36,10 @@ local-lite:
   # 单节点机器,多副本没有意义(ADR-038 记录过这个结论)
   # Kafka 单节点 KRaft:副本数 1 时三个 replication factor 只能是 1,
   # 否则 topic 建不出来(可用 broker 不够)。
+  # Keycloak 会话超时(秒)。开发联调放宽:8h 空闲 / 24h 最长,理由见
+  # templates/scripts/03-configure-keycloak.sh 里那段注释。
+  keycloak_sso_session_idle_timeout: "28800"
+  keycloak_sso_session_max_lifespan: "86400"
   kafka_replicas: "1"
   kafka_replication_factor: "1"
   kafka_min_insync_replicas: "1"
@@ -102,6 +106,9 @@ cloud-full:
   trino_workers: "0"
   # 也是单节点 ECS,同上
   # 同上,单节点 ECS。
+  # 同 local-lite:这仍然是给人调试用的环境,不是生产。
+  keycloak_sso_session_idle_timeout: "28800"
+  keycloak_sso_session_max_lifespan: "86400"
   kafka_replicas: "1"
   kafka_replication_factor: "1"
   kafka_min_insync_replicas: "1"
@@ -171,6 +178,11 @@ prod:
   # 3 broker + 3 副本 + min.insync 2:允许挂一台还能继续写(isr 取 3 的话
   # 挂一台就直接停写)。存储容量同样是方向性起步值,真实容量要按消息量和
   # 保留期算,不是这里能定的。
+  # 30 分钟空闲 / 8 小时最长(一个工作日)。**保守起步基线,不是"符合贵
+  # 公司安全要求"的证明**——上生产前仍要拿公司自己的基线核对,只是现在
+  # 核对的对象是一个明确的配置值,不是一句"记得重新评估"的注释。
+  keycloak_sso_session_idle_timeout: "1800"
+  keycloak_sso_session_max_lifespan: "28800"
   kafka_replicas: "3"
   kafka_replication_factor: "3"
   kafka_min_insync_replicas: "2"

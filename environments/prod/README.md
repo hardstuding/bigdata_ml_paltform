@@ -83,10 +83,14 @@ Encrypt 或企业内部 CA,看有没有公网出口决定用哪种 ACME 方式)�
 
 ### 4. Keycloak 会话超时、密钥轮换等安全基线
 
-`docs/operations/tuning.md` 已经标了一条:Keycloak 的
-`ssoSessionIdleTimeout`/`ssoSessionMaxLifespan`(现在是 8/24 小时)
-是为 local-lite 开发联调放宽的值,**prod 部署前必须按公司安全基线
-重新评估**,不能直接照抄。同样要review 的还有:各组件的初始密码
+Keycloak 的 `ssoSessionIdleTimeout`/`ssoSessionMaxLifespan`
+**已经做成按环境分档**(2026-08-22):local-lite/cloud-full 是为开发联调
+放宽的 8h/24h,prod 档是 30 分钟空闲 / 8 小时最长。以前这里只有一句
+"prod 部署前必须重新评估"的注释——那类注释在这个仓库已经被证明不管用,
+没有任何机制保证有人真的去评估,而漏评估的后果是生产环境跑着一套为开发
+调试放宽的会话策略,还没人会发现。**prod 档那两个数字是保守起步基线,
+不是"符合贵公司安全要求"的证明**,仍然要拿公司自己的基线核对一遍,只是
+核对的对象现在是一个明确的配置值。同样要review 的还有:各组件的初始密码
 (`scripts/00-generate-secrets.sh` 生成的)要不要接进真正的密钥管理
 系统(Vault 之类),而不是留在 `secrets/generated-credentials.txt`
 这个本地文件里。

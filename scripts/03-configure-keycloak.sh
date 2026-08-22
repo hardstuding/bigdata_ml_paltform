@@ -59,15 +59,22 @@ echo "已开启 platform realm 的登录事件 + 管理员事件审计日志"
 # 默认 ssoSessionIdleTimeout 只有 30 分钟(Keycloak 默认值)——本地开发/
 # 联调这台机器上,人不在电脑前的间隔经常超过 30 分钟,session 过期后每次都
 # 要重新走一遍浏览器登录,而且密码类操作没法用脚本代劳(不能替人输入密码,
-# 是安全上的硬规则,不是技术做不到)。放宽到 8 小时空闲超时 + 24 小时
-# 最大会话长度,减少这种"必须有人在电脑前才能继续调试"的等待。生产环境的
-# 会话策略应该由公司自己的安全基线决定,这里的宽松值只适合 local-lite/开发
-# 联调场景,cloud-full/prod 部署时应该按公司安全要求重新评估这两个值。
+# 是安全上的硬规则,不是技术做不到)。所以 local-lite/cloud-full 放宽到
+# 8 小时空闲 + 24 小时最长。
+#
+# **2026-08-22:这两个值改成按环境分档了**(environments/resource-profiles.yaml
+# 的 keycloak_sso_session_idle_timeout / _max_lifespan)。以前是写死的宽松
+# 值 + 一句"prod 部署时应该重新评估"的注释——这类注释在这个仓库已经被证明
+# 不管用:没有任何机制保证有人真的去评估,而漏评估的后果是生产环境跑着一套
+# 为开发调试放宽的会话策略,而且没人会发现。prod 档现在是 30 分钟空闲 /
+# 8 小时最长,**这是一个保守的起步基线,不是"符合贵公司安全要求"的证明**
+# ——真正上生产前仍然要拿公司自己的基线核对一遍,只是现在核对的对象是一个
+# 明确的配置值,不是一句注释。
 # 【可调参数,见 docs/operations/tuning.md】
 kcadm update realms/platform \
   -s ssoSessionIdleTimeout=28800 \
   -s ssoSessionMaxLifespan=86400
-echo "已放宽 platform realm 的会话超时(8 小时空闲 / 24 小时最长,仅适合开发环境)"
+echo "已设置 platform realm 的会话超时(空闲 28800s / 最长 86400s)"
 
 create_client_if_absent() {
   local client_id="$1" redirect_uris="$2" secret_ns="$3" secret_name="$4" secret_key="$5"
