@@ -314,6 +314,38 @@ OCI 不需要 index,按名字+版本直接取,实测几秒钟拉完。
 GitHub Pages 巨型 index.yaml 的 Application,一旦需要真正重新同步
 (升版本、改 values)就会卡死。
 
+### 2.10 境内环境每引入一个新境外镜像,都是几小时级的部署风险
+
+**2026-08-22 实测数字**:cloud-full 这台境内云主机直连 `ghcr.io` 拉镜像
+只有约 **80 KB/s**(实测 `/data/docker` 增长速率),一个几百 MB 的镜像要
+几小时;走国内镜像站(`ghcr.m.daocloud.io` 等)约 **2.3 MB/s**,**差约
+30 倍**。
+
+那天引入 Flink Operator 时就撞上了:Pod 卡在 `ContainerCreating` 十几
+分钟,而且**从 Pod 状态完全看不出是"在慢慢下载"还是"卡死了"**——只有
+去 SSH 上看 `/data/docker` 有没有在长,才能区分。
+
+已有的缓解手段 `scripts/23-pull-images-remote-via-mirror.sh` 是好的,
+问题在于**它不在任何"部署时该做什么"的流程里**:`bootstrap-all.sh` 没有
+调它(也调不了——那个脚本要 SSH 凭据,而 bootstrap 只假设有 kubectl),
+README 的一键部署那节也没提。结果是"引入新组件 → 忘了预拉 → 卡几小时 →
+才想起来有这个脚本"。
+
+已经做的:`bootstrap-all.sh` 在跳过本机镜像缓存那一步时打印显式提醒。
+**这只是止血,不是解决。** 可选方向:
+
+1. 给云主机的 docker 配 `registry-mirrors`(daemon.json),让**所有**拉取
+   自动走镜像站。最彻底,但要考虑 digest 固定的镜像经镜像站拉能不能保持
+   digest 一致(`scripts/23` 的注释里说实测过三个例子 digest 一致,可以
+   作为依据,但没有全量验证过)。
+2. 把 `scripts/23` 做成 `scripts/21-bootstrap-cloud-vm.sh` 的一部分(那个
+   脚本本来就有 SSH 凭据),开机初始化时就预拉一遍。
+3. 保持现状 + 提醒。最省事,但依赖人记得。
+
+**多节点演练前必须先定这一条**(见
+`docs/operations/multi-node-rehearsal.md` 的成本估算):3 台新机器从零拉
+镜像,按 80KB/s 是完全不可行的。
+
 ### 2.5 扩大 CI
 
 **已迈出几步**(chart 渲染校验、DAG 单一源码、app ConfigMap 单一源码、

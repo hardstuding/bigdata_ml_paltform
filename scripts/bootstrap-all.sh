@@ -169,6 +169,21 @@ if [ "$TARGET_ENV" != "local-lite" ]; then
   # 这一步操作的是**跑脚本这台机器自己的本地 docker**,只有 local-lite
   # (colima 就在这台机器上)才有意义。
   log "--> TARGET_ENV=${TARGET_ENV} 不是 local-lite,跳过(这一步灌的是本机 docker,只对 local-lite 有意义)"
+  # 2026-08-22 实测教训:境内云主机**直连 ghcr.io 只有约 80KB/s**,一个
+  # 几百 MB 的镜像要拉几小时,Pod 会长时间卡在 ContainerCreating 而且看
+  # 不出是"慢"还是"死了"。走国内镜像站(scripts/23)实测约 2.3MB/s,差
+  # 约 30 倍。
+  #
+  # 这一步没法在这份脚本里自动做:scripts/23 要 SSH 到云主机上执行,需要
+  # CLOUD_VM_IP/CLOUD_VM_KEY,而这份脚本本身只用 kubectl、不假设有 SSH
+  # 通道。所以这里只能提醒——但**必须提醒**,因为不做的后果不是"慢一点",
+  # 是新组件可能几小时都起不来。
+  log ""
+  log "    ⚠️  如果目标集群在境内网络、而且这次引入了**新镜像**,先在另一个"
+  log "        终端跑一遍(可以和这份脚本并行):"
+  log "          CLOUD_VM_IP=<公网IP> CLOUD_VM_KEY=<私钥> ./scripts/23-pull-images-remote-via-mirror.sh"
+  log "        它是幂等的,已有的镜像会跳过。不跑的话,新镜像可能卡几小时。"
+  log ""
 elif [ -d image-cache ] && [ -n "$(ls -A image-cache 2>/dev/null)" ]; then
   # 这一步操作的是"跑这份脚本的机器自己的本地 docker 存储",不是
   # kubectl 当前指向的那个集群——对 local-lite(colima 就在这台机器上)
