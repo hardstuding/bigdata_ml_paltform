@@ -74,4 +74,13 @@ RUN set -eux; \
     # apache/spark 官方镜像自带 hive-metastore 客户端,Flink 镜像不带。
     # 又一个"跨引擎复用同一套元数据服务,但每个引擎缺的东西不一样"的例子。
     curl -fsSL -O https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-hive-3.1.3_2.12/1.20.5/flink-sql-connector-hive-3.1.3_2.12-1.20.5.jar; \
+    # flink-sql-connector-hive 是 shaded 包,但**没有把这三个打进去**,
+    # 官方 Hive 集成文档里也是单列出来要自己加的。2026-08-22 夜实测:
+    # 只加上面那个 connector 之后,下一个报错就是
+    # `NoClassDefFoundError: org/apache/commons/logging/LogFactory`。
+    # 三个一次加齐,避免"修一个露一个"多跑几轮 CI + 镜像拉取(每轮十几
+    # 分钟,而且是在按小时计费的机器上等)。
+    curl -fsSL -O https://repo1.maven.org/maven2/commons-logging/commons-logging/1.2/commons-logging-1.2.jar; \
+    curl -fsSL -O https://repo1.maven.org/maven2/org/antlr/antlr-runtime/3.5.2/antlr-runtime-3.5.2.jar; \
+    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/thrift/libfb303/0.9.3/libfb303-0.9.3.jar; \
     chown -R flink:flink "${FLINK_HOME}/lib"
