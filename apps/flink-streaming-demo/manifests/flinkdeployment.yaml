@@ -42,7 +42,7 @@ spec:
   # 这个镜像**只有 linux/amd64**——
   # apache-flink 在 PyPI 上没有 linux/arm64 wheel,原因和约束见
   # docs/decisions/062-flink-streaming-pipeline.md 末尾。
-  image: ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg:35232df151cf0a662eddf3886c53b7b7afa5ee27
+  image: ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg:c63813f4bad8eff21166bf070297c73832914caf
   imagePullPolicy: IfNotPresent
   flinkVersion: v1_20
   serviceAccount: flink
