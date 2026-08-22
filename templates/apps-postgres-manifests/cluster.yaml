@@ -38,7 +38,7 @@ metadata:
   namespace: data
 spec:
   # 规格分档,见 environments/resource-profiles.yaml
-  instances: 1
+  instances: {{RES:postgres_instances}}
   # 2026-08-14:见 ADR-041(队列资源管理)——Postgres 是共享底座,挂了会
   # 带崩一大片消费方,归 platform-critical 档,节点资源紧张时最后才会被
   # 考虑驱逐。CNPG 的 Cluster CRD 原生支持这个字段

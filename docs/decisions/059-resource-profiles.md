@@ -1,7 +1,7 @@
 # 059. 规格分档:同一份组件定义,三个环境不同资源规格
 
-- 状态: **机制已实现并验证(2026-08-21)**,当前只覆盖 helm 类组件,
-  裸 manifest 类组件仍未覆盖(见下面"没做到的部分")。
+- 状态: **机制已实现并验证(2026-08-21)**,helm 类和裸 manifest 类组件
+  都已证明可覆盖(各有一个样本:Trino、Postgres HA),其余组件按需铺开。
 
 ## 背景
 
@@ -66,21 +66,27 @@ prod 那次是在临时 clone 里渲染验证的,不在主工作区——`apps/d
 键集合一致性校验也自测过:临时给 prod 加一个别的环境没有的键,渲染立刻
 报出"local-lite/cloud-full 缺 [zzz_test_key]"。
 
-## 没做到的部分(不要误以为已经完整)
+## 覆盖范围(含一次自我修正)
 
-**只覆盖 helm 类组件(19 个)。裸 manifest 类组件(25 个)覆盖不到。**
+**初版判断是错的,已修正。** 第一版这里写的是"只能覆盖 helm 类组件(19 个),
+裸 manifest 类(25 个)覆盖不到,要覆盖需要把 `apps/<x>/manifests/` 纳入
+渲染管线并逐个改 Application 的 `path:`,属于架构级改动"。
 
-原因是结构性的:裸 manifest 组件的 Application 只用 `path:` 指向
-`apps/<x>/manifests/`,ArgoCD 直接从 git 读那些原始文件,**根本不经过渲染
-管线**。渲染管线目前只处理 `apps/components/*.yaml`(Application 定义本身)
-和 `templates/` 下的东西。
+写完之后重新想了一遍,发现**这个判断过重**:现有 `templates/<x>/ → 目标目录`
+这套机制本来就允许"生成产物落在任意路径"。把需要分档的裸 manifest 源文件挪进
+`templates/`,让渲染产物仍然落在 ArgoCD 原本读的那个路径上就行——
+**Application 的 `path:` 一个字都不用改**,和 `platform/apps/*.yaml` 早就在用的
+是同一个模式。
 
-受影响最典型的是 **Postgres 的 `instances: 1`**(HA 副本数,在
-`apps/postgres/manifests/cluster.yaml`)——那是 prod 必须改的一项,现在改不了。
+已经用 **Postgres 的 HA 副本数**验证过这条路(prod 的头号硬需求):
+`templates/apps-postgres-manifests/cluster.yaml` 是源,渲染产物仍然是
+`apps/postgres/manifests/cluster.yaml`。结果:cloud-full 渲染出
+`instances: 1`(和改造前功能上完全一致,只多一行注释),prod 渲染出
+`instances: 3`(1 主 2 备)。
 
-要覆盖它们,得把 `apps/<x>/manifests/` 也纳入"源 → 生成产物"管线,并逐个改
-Application 的 `path:` 指向生成目录。那是架构级改动,单独立项,不在这次范围
-——**在它做完之前,prod 只能算"配置结构完整",不能算"可用"**。
+所以当前的真实状态是:**机制对两类组件都成立,只是还没逐个铺开**。已覆盖的
+是 Trino(资源+worker 数)和 Postgres(HA 副本数)两个样本;其余组件按需
+补占位符即可,是机械工作不是设计问题。
 
 ## 后续
 

@@ -73,6 +73,11 @@ DIR_MAP = {
     "platform-apps": REPO_ROOT / "platform" / "apps",
     "platform-bootstrap": REPO_ROOT / "platform" / "bootstrap",
     "scripts": REPO_ROOT / "scripts",
+    # 裸 manifest 类组件里需要按环境分档的,把源文件放进 templates/,
+    # 生成产物仍然落在 ArgoCD 原本读的那个路径上——**Application 的
+    # `path:` 完全不用改**。ADR-059 一开始判断"裸 manifest 覆盖不到、需要
+    # 架构级改动",后来发现现有机制这样扩展就够了,那个判断过重,已修正。
+    "apps-postgres-manifests": REPO_ROOT / "apps" / "postgres" / "manifests",
 }
 
 
