@@ -17,16 +17,25 @@
 # 2026-08-19 真实故障:部署后 CrashLoopBackOff,
 # `ClassNotFoundException: Class org.apache.hadoop.fs.s3a.S3AFileSystem
 # not found`——apache/spark 官方镜像故意不打包云存储连接器 jar(s3a 属于
-# 可选依赖,体积原因),这和 apps/spark-iceberg-demo/manifests/
-# sparkapplication.yaml 撞的是同一类缺口,那边是 SparkApplication 用
-# `spark.jars.packages` 在提交时从 Maven 现拉解决的,但 History Server是
-# 裸 Deployment,没有 spark-submit 那套依赖解析机制。用 initContainer 从
-# Maven Central 下载同样版本的 jar(hadoop-aws:3.3.4 + aws-java-sdk-
-# bundle:1.12.262,和 sparkapplication.yaml 用的是完全一致的版本——那份
-# 文件已经验证过这两个版本号和这个基础镜像自带的 hadoop-client-api/
-# runtime:3.3.4 兼容,不是另外猜的),补进 ${SPARK_HOME}/jars/ 目录本身
-# ——具体怎么补、为什么不能用 spark.driver.extraClassPath,见下面
-# initContainers 那段的说明。
+# 可选依赖,体积原因)。当时的解法是用 initContainer 在**每次 Pod 启动时**
+# 从 Maven Central 现拉 hadoop-aws + aws-java-sdk-bundle。
+#
+# **2026-08-22:那个解法在 cloud-full 上被实测证伪,已经换掉。** 那天 VM
+# 重启后 History Server 起不来,init 容器报
+# `curl: (28) Operation timed out after 120000 milliseconds with 44908902
+# out of 280645251 bytes received`——aws-java-sdk-bundle 有 280MB,从境内
+# 节点拉 Maven Central 拉不完,Pod 进 CrashLoopBackOff。这不是偶发网络
+# 抖动,是同一个坑第三次出现:apps/spark-iceberg-image/Dockerfile 和
+# apps/argo-workflows-training-image/Dockerfile 顶部都记过同一件事
+# (运行时联网拉依赖在这个环境里不可靠)。
+#
+# 现在直接复用 apps/spark-iceberg-image/ 那个镜像——它构建期就把这两个
+# jar(版本完全一致)打进了 ${SPARK_HOME}/jars/。**Pod 启动不再需要任何
+# 外网访问**,initContainer 和 emptyDir 卷一起删掉了。多带的
+# iceberg-spark-runtime jar 对 History Server 无害(只是多几十 MB)。
+#
+# 这条改动的意义超出"修一个坏掉的组件":一键部署的承诺是"从空环境可恢复"
+# ——一个每次重启都要成功下载 280MB 才能起来的组件,不满足这个承诺。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,42 +52,12 @@ spec:
       labels:
         app: spark-history-server
     spec:
-      # spark-class(见 /opt/spark/bin/spark-class 里的
-      # LAUNCH_CLASSPATH="$SPARK_JARS_DIR/*")直接从 ${SPARK_HOME}/jars/*
-      # 拼类路径来启动 org.apache.spark.launcher.Main,不经过 spark-submit
-      # 那条会读 spark.driver.extraClassPath 的路径——试过用这个配置项
-      # 追加 classpath,读了 spark-class 脚本源码确认根本不会生效,不能
-      # 只凭经验假设,得读实际脚本逻辑。真正管用的办法是把两个 S3A 相关的
-      # jar 直接放进 ${SPARK_HOME}/jars/ 目录本身。emptyDir 卷挂载在这个
-      # 路径上会先清空原有内容,所以 initContainer 要先把镜像自带的全部
-      # jars 复制进这个卷,再补下载这两个,不能只放这两个进去(会丢失
-      # 镜像原有的核心 jar,直接启动失败)。
-      initContainers:
-        - name: fetch-s3a-jars
-          image: apache/spark:3.5.9
-          command:
-            - /bin/bash
-            - -c
-            - |
-              set -euo pipefail
-              cp -r /opt/spark/jars/. /jars/
-              curl -fsSL -m 60 -o /jars/hadoop-aws-3.3.4.jar \
-                https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar
-              curl -fsSL -m 120 -o /jars/aws-java-sdk-bundle-1.12.262.jar \
-                https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
-              echo "jars 目录就绪,共 $(ls /jars | wc -l) 个文件"
-          volumeMounts:
-            - name: s3a-jars
-              mountPath: /jars
       containers:
         - name: history-server
-          image: apache/spark:3.5.9
+          image: ghcr.io/hardstuding/bigdata_ml_paltform/spark-iceberg@sha256:afbf3cd189045744417d1dc5813fdb31d8664f2e8d080ef512ec947c2012de5b
           command:
             - /opt/spark/bin/spark-class
             - org.apache.spark.deploy.history.HistoryServer
-          volumeMounts:
-            - name: s3a-jars
-              mountPath: /opt/spark/jars
           # 【可插拔基础设施,见 ADR-030】又一份独立的 S3A 配置(和 Hive
           # Metastore/Trino 各自的那份不共用),接外部 S3 要同步改这里 +
           # 下面的 AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY,取舍(path-
@@ -121,9 +100,6 @@ spec:
               path: /
               port: 18080
             initialDelaySeconds: 30
-      volumes:
-        - name: s3a-jars
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
