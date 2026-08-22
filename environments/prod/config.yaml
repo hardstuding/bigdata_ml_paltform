@@ -10,3 +10,67 @@ domain_suffix: your-real-domain.example.com
 http_port_suffix: ""
 https_port_suffix: ""
 external_scheme: https
+
+# 2026-08-21 补:之前这份文件**没有 enabled_components**,导致
+# `render-environment-config.py prod` 跑一半失败——模板替换那步已经把
+# platform/apps/*.yaml 的域名改成 prod 占位域名了,组件选择那步才报错,
+# 工作区被留在"一半 prod 一半 cloud-full"的混合状态(渲染脚本已经改成
+# 校验前置,现在会在写任何文件之前退出)。没有这份清单,"改配置切换环境"
+# 这个承诺对 prod 就是不成立的。
+#
+# **先照搬 cloud-full 的全量 44 个组件**,理由:prod 的定位是
+# "功能完整的生产环境",不是裁剪版;真要裁(比如生产不需要 demo 类组件)
+# 应该是有明确理由的减法,不是一开始就少写几个。
+#
+# **但必须说清楚:这份清单能渲染出来 ≠ prod 能直接拉起来用。** 还差的
+# 硬条件见 environments/prod/README.md,其中最关键的是**资源规格分档还
+# 没有做**——所有组件的 resources/副本数目前写死的是 local-lite 那套
+# 小规格(比如 Trino coordinator 300m CPU、server.workers: 0),照搬到
+# 生产硬件上不改,等于用一台笔记本的配置跑生产。这一层是
+# `docs/BACKLOG.md` 1.1 明确押后的后半段,没做完之前 prod 只能算
+# "配置结构完整",不能算"可用"。
+enabled_components:
+  - airflow-db-init.yaml
+  - airflow.yaml
+  - argo-training-workflow-template.yaml
+  - argo-workflows.yaml
+  - cloudnative-pg-operator.yaml
+  - dbt-demo.yaml
+  - feast.yaml
+  - hive-metastore.yaml
+  - iam-sync.yaml
+  - jupyterhub.yaml
+  - kafka-cluster.yaml
+  - kafka-operator.yaml
+  - keycloak-db-init.yaml
+  - kserve-crd.yaml
+  - kserve-resources.yaml
+  - minio.yaml
+  - mlflow-db-init.yaml
+  - mlflow-oauth2-proxy.yaml
+  - mlflow.yaml
+  - network-policies.yaml
+  - opa.yaml
+  - openmetadata-db-init.yaml
+  - openmetadata.yaml
+  - opensearch.yaml
+  - permission-request-app-oauth2-proxy.yaml
+  - permission-request-app.yaml
+  - platform-iam-rbac.yaml
+  - platform-portal-oauth2-proxy.yaml
+  - platform-portal.yaml
+  - platform-sdk-submitter-rbac.yaml
+  - postgres-backup.yaml
+  - postgres.yaml
+  - resource-quotas.yaml
+  - seatunnel.yaml
+  - spark-history-server-oauth2-proxy.yaml
+  - spark-history-server.yaml
+  - spark-operator.yaml
+  - superset-db-init.yaml
+  - superset.yaml
+  - table-registration-app-oauth2-proxy.yaml
+  - table-registration-app.yaml
+  - trino-liveness-fix.yaml
+  - trino-tls.yaml
+  - trino.yaml
