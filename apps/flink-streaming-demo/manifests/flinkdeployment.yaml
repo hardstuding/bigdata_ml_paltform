@@ -70,7 +70,16 @@ spec:
     flink.hadoop.fs.s3a.path.style.access: "true"
     flink.hadoop.fs.s3a.connection.ssl.enabled: "false"
     flink.hadoop.fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
-    flink.hadoop.fs.s3a.aws.credentials.provider: "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider"
+    # **用读环境变量的 provider,不是 SimpleAWSCredentialsProvider。**
+    # 2026-08-22 夜实测:配成 SimpleAWSCredentialsProvider 会报
+    # `NoAwsCredentialsException: SimpleAWSCredentialsProvider: No AWS
+    # credentials in the Hadoop configuration` —— 它只认 Hadoop 配置里的
+    # fs.s3a.access.key/secret.key,**不读环境变量**。而这个平台的凭据放在
+    # minio-root 这个 Secret 里、以环境变量注入,不能明文写进 git 的配置。
+    # EnvironmentVariableCredentialsProvider 正好读
+    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY(下面 podTemplate 里注入的
+    # 就是这两个)。
+    flink.hadoop.fs.s3a.aws.credentials.provider: "com.amazonaws.auth.EnvironmentVariableCredentialsProvider"
   podTemplate:
     spec:
       containers:
