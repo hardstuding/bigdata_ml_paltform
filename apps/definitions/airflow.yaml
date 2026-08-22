@@ -110,6 +110,7 @@ spec:
         # Airflow 应用)必然 OOMKilled(exitCode 137,实测确认),表现成
         # api-server 这个 Deployment 卡在 Init:CrashLoopBackOff 起不来。
         apiServer:
+          # 规格分档,见 environments/resource-profiles.yaml
           replicas: 1
           resources:
             requests:
@@ -148,6 +149,7 @@ spec:
             AUTH_USER_REGISTRATION = True
             AUTH_USER_REGISTRATION_ROLE = "Admin"
         scheduler:
+          # 规格分档,见 environments/resource-profiles.yaml
           replicas: 1
           resources:
             requests:
@@ -184,6 +186,7 @@ spec:
         # 要挂进这里——scheduler 和 dagProcessor 都要能看到 dags 目录,不是
         # 只挂一边。
         dagProcessor:
+          # 规格分档,见 environments/resource-profiles.yaml
           replicas: 1
           resources:
             requests:
@@ -216,6 +219,7 @@ spec:
               mountPath: /opt/airflow/dags/platform_sdk_demo.py
               subPath: platform_sdk_demo.py
         triggerer:
+          # 规格分档,见 environments/resource-profiles.yaml
           replicas: 1
           persistence:
             enabled: false
@@ -255,6 +259,8 @@ spec:
             # (见 apps/airflow/dags/seatunnel_device_events.py),但那只
             # 覆盖那一个 DAG,这里补一个平台级默认值,以后新增的 DAG
             # 不用每次都记得自己加。
+            # 规格分档,见 environments/resource-profiles.yaml——这是每个任务
+            # pod 的资源模板,不是常驻副本数,没有 replicas 这个维度。
             resources:
               requests:
                 cpu: 50m

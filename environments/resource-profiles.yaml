@@ -36,6 +36,55 @@ local-lite:
   # 单节点机器,多副本没有意义(ADR-038 记录过这个结论)
   postgres_instances: "1"
 
+  # --- 下面这批(Superset/Airflow/MLflow/OpenSearch/MinIO)是
+  # apps/components/*.yaml 里原来写死的数字原样照抄,local-lite/cloud-full
+  # 两档的值必须和改造前逐字节一致(单节点机器,没有理由现在就不一样)。
+
+  superset_node_replicas: 1
+  superset_node_cpu: "200m"
+  superset_node_memory_request: "512Mi"
+  superset_node_memory_limit: "1024Mi"
+  # 没有 Redis/Celery broker,worker 起来也没用,见 superset.yaml 里的注释
+  superset_worker_replicas: 0
+
+  airflow_apiserver_replicas: 1
+  airflow_apiserver_cpu: "150m"
+  airflow_apiserver_memory_request: "512Mi"
+  airflow_apiserver_memory_limit: "1024Mi"
+  airflow_scheduler_replicas: 1
+  airflow_scheduler_cpu: "150m"
+  airflow_scheduler_memory_request: "512Mi"
+  airflow_scheduler_memory_limit: "1024Mi"
+  airflow_dagprocessor_replicas: 1
+  airflow_dagprocessor_cpu: "100m"
+  airflow_dagprocessor_memory_request: "512Mi"
+  airflow_dagprocessor_memory_limit: "1024Mi"
+  airflow_triggerer_replicas: 1
+  airflow_triggerer_cpu: "100m"
+  airflow_triggerer_memory_request: "256Mi"
+  airflow_triggerer_memory_limit: "512Mi"
+  # KubernetesExecutor 每个任务起的 pod 模板,不是常驻副本
+  airflow_worker_pod_cpu: "50m"
+  airflow_worker_pod_memory_request: "256Mi"
+  airflow_worker_pod_memory_limit: "512Mi"
+
+  mlflow_cpu: "200m"
+  mlflow_memory_request: "1024Mi"
+  mlflow_memory_limit: "2560Mi"
+
+  opensearch_single_node: "true"
+  opensearch_replicas: 1
+  opensearch_cpu: "300m"
+  opensearch_memory_request: "768Mi"
+  opensearch_memory_limit: "1280Mi"
+  opensearch_storage_size: "5Gi"
+
+  minio_replicas: 1
+  minio_storage_size: "8Gi"
+  minio_cpu: "100m"
+  minio_memory_request: "256Mi"
+  minio_memory_limit: "512Mi"
+
 cloud-full:
   # 阿里云 ECS 16 vCPU / 64 GiB,当前实际在跑的就是这一档
   trino_coordinator_cpu: "300m"
@@ -47,6 +96,52 @@ cloud-full:
   trino_workers: "0"
   # 也是单节点 ECS,同上
   postgres_instances: "1"
+
+  # 和 local-lite 完全一样的数字——渲染 cloud-full 之后 apps/definitions/
+  # 必须和改造前逐字节一致,这是这次改动"零行为变化"的验收标准。
+
+  superset_node_replicas: 1
+  superset_node_cpu: "200m"
+  superset_node_memory_request: "512Mi"
+  superset_node_memory_limit: "1024Mi"
+  superset_worker_replicas: 0
+
+  airflow_apiserver_replicas: 1
+  airflow_apiserver_cpu: "150m"
+  airflow_apiserver_memory_request: "512Mi"
+  airflow_apiserver_memory_limit: "1024Mi"
+  airflow_scheduler_replicas: 1
+  airflow_scheduler_cpu: "150m"
+  airflow_scheduler_memory_request: "512Mi"
+  airflow_scheduler_memory_limit: "1024Mi"
+  airflow_dagprocessor_replicas: 1
+  airflow_dagprocessor_cpu: "100m"
+  airflow_dagprocessor_memory_request: "512Mi"
+  airflow_dagprocessor_memory_limit: "1024Mi"
+  airflow_triggerer_replicas: 1
+  airflow_triggerer_cpu: "100m"
+  airflow_triggerer_memory_request: "256Mi"
+  airflow_triggerer_memory_limit: "512Mi"
+  airflow_worker_pod_cpu: "50m"
+  airflow_worker_pod_memory_request: "256Mi"
+  airflow_worker_pod_memory_limit: "512Mi"
+
+  mlflow_cpu: "200m"
+  mlflow_memory_request: "1024Mi"
+  mlflow_memory_limit: "2560Mi"
+
+  opensearch_single_node: "true"
+  opensearch_replicas: 1
+  opensearch_cpu: "300m"
+  opensearch_memory_request: "768Mi"
+  opensearch_memory_limit: "1280Mi"
+  opensearch_storage_size: "5Gi"
+
+  minio_replicas: 1
+  minio_storage_size: "8Gi"
+  minio_cpu: "100m"
+  minio_memory_request: "256Mi"
+  minio_memory_limit: "512Mi"
 
 prod:
   # 6 台物理机(见 environments/prod/README.md 的目标硬件)。下面的数字是
@@ -63,3 +158,71 @@ prod:
   trino_workers: "3"
   # 6 台物理机才谈得上真 HA:1 主 2 备,见 environments/prod/README.md
   postgres_instances: "3"
+
+  # 下面这批同样是**方向性起步值,不是实测容量规划**——请求值×3、限制值×2,
+  # 副本数按 6 台物理机的 HA 常识给,真上生产后要按 `kubectl top pods` 回调。
+
+  # Superset node 是无状态的 Flask 应用,挂 ingress 后面,2 副本就是最基本
+  # 的 HA(单副本重启/滚动更新时会有一瞬间不可用)。
+  superset_node_replicas: 2
+  superset_node_cpu: "600m"
+  superset_node_memory_request: "1536Mi"
+  superset_node_memory_limit: "2048Mi"
+  # 这次分档没有一并把 Celery/Redis broker 接上(那是架构级改动,超出这次
+  # "机械铺开占位符"的范围)——prod 没有 broker,worker 依然起来没用,所以
+  # prod 这一档也保持 0,不是漏配。等以后真的接 Redis/Celery 才有必要调大。
+  superset_worker_replicas: 0
+
+  # apiServer/scheduler/dagProcessor/triggerer 都是无状态或者靠 DB 锁协调
+  # 的组件,Airflow 官方文档明确支持多副本(包括多 scheduler),6 台物理机
+  # 上给 2 副本是常规 HA 起点。
+  airflow_apiserver_replicas: 2
+  airflow_apiserver_cpu: "450m"
+  airflow_apiserver_memory_request: "1536Mi"
+  airflow_apiserver_memory_limit: "2048Mi"
+  airflow_scheduler_replicas: 2
+  airflow_scheduler_cpu: "450m"
+  airflow_scheduler_memory_request: "1536Mi"
+  airflow_scheduler_memory_limit: "2048Mi"
+  airflow_dagprocessor_replicas: 2
+  airflow_dagprocessor_cpu: "300m"
+  airflow_dagprocessor_memory_request: "1536Mi"
+  airflow_dagprocessor_memory_limit: "2048Mi"
+  airflow_triggerer_replicas: 2
+  airflow_triggerer_cpu: "300m"
+  airflow_triggerer_memory_request: "768Mi"
+  airflow_triggerer_memory_limit: "1024Mi"
+  # KubernetesExecutor 每个任务起的 pod 模板,不是常驻副本,只按倍数放大
+  # 单个任务 pod 能用的资源上限,不涉及 HA 副本数这个维度。
+  airflow_worker_pod_cpu: "150m"
+  airflow_worker_pod_memory_request: "768Mi"
+  airflow_worker_pod_memory_limit: "1024Mi"
+
+  mlflow_cpu: "600m"
+  mlflow_memory_request: "3072Mi"
+  mlflow_memory_limit: "5120Mi"
+
+  # OpenSearch 生产建议至少 3 节点做 quorum(避免脑裂),关掉 singleNode
+  # 这件事这次没有一并做(那是架构级改动,不是机械铺占位符能覆盖的范围,
+  # 见 apps/components/opensearch.yaml 里 singleNode: true 还是写死的)——
+  # replicas 先按 3 给,等真正切到集群模式时再回头核对 singleNode 开关。
+  # 存储容量给了明显更大的值,搜索索引数据量增长比其它组件更难预估。
+  opensearch_single_node: "false"
+  opensearch_replicas: 3
+  opensearch_cpu: "900m"
+  opensearch_memory_request: "2304Mi"
+  opensearch_memory_limit: "2560Mi"
+  opensearch_storage_size: "100Gi"
+
+  # MinIO 官方 chart 的 replicas 直接决定纠删码(erasure coding)的节点数,
+  # 不是简单的"多几个副本更保险"——常见分布式部署是 4/8/16 这类特定档位,
+  # 贸然给一个数字有把纠删码配出一个没验证过的诡异形状的风险,比单节点
+  # 更不安全。这里保守地把 prod 也维持 1(单节点,和 local-lite/cloud-full
+  # 一样),只放大资源和存储——**这是本次改动里唯一没有跟着"6 台物理机
+  # 该有 HA"这个方向走的一项,是刻意的保守选择,不是遗漏**。真要上生产
+  # 分布式 MinIO,需要单独评估节点数/磁盘布局,超出这次机械铺占位符的范围。
+  minio_replicas: 1
+  minio_storage_size: "500Gi"
+  minio_cpu: "300m"
+  minio_memory_request: "768Mi"
+  minio_memory_limit: "1024Mi"

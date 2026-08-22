@@ -82,6 +82,7 @@ spec:
         # 要对照 kubectl top 的实际内存占用曲线)。调大到 2560Mi,请求同步
         # 调整,给 FastAPI 应用本身 + 启动时注册的后台定时任务(online_
         # scoring_scheduler/trace_archival_scheduler)留够余量。
+        # 规格分档,见 environments/resource-profiles.yaml
         resources:
           requests:
             cpu: 200m

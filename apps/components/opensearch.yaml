@@ -19,8 +19,13 @@ spec:
     targetRevision: 3.8.0
     helm:
       valuesObject:
-        singleNode: true
-        replicas: 1
+        # singleNode 必须和 replicas 一起切:chart 的 singleNode=true 会写
+        # discovery.type=single-node,那个模式下 OpenSearch 根本不组集群,
+        # 副本数写 3 也只是起 3 个互不相干的单节点实例——比单节点更糟(数据
+        # 分散在三份互相看不见的存储里)。所以这两个键在 resource-profiles.yaml
+        # 里是绑定的:selfsigned 单机档 true/1,prod 档 false/3。
+        singleNode: {{RES:opensearch_single_node}}
+        replicas: {{RES:opensearch_replicas}}
         sysctlInit:
           enabled: true
         # OpenSearch 2.12+ 的 security 插件强制要求这个,不设直接拒绝启动。
@@ -34,13 +39,13 @@ spec:
                 key: password
         resources:
           requests:
-            cpu: 300m
-            memory: 768Mi
+            cpu: {{RES:opensearch_cpu}}
+            memory: {{RES:opensearch_memory_request}}
           limits:
-            memory: 1280Mi
+            memory: {{RES:opensearch_memory_limit}}
         persistence:
           enabled: true
-          size: 5Gi
+          size: {{RES:opensearch_storage_size}}
   destination:
     server: https://kubernetes.default.svc
     namespace: openmetadata

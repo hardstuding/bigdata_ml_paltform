@@ -170,6 +170,7 @@ spec:
             periodSeconds: 10
             failureThreshold: 90
             timeoutSeconds: 5
+          # 规格分档,见 environments/resource-profiles.yaml
           resources:
             requests:
               cpu: 200m
@@ -179,6 +180,8 @@ spec:
         supersetWorker:
           # 没有 Redis/Celery broker,worker 起来也没用。replicaCount 压到 0
           # (Deployment 对象还在,但不占资源,比强行让 enabled:false 生效更可靠)。
+          # 三个环境都是 0(见 resource-profiles.yaml 里的注释——prod 也一样,
+          # 这次分档没有一并把 Celery/Redis 接上,不是漏配)。
           replicas:
             replicaCount: 0
         supersetCeleryBeat:

@@ -75,12 +75,13 @@ spec:
         # 要对照 kubectl top 的实际内存占用曲线)。调大到 2560Mi,请求同步
         # 调整,给 FastAPI 应用本身 + 启动时注册的后台定时任务(online_
         # scoring_scheduler/trace_archival_scheduler)留够余量。
+        # 规格分档,见 environments/resource-profiles.yaml
         resources:
           requests:
-            cpu: 200m
-            memory: 1024Mi
+            cpu: {{RES:mlflow_cpu}}
+            memory: {{RES:mlflow_memory_request}}
           limits:
-            memory: 2560Mi
+            memory: {{RES:mlflow_memory_limit}}
         # 2026-08-19 真实故障:mlflow 命名空间的 ResourceQuota(见
         # platform/resource-quotas/manifests/quotas.yaml)限死
         # limits.memory 3Gi。这个 Deployment 默认走 RollingUpdate,滚动

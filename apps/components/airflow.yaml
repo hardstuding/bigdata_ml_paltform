@@ -103,13 +103,14 @@ spec:
         # Airflow 应用)必然 OOMKilled(exitCode 137,实测确认),表现成
         # api-server 这个 Deployment 卡在 Init:CrashLoopBackOff 起不来。
         apiServer:
-          replicas: 1
+          # 规格分档,见 environments/resource-profiles.yaml
+          replicas: {{RES:airflow_apiserver_replicas}}
           resources:
             requests:
-              cpu: 150m
-              memory: 512Mi
+              cpu: {{RES:airflow_apiserver_cpu}}
+              memory: {{RES:airflow_apiserver_memory_request}}
             limits:
-              memory: 1024Mi
+              memory: {{RES:airflow_apiserver_memory_limit}}
           # 2026-08-19:接 Keycloak SSO——Airflow 3.x 默认的 auth_manager 还是
           # FabAuthManager(和 Superset 底层同一个 Flask-AppBuilder),所以走
           # 的是同一套 webserver_config.py / AUTH_TYPE = AUTH_OAUTH 机制,不是
@@ -141,13 +142,14 @@ spec:
             AUTH_USER_REGISTRATION = True
             AUTH_USER_REGISTRATION_ROLE = "Admin"
         scheduler:
-          replicas: 1
+          # 规格分档,见 environments/resource-profiles.yaml
+          replicas: {{RES:airflow_scheduler_replicas}}
           resources:
             requests:
-              cpu: 150m
-              memory: 512Mi
+              cpu: {{RES:airflow_scheduler_cpu}}
+              memory: {{RES:airflow_scheduler_memory_request}}
             limits:
-              memory: 1024Mi
+              memory: {{RES:airflow_scheduler_memory_limit}}
           # 挂整个 ConfigMap 目录会踩 Airflow 3.x 的坑:k8s ConfigMap 卷靠
           # `..data` 软链 + 带时间戳的隐藏目录做原子更新,Airflow 3.x 新的
           # DAG 目录遍历逻辑会把这些隐藏目录识别成"递归循环"直接崩溃退出
@@ -177,13 +179,14 @@ spec:
         # 要挂进这里——scheduler 和 dagProcessor 都要能看到 dags 目录,不是
         # 只挂一边。
         dagProcessor:
-          replicas: 1
+          # 规格分档,见 environments/resource-profiles.yaml
+          replicas: {{RES:airflow_dagprocessor_replicas}}
           resources:
             requests:
-              cpu: 100m
-              memory: 512Mi
+              cpu: {{RES:airflow_dagprocessor_cpu}}
+              memory: {{RES:airflow_dagprocessor_memory_request}}
             limits:
-              memory: 1024Mi
+              memory: {{RES:airflow_dagprocessor_memory_limit}}
           # 挂整个 ConfigMap 目录会踩 Airflow 3.x 的坑:k8s ConfigMap 卷靠
           # `..data` 软链 + 带时间戳的隐藏目录做原子更新,Airflow 3.x 新的
           # DAG 目录遍历逻辑会把这些隐藏目录识别成"递归循环"直接崩溃退出
@@ -209,15 +212,16 @@ spec:
               mountPath: /opt/airflow/dags/platform_sdk_demo.py
               subPath: platform_sdk_demo.py
         triggerer:
-          replicas: 1
+          # 规格分档,见 environments/resource-profiles.yaml
+          replicas: {{RES:airflow_triggerer_replicas}}
           persistence:
             enabled: false
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: {{RES:airflow_triggerer_cpu}}
+              memory: {{RES:airflow_triggerer_memory_request}}
             limits:
-              memory: 512Mi
+              memory: {{RES:airflow_triggerer_memory_limit}}
         statsd:
           enabled: false
         dags:
@@ -248,12 +252,14 @@ spec:
             # (见 apps/airflow/dags/seatunnel_device_events.py),但那只
             # 覆盖那一个 DAG,这里补一个平台级默认值,以后新增的 DAG
             # 不用每次都记得自己加。
+            # 规格分档,见 environments/resource-profiles.yaml——这是每个任务
+            # pod 的资源模板,不是常驻副本数,没有 replicas 这个维度。
             resources:
               requests:
-                cpu: 50m
-                memory: 256Mi
+                cpu: {{RES:airflow_worker_pod_cpu}}
+                memory: {{RES:airflow_worker_pod_memory_request}}
               limits:
-                memory: 512Mi
+                memory: {{RES:airflow_worker_pod_memory_limit}}
             extraVolumes:
               - name: dags
                 configMap:

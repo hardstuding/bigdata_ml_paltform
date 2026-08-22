@@ -32,6 +32,7 @@ spec:
           repository: minio/mc
           tag: RELEASE.2025-08-13T08-35-41Z
         mode: standalone
+        # 规格分档,见 environments/resource-profiles.yaml
         replicas: 1
         existingSecret: minio-root
         persistence:

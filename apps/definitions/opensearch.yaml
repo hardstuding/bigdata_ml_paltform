@@ -26,6 +26,11 @@ spec:
     targetRevision: 3.8.0
     helm:
       valuesObject:
+        # singleNode 必须和 replicas 一起切:chart 的 singleNode=true 会写
+        # discovery.type=single-node,那个模式下 OpenSearch 根本不组集群,
+        # 副本数写 3 也只是起 3 个互不相干的单节点实例——比单节点更糟(数据
+        # 分散在三份互相看不见的存储里)。所以这两个键在 resource-profiles.yaml
+        # 里是绑定的:selfsigned 单机档 true/1,prod 档 false/3。
         singleNode: true
         replicas: 1
         sysctlInit:

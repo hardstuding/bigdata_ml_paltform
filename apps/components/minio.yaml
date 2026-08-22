@@ -25,17 +25,18 @@ spec:
           repository: minio/mc
           tag: RELEASE.2025-08-13T08-35-41Z
         mode: standalone
-        replicas: 1
+        # 规格分档,见 environments/resource-profiles.yaml
+        replicas: {{RES:minio_replicas}}
         existingSecret: minio-root
         persistence:
           enabled: true
-          size: 8Gi
+          size: {{RES:minio_storage_size}}
         resources:
           requests:
-            cpu: 100m
-            memory: 256Mi
+            cpu: {{RES:minio_cpu}}
+            memory: {{RES:minio_memory_request}}
           limits:
-            memory: 512Mi
+            memory: {{RES:minio_memory_limit}}
         consoleService:
           type: ClusterIP
         service:
