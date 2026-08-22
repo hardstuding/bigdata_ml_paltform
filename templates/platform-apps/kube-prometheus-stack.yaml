@@ -30,7 +30,31 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://prometheus-community.github.io/helm-charts
+    # 2026-08-22 从 https://prometheus-community.github.io/helm-charts
+    # 换成同一个组织发布的 OCI 仓库。**不是换了 chart 来源方**,是同一批
+    # 人发布的同一个 chart 的另一种分发形式(digest 可核对)。
+    #
+    # 换的原因是实测出来的:传统 Helm 仓库每次同步都要先拉整个
+    # index.yaml,prometheus-community/grafana 这两个 index 都超过 1.4MB,
+    # 从这台境内云主机实测下载速度只有约 12KB/s,单是这一个文件就要两分钟
+    # 以上,直接打爆 ArgoCD 的执行超时——repo-server 日志里连续多轮
+    # `helm pull ... context deadline exceeded`,Application 长期卡在
+    # Sync Status = Unknown(底层 Pod 健康,纯粹是比较逻辑拉不到 chart)。
+    # OCI 不需要 index:直接按名字+版本取 manifest,同一台机器上实测
+    # 894KB 的 chart 几秒钟就拉完了。
+    #
+    # 这条对"上生产"是实质性的:生产大概率也在境内网络,任何依赖境外
+    # GitHub Pages 上巨型 index.yaml 的 Application,一旦需要真正重新
+    # 同步(升版本、改 values)就会卡死。
+    #
+    # **grafana 的 alloy/loki 两个 chart 还没有这条路可走**——Grafana 目前
+    # 没有把 chart 发到 OCI 仓库(ghcr.io/grafana/{helm-charts,charts}/alloy
+    # 三个路径实测全是 403/not found),那两个仍然走 index.yaml,是已知
+    # 遗留风险,记在 docs/BACKLOG.md。
+    # repoURL 里带上 chart 名,和这个仓库已有的 OCI 来源写法保持一致
+    # (apps/definitions/kserve-crd.yaml、mlflow.yaml 都是这么写的),
+    # 不要只写到命名空间——`scripts/validate-charts.py` 认的是这一种。
+    repoURL: oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
     chart: kube-prometheus-stack
     targetRevision: 88.2.0
     helm:

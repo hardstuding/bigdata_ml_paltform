@@ -16,6 +16,7 @@
 
 ---
 
+
 ## P0(会阻断当前主线的,才有资格排这里)
 
 当前没有。如果出现真实的数据风险/持续计费异常/安全问题,加在这里,
@@ -279,6 +280,39 @@ seatunnel 命名空间的 pod,DAG 源码里没有 `namespace="seatunnel"`)——
 
 想彻底解决间接连接这类,得换个思路(比如从"按命名空间名枚举"改成"按
 命名空间 label 选择",让消费方自己声明),那是架构级改动,单独评估。
+
+### 2.9 alloy/loki 的 chart 源仍然依赖境外巨型 index.yaml
+
+**2026-08-22 实测量化过的问题,不是猜测。** 传统 Helm 仓库每次同步都要先
+拉整个 `index.yaml`,`grafana.github.io/helm-charts` 那份超过 1.4MB,从
+cloud-full 这台境内云主机实测下载速度约 **12KB/s**,单是这个文件就要两
+分钟以上,直接打爆 ArgoCD 的执行超时。表现是 alloy/loki/
+kube-prometheus-stack 三个 Application 长期 `Sync Status = Unknown`
+(底层 Pod 一直健康,纯粹是比较逻辑拉不到 chart)。手动 hard refresh
+三次、跨约 6 分钟四轮独立重试,100% 失败,每次都精确卡满超时——是持续性
+的,不是网络抖动。
+
+kube-prometheus-stack 已经解决:换成同一个组织发布的 OCI 仓库
+(`oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack`),
+OCI 不需要 index,按名字+版本直接取,实测几秒钟拉完。
+
+**alloy/loki 走不通同一条路**:Grafana 目前没有把 chart 发到 OCI 仓库,
+`ghcr.io/grafana/helm-charts/alloy`、`ghcr.io/grafana/charts/alloy`、
+`ghcr.io/grafana/alloy` 三个路径实测全是 403/not found。
+
+可选方向(没做,需要先定):
+1. 用仓库已有的 GitHub Actions(境外 runner)把这两个 chart 镜像到我们
+   自己的 GHCR OCI 仓库。技术上直接(`helm pull` + `helm push`),但
+   GHCR package 默认私有,要么手动改成 public,要么给 ArgoCD 配拉取
+   凭据,多一层维护。
+2. 把 chart vendor 进仓库(和 argo-workflows CRD 一样)。最确定、也最
+   适合"生产可能没有外网"这个场景,代价是升级要手动同步。
+3. 只调大超时忍着。最省事,但每次同步多花两分钟,而且速度再降一点就
+   又会失效——不解决问题,只是把阈值往后挪。
+
+**这条对上生产是实质性的**:生产大概率也在境内网络,任何依赖境外
+GitHub Pages 巨型 index.yaml 的 Application,一旦需要真正重新同步
+(升版本、改 values)就会卡死。
 
 ### 2.5 扩大 CI
 
