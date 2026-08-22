@@ -181,3 +181,33 @@ Kafka/Hive Metastore/MinIO、`HADOOP_CONF_DIR` 这条路径在 Flink 里是否
 真的按预期提交数据、Kafka 4.3.0 broker 和这个版本的连接器组合是否真的
 如预期兼容。`scripts/31-run-flink-streaming-demo.sh` 是给这些问题准备的
 验证脚本,下次云主机开机后应该第一时间跑。
+
+
+## 2026-08-22 补:第一次 CI 构建失败,根因是 PyFlink 没有 arm64 wheel
+
+第一次跑 `build-images.yml`,`flink-iceberg` 这个镜像**构建失败**(同一次
+run 里另外 9 个镜像都成功)。
+
+**根因(查过 PyPI 确认,不是推测)**:`apache-flink==1.20.5` 在 PyPI 上
+只发了 x86_64 的 manylinux wheel 和 macOS 的 arm64 wheel,**没有
+linux/aarch64 wheel**。这个仓库的镜像流水线默认建
+`linux/amd64,linux/arm64` 两个平台,arm64 那条腿拿不到 wheel 只能从
+sdist 现编译,在 GitHub runner 的 QEMU 模拟下必然挂。
+
+**处理**:给 `build-images.yml` 的 matrix 加了一个可选的 `platforms`
+覆盖字段(默认仍然是两个平台),`flink-iceberg` 单独设成
+`linux/amd64`。
+
+**为什么可以只建 amd64**:唯一的 arm64 环境是 local-lite(colima / Mac
+M2),而 Flink 相关的三个组件**没有出现在
+`environments/local-lite/config.yaml` 的 `enabled_components` 里**——那
+一档只有 17 个轻量组件,连 Kafka 都没启用,Flink 更不可能在笔记本上跑。
+
+**⚠️ 留给以后的约束**:如果哪天要在 local-lite 上启用 Flink,不能直接
+往 `enabled_components` 里加了事。这个仓库踩过"只建 amd64 的镜像在 arm64
+节点上靠 QEMU 跑,触发 client-go 并发 bug"的坑(iam-sync 那次)。届时要么
+等上游出 aarch64 wheel,要么用原生 arm64 runner 构建。
+
+顺带一条:这次也顺手核实了 Dockerfile 里全部 6 个 jar 下载 URL 都是
+HTTP 200(ADR 正文里那个 `flink-python` 坐标改名的坑修对了),失败**不是**
+jar 地址问题。
