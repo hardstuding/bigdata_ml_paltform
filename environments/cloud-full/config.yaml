@@ -23,6 +23,10 @@ external_scheme: http
 # 被浏览器信任。
 tls_issuer_mode: selfsigned
 
+# 告警外部通知渠道:none | webhook。见 ADR-060 的条件生成机制。
+# 集成环境,告警看 Alertmanager 自己的 UI 就够,不往外推。
+alert_notification_mode: none
+
 # 2026-08-20 新增(ADR-057 第三批):cloud-full 是"功能完整"环境,目前
 # `apps/components/` 下的全部组件都要启用——这份清单和 2026-08-20 渲染
 # 这份配置之前 `apps/definitions/` 里实际常驻的 43 个文件逐一核对过,

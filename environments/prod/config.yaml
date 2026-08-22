@@ -30,6 +30,16 @@ tls_acme_server: https://acme-staging-v02.api.letsencrypt.org/directory
 # 提醒,填错了等于放弃唯一的过期预警渠道。
 tls_acme_email: platform-ops@your-real-domain.example.com
 
+# 告警外部通知渠道:none | webhook。见 ADR-060 的条件生成机制。
+# prod 走通用 webhook。**还没在真实环境验证过**(用户 2026-08-22 明确说
+# 等上生产再测)。真正生效还需要在集群里建一个 Secret 放 webhook 地址:
+#   kubectl -n monitoring create secret generic alertmanager-webhook \
+#     --from-literal=url='https://<真实的 webhook 地址>'
+# 没建这个 Secret,Alertmanager 会拒绝加载这份配置——这是有意的,
+# 比静默地什么都不发好。细节见
+# templates/platform-alertmanager-notification/alertmanagerconfig-webhook.yaml
+alert_notification_mode: webhook
+
 # 2026-08-21 补:之前这份文件**没有 enabled_components**,导致
 # `render-environment-config.py prod` 跑一半失败——模板替换那步已经把
 # platform/apps/*.yaml 的域名改成 prod 占位域名了,组件选择那步才报错,

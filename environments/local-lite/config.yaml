@@ -16,6 +16,10 @@ external_scheme: http
 # 被浏览器信任。
 tls_issuer_mode: selfsigned
 
+# 告警外部通知渠道:none | webhook。见 ADR-060 的条件生成机制。
+# 本机验证环境,没有也不需要外部通知渠道。
+alert_notification_mode: none
+
 # 2026-08-20 新增(ADR-057 第三批):**这份清单是按 docs/architecture.md
 # 组件表里"local-lite(设计归属)"这一列的 ✅/⚠️ 推出来的,不是对着这台
 # 机器当前真实状态核对过的**——写这份清单的时候 colima 没有在跑,没办法

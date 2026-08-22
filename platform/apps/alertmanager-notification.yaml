@@ -1,0 +1,29 @@
+# 告警外部通知渠道(企业微信/飞书/邮件等)的 AlertmanagerConfig。
+#
+# 单独一个 Application 而不是塞进 kube-prometheus-stack 的 values:这份配置
+# 是**按环境条件生成**的(见 templates/platform-alertmanager-notification/
+# 和 ADR-060),生成与否由 environments/<env>/config.yaml 的
+# alert_notification_mode 决定;chart 的 values 是所有环境共用的。
+#
+# 目录在某些环境下只有一个 README.md(不是 manifest)——ArgoCD 的 directory
+# 类型只认 YAML,这种情况下这个 Application 同步 0 个资源,是正常的。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alertmanager-notification
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/alertmanager-notification/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

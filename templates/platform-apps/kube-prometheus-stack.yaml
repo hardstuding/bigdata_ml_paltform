@@ -44,6 +44,21 @@ spec:
               requests: {cpu: 25m, memory: 64Mi}
               limits: {memory: 128Mi}
             storage: {}
+            # 让 Alertmanager 收编 monitoring 命名空间里的 AlertmanagerConfig
+            # CR(见 platform/alertmanager-notification/)。外部通知渠道拆在
+            # 那边而不是写在下面的 config 里,是因为它按环境条件生成
+            # (ADR-060),而这份 values 三个环境共用。
+            #
+            # 空的 selector = 匹配该命名空间下所有 AlertmanagerConfig。没有
+            # 任何 CR 时这个设置零影响(当前 local-lite/cloud-full 就是这种
+            # 情况),不是"打开了一个没验证过的东西"。
+            alertmanagerConfigSelector: {}
+            # 默认策略(OnNamespace)会给每条 AlertmanagerConfig 的路由自动
+            # 加一个 `namespace = monitoring` 的 matcher——那样外部通知就只能
+            # 收到 monitoring 命名空间自己的告警,整个集群其它命名空间的告警
+            # 全都路由不过去,是个很容易踩、而且要等真出故障才会发现的坑。
+            alertmanagerConfigMatcherStrategy:
+              type: None
           config:
             route:
               receiver: "null"
@@ -57,6 +72,16 @@ spec:
             receivers:
               - name: "null"
               # ============================================================
+              # **2026-08-22 更新:开关已经不在这里了。** 下面这一整段注释
+              # 模板留着仍然有用(它是各家渠道字段怎么填的参考),但"这个
+              # 环境要不要往外推告警"现在是
+              # environments/<env>/config.yaml 的 `alert_notification_mode`
+              # 一个键决定的,生成产物在 platform/alertmanager-notification/,
+              # 机制见 ADR-060。原因很简单:注释不会生效,也没有任何机制
+              # 保证它和现实不脱节;用户要的是"留好配置项、能够生效",不是
+              # "留好说明书"。要接企业微信/邮件这类原生渠道,照下面的字段
+              # 模板改 platform/alertmanager-notification/ 的那个 CR。
+              #
               # 2026-08-13 预留:邮箱/企业微信/Slack/飞书等通知渠道(见
               # ADR-034"预留通知渠道"一节)。用户明确要求先把结构搭好,现在
               # 不需要真的能收到通知——下面全部注释掉,route 也没有指向
