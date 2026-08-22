@@ -37,7 +37,7 @@ apps/
   definitions/    # 业务组件的 ArgoCD Application 定义(当前启用的)
   <component>/    # 没有官方 chart、我们自己写 manifest 的组件各占一个目录(postgres、hive-metastore、spark-history-server 等)
 environments/     # local-lite / cloud-full / prod 三个环境画像;每个环境的 config.yaml 里 enabled_components 列表决定这个环境要哪些组件(apps/components/ 是全部组件的源码)
-scripts/          # 一键拉起 / 常用运维 / 校验脚本,编号大致是执行顺序
+scripts/          # 一键拉起 / 常用运维 / 校验脚本 —— 51 个文件的分类导航见 scripts/README.md(编号不等于执行顺序)
 docs/
   architecture.md   # 架构总览、组件清单、路线图
   decisions/        # ADR——每个非显而易见的技术决策,连同踩过的坑
