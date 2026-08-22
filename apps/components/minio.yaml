@@ -53,6 +53,20 @@ spec:
           - name: spark-logs
             policy: none
             purge: false
+        # 2026-08-21:光有 bucket 不够,还要**建出 events/ 这个前缀**,否则
+        # Spark 和 History Server 两边都起不来:
+        #   - Spark driver:eventLog.dir 指向不存在的目录,报
+        #     `FileNotFoundException: No such file or directory`(Spark 只
+        #     检查目录存在,自己不会创建)
+        #   - History Server:同样找不到目录,直接 CrashLoopBackOff
+        # 而且**不能退回用 bucket 根路径**(s3a://spark-logs/)——根路径会让
+        # S3AFileSystem 的 S3Guard PathMetadata 抛
+        # `IllegalArgumentException: path must be absolute`,实测过。
+        # chart 的 buckets: 只建 bucket 不建前缀,用 customCommands 补。
+        # `mc mb <bucket>/<prefix>` 实测能建前缀(不只是建 bucket),
+        # `--ignore-existing` 保证 ArgoCD 反复同步时幂等。
+        customCommands:
+          - command: "mb --ignore-existing myminio/spark-logs/events"
   destination:
     server: https://kubernetes.default.svc
     namespace: minio
