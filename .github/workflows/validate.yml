@@ -41,6 +41,9 @@ jobs:
       - name: NetworkPolicy 消费者白名单校验(新命名空间用共享服务不能漏加白名单)
         run: python3 scripts/check-networkpolicy-consumers.py
 
+      - name: 镜像版本锁定校验(不允许 latest 这类浮动 tag,见 ADR-010)
+        run: python3 scripts/check-image-tags.py
+
       - name: 环境配置单一源码校验(cloud-full 部署文件不能和 templates/ + environments/cloud-full/config.yaml 渲染结果漂移)
         run: python3 scripts/render-environment-config.py cloud-full --check
 
