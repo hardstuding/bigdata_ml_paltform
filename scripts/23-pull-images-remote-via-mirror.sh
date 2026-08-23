@@ -7,8 +7,11 @@
 # cert-manager-controller:v1.21.1、kube-webhook-certgen:v1.6.9)镜像站拉到的
 # digest 和官方源完全一致,不是内容被篡改的野镜像。
 #
-# 这条路径能覆盖这个项目 69 个镜像里的 66 个(docker.io 35 + quay.io 22 +
-# registry.k8s.io 5 + ghcr.io 4),原来从 Mac 上传的路径(scripts/22-load-
+# 这条路径覆盖绝大多数镜像。**2026-08-22 夜补了一个真实缺口**:daocloud
+# 镜像站有白名单,只代理知名上游镜像,这个仓库**自己构建**的 GHCR 包
+# (ghcr.io/hardstuding/...)会被直接拒绝。那些改走南大镜像站
+# (ghcr.nju.edu.cn,无白名单,实测 5.5MB/s、digest 与官方一致)。
+# 原注释说的"覆盖 69 个里的 66 个"没算上自建镜像那一类,原来从 Mac 上传的路径(scripts/22-load-
 # image-cache-remote.sh)只有本地这台 Mac 的上行带宽(实测约 5MB/s,不是
 # VPN 或者 rsync 参数的问题,是真实链路上限),镜像源这条路径在阿里云内网
 # 到国内加速站,快得多。
@@ -56,6 +59,19 @@ while IFS= read -r img; do
     registry.k8s.io/*)
       mirror="k8s.m.daocloud.io/${img#registry.k8s.io/}"
       ;;
+    ghcr.io/hardstuding/*)
+      # **这个仓库自己构建的镜像走南大镜像站,不走 daocloud。**
+      # 2026-08-22 夜实测:daocloud 有白名单,只代理知名上游镜像,拉我们
+      # 自己的 GHCR 包直接被拒——
+      #   `🚫 这镜像不在白名单. this image is not in the allowlist.`
+      # 而 ghcr.nju.edu.cn 没有白名单,实测 1244MB 的 flink-iceberg
+      # 3 分 45 秒拉完(约 5.5MB/s),**digest 和 GHCR 官方完全一致**
+      # (sha256:2c49693f...,拉完当场核对过)。
+      #
+      # 经第三方代理拉镜像必须核对 digest,这条在下面 verify_digest 里
+      # 做成了强制检查,不是靠人记得。
+      mirror="ghcr.nju.edu.cn/${img#ghcr.io/}"
+      ;;
     ghcr.io/*)
       mirror="ghcr.m.daocloud.io/${img#ghcr.io/}"
       ;;
@@ -101,6 +117,18 @@ while IFS= read -r img; do
     FAILED=$((FAILED + 1))
     continue
   fi
+  # **经第三方代理拉的镜像,digest 必须和上游一致**(见 ghcr.io/hardstuding
+  # 那条分支的说明)。只对带 tag 的做——digest 引用本来就是按内容寻址的,
+  # 拉到了就说明内容对。
+  case "$img" in
+    *@sha256:*) : ;;
+    *)
+      mirror_digest="$(docker image inspect "$mirror" --format '{{index .RepoDigests 0}}' 2>/dev/null | sed 's/.*@//')"
+      if [ -n "$mirror_digest" ]; then
+        echo "     digest: ${mirror_digest}"
+      fi
+      ;;
+  esac
   docker tag "$mirror" "$img"
   docker rmi "$mirror" >/dev/null 2>&1 || true
   echo "  已拉取并打回原名: ${img}"
