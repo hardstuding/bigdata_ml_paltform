@@ -31,7 +31,11 @@ TOKEN = os.environ["OPENMETADATA_TOKEN"]
 BASE = os.environ.get("OPENMETADATA_URL", "http://openmetadata.openmetadata.svc.cluster.local:8585")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 TABLE_FQN = "trino.iceberg.demo.orders"
+# 这三条是 scripts/34 一定会建出来的。新鲜度那条(orders_freshness_daily)
+# **刻意不放进必须项**:它的参数名还没在真机上核对过,scripts/34 对不上
+# 时会跳过——把它列进必须项的话,一次正常的跳过会被报成验证失败。
 EXPECTED = {"orders_row_count_not_empty", "orders_order_id_unique", "orders_amount_not_null"}
+OPTIONAL = {"orders_freshness_daily"}
 
 
 def om(method, path, body=None, ok404=False):
@@ -60,7 +64,7 @@ while time.time() < deadline:
     results = {
         c["name"]: (c.get("testCaseResult") or {}).get("testCaseStatus")
         for c in listing.get("data", [])
-        if c["name"] in EXPECTED
+        if c["name"] in EXPECTED | OPTIONAL
     }
     if EXPECTED <= set(results) and all(results.get(n) for n in EXPECTED):
         break
@@ -70,6 +74,9 @@ while time.time() < deadline:
 print("\n最终结果:")
 for name in sorted(EXPECTED):
     print(f"  {name}: {results.get(name) or '(没有结果)'}")
+for name in sorted(OPTIONAL):
+    got = results.get(name)
+    print(f"  {name}(可选): {got or '(还没建出来,见 scripts/34 的说明)'}")
 
 missing = [n for n in EXPECTED if not results.get(n)]
 if missing:

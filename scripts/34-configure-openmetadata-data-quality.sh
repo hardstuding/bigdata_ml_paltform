@@ -113,6 +113,39 @@ CASES = [
      f"<#E::table::{TABLE_FQN}::columns::amount>", []),
 ]
 
+# 数据新鲜度(ADR-070)。**新鲜度就是一条数据质量断言,不是另一个子系统**
+# ——"这张表最近 N 天有没有新数据进来"和"这张表行数是不是为零"是同一类
+# 问题,没有理由为它单独引一套监控。
+#
+# 但 tableRowInsertedCountToBeBetween 的参数名没法离线确认(这个项目已经
+# 因为"猜 API 形状"栽过三次,见 ADR-065),所以下面**先把定义拉下来对一遍**,
+# 名字对不上就跳过并打印真实的参数名,不硬着头皮建一个必然失败的断言。
+FRESHNESS_DEF = "tableRowInsertedCountToBeBetween"
+FRESHNESS_PARAMS = {
+    "min": "1",              # 至少新增 1 行
+    "columnName": "order_date",
+    "rangeType": "DAY",
+    "rangeInterval": "1",
+}
+
+
+def add_freshness_case():
+    definition = om("GET", f"/api/v1/dataQuality/testDefinitions/name/{FRESHNESS_DEF}")
+    declared = {p["name"] for p in definition.get("parameterDefinition", [])}
+    unknown = set(FRESHNESS_PARAMS) - declared
+    if unknown:
+        print(f"!! 跳过新鲜度断言:{FRESHNESS_DEF} 不认识参数 {sorted(unknown)};"
+              f"它实际接受的是 {sorted(declared)}。改好脚本里的 FRESHNESS_PARAMS 再跑。")
+        return
+    CASES.append((
+        "orders_freshness_daily", FRESHNESS_DEF,
+        f"<#E::table::{TABLE_FQN}>",
+        [{"name": k, "value": v} for k, v in FRESHNESS_PARAMS.items()],
+    ))
+
+
+add_freshness_case()
+
 for name, definition, entity_link, params in CASES:
     body = {"name": name, "entityLink": entity_link,
             "testDefinition": definition, "parameterValues": params}
