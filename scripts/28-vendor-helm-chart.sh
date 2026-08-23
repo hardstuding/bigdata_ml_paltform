@@ -18,7 +18,24 @@
 # 不需要任何外网访问就能部署。
 #
 # 用法:
-#   ./scripts/28-vendor-helm-chart.sh <repoURL> <chart> <版本> <目标目录>
+#   ./scripts/28-vendor-helm-chart.sh <repoURL> <chart> <版本> <目标目录> [--exclude-crds]
+#
+# `--exclude-crds`:把 chart 渲染出来的 CRD 从 templates/ 里摘出去,单独存成
+# 一份纯 YAML(`<目标目录>/crds-out-of-band/crds.yaml`),由 kubectl
+# --server-side 单独装,不走 ArgoCD。
+#
+# **什么时候需要**:CRD 超过 262144 字节(K8s 对 annotation 的硬限制)时,
+# ArgoCD 同步会报 `metadata.annotations: Too long`。这个仓库已经在
+# kube-prometheus-stack(scripts/04)、CloudNativePG(scripts/16)、
+# argo-workflows(scripts/25)上踩过三次,**而且已经确认过 syncOptions 里的
+# ServerSideApply=true 解决不了**(理论上 SSA 不写 last-applied 注解,但
+# ArgoCD 对 chart 里的 CRD 这条路径不完全遵守——见
+# apps/components/cloudnative-pg-operator.yaml 里那段记录)。2026-08-23 装
+# Kueue 时第四次撞上(workloads CRD 单个文件 1.4MB),这次不再每个组件写
+# 一个一次性脚本,而是把"摘 CRD"这个动作固化进 vendor 流程本身。
+#
+# 前三次那几个组件没有回头改造成这条路径:它们的 chart 不是 vendor 进来的,
+# 改造要先 vendor,超出当时的范围。新增组件优先用这个开关。
 # 例:
 #   ./scripts/28-vendor-helm-chart.sh https://grafana.github.io/helm-charts alloy 1.11.1 platform/alloy-chart
 #
@@ -27,11 +44,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ $# -ne 4 ]; then
-  echo "用法: $0 <repoURL> <chart> <版本> <目标目录>" >&2
+if [ $# -lt 4 ] || [ $# -gt 5 ]; then
+  echo "用法: $0 <repoURL> <chart> <版本> <目标目录> [--exclude-crds]" >&2
   exit 1
 fi
-REPO_URL="$1"; CHART="$2"; VERSION="$3"; DEST="$4"
+REPO_URL="$1"; CHART="$2"; VERSION="$3"; DEST="$4"; EXCLUDE_CRDS="${5:-}"
+if [ -n "$EXCLUDE_CRDS" ] && [ "$EXCLUDE_CRDS" != "--exclude-crds" ]; then
+  echo "第 5 个参数只能是 --exclude-crds(收到:$EXCLUDE_CRDS)" >&2
+  exit 1
+fi
 
 command -v helm >/dev/null || { echo "找不到 helm" >&2; exit 1; }
 
@@ -56,6 +77,26 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 tar xzf "$TGZ" -C "$DEST" --strip-components=1
 
+if [ "$EXCLUDE_CRDS" = "--exclude-crds" ]; then
+  echo "==> 摘出 CRD:先用 helm template 渲染,再从 templates/ 删掉"
+  # 必须先渲染再删:CRD 文件里有 {{- if .Values.xxx }} 这类模板语法,直接
+  # 复制原文件出去的话 kubectl 根本 apply 不了。渲染用 chart 默认 values
+  # ——CRD 的内容不该依赖我们在 Application 里覆盖的那些 values(资源规格、
+  # 副本数),如果哪天真的依赖了,那是 chart 本身的设计问题,应该停下来看,
+  # 而不是在这里补一个 --set 把它糊过去。
+  mkdir -p "${DEST}/crds-out-of-band"
+  helm template "$CHART" "$DEST" | python3 -c "
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind') == 'CustomResourceDefinition']
+if not docs:
+    sys.exit('!! 传了 --exclude-crds,但这个 chart 渲染不出任何 CRD,参数是不是给错了')
+print(f'摘出 {len(docs)} 个 CRD', file=sys.stderr)
+yaml.safe_dump_all(docs, sys.stdout)
+" > "${DEST}/crds-out-of-band/crds.yaml"
+  find "${DEST}/templates" -type d -name 'crd*' -exec rm -rf {} + 2>/dev/null || true
+  echo "    -> ${DEST}/crds-out-of-band/crds.yaml($(wc -c < "${DEST}/crds-out-of-band/crds.yaml" | tr -d ' ') 字节)"
+fi
+
 cat > "${DEST}/VENDORED.md" <<EOF
 # 这是 vendor 进来的第三方 chart,不要手改
 
@@ -67,14 +108,19 @@ cat > "${DEST}/VENDORED.md" <<EOF
 | 打包文件 sha256 | \`${DIGEST}\` |
 | vendor 时间 | $(date -u +%F) |
 
-**任何本地修改都会在下次升级时被覆盖**——目标目录是整个删掉重建的。要改
+${EXCLUDE_CRDS:+**CRD 不在 \`templates/\` 里**,被摘到了 \`crds-out-of-band/crds.yaml\`,
+需要用 \`kubectl apply --server-side\` 单独装(ArgoCD 装不了,CRD 超过
+262144 字节的 annotation 上限)。原因见 \`scripts/28-vendor-helm-chart.sh\`
+顶部 \`--exclude-crds\` 那段。
+
+}**任何本地修改都会在下次升级时被覆盖**——目标目录是整个删掉重建的。要改
 行为请改对应 ArgoCD Application 里的 \`helm.valuesObject\`,不要改 chart
 模板本身。
 
 升级:
 
 \`\`\`bash
-./scripts/28-vendor-helm-chart.sh ${REPO_URL} ${CHART} <新版本> ${DEST}
+./scripts/28-vendor-helm-chart.sh ${REPO_URL} ${CHART} <新版本> ${DEST} ${EXCLUDE_CRDS}
 \`\`\`
 
 为什么要 vendor 而不是让 ArgoCD 直接拉:见

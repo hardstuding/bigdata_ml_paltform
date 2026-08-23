@@ -211,6 +211,9 @@ run_required "scripts/16-install-cloudnative-pg-crds.sh" ./scripts/16-install-cl
 step "装 argo-workflows 的 CRD(vendor 进仓库,不依赖运行时下载,见脚本头部注释)"
 run_required "scripts/25-install-argo-workflows-crds.sh" ./scripts/25-install-argo-workflows-crds.sh
 
+step "装 Kueue 的 CRD(第四个太大的,见 ADR-064)"
+run_required "scripts/33-install-kueue-crds.sh" ./scripts/33-install-kueue-crds.sh
+
 step "等 Keycloak Application Healthy"
 wait_healthy keycloak 300s
 
