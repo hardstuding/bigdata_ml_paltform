@@ -13,7 +13,13 @@ Kubernetes-native 的 Data + AI 平台骨架:统一身份认证、GitOps 驱动�
 - **可插拔基础设施**:公司已经有 Postgres/Kafka/对象存储了?不强制重新部署一份,配置里标出了怎么改接现有的(见 [ADR-030](docs/decisions/030-pluggable-external-infrastructure.md))。
 - **只用官方支持的部署方式**:不用 Bitnami 或来源不明的社区 chart,没有官方 Helm chart 的组件才自己写 manifest(见 [ADR-008](docs/decisions/008-avoid-bitnami.md))。每个决策的取舍理由都留了 ADR,不是"我们就是这么做的",是"为什么这么做、还有什么后果"。
 
-## 快速上手
+## 第一次接触这个平台?
+
+先看 [`docs/QUICKSTART.md`](docs/QUICKSTART.md) —— 半小时亲手跑通一条
+"数据进来 → 能查 → 能看 → 能训练 → 能上线"的完整链路,先有整体感觉,
+再看细节。下面这段"快速上手"是**部署**用的,不是使用引导。
+
+## 快速上手(部署)
 
 ```bash
 git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
