@@ -26,6 +26,24 @@
 
 ---
 
+### flink-kubernetes-operator 的 4 个 CRD 一直 OutOfSync(2026-08-23 记录)
+
+`kubectl -n argocd get app flink-kubernetes-operator` 常年 OutOfSync/Healthy,
+OutOfSync 的正是它那四个 CRD(flinkdeployments 等)。**这不是新问题**,
+2026-08-23 之前就是这个状态,Flink 作业本身跑得好好的,所以一直没人管。
+
+大概率是这个仓库已经踩过四次的同一类:CRD 太大,ArgoCD 塞不进
+last-applied 注解。现在有现成的解法了——`scripts/28-vendor-helm-chart.sh`
+的 `--exclude-crds`(见 [ADR-064](decisions/064-role-based-resource-quota.md)
+的踩坑记录)。做法是把 flink-kubernetes-operator 的 chart vendor 进来、
+CRD 摘出去单独装。
+
+**为什么不现在顺手做**:它要 vendor 一个新 chart + 改部署路径,属于
+CLAUDE.md 说的"跨组件、超过一小段时间"那类,应该单独立项,不该塞进别的
+任务里顺便做。
+
+---
+
 ## P0(会阻断当前主线的,才有资格排这里)
 
 当前没有。如果出现真实的数据风险/持续计费异常/安全问题,加在这里,
