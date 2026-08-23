@@ -35,7 +35,7 @@ TABLE_FQN = "trino.iceberg.demo.orders"
 # **刻意不放进必须项**:它的参数名还没在真机上核对过,scripts/34 对不上
 # 时会跳过——把它列进必须项的话,一次正常的跳过会被报成验证失败。
 EXPECTED = {"orders_row_count_not_empty", "orders_order_id_unique", "orders_amount_not_null"}
-OPTIONAL = {"orders_freshness_daily"}
+OPTIONAL = {"device_events_stream_freshness_daily"}
 
 
 def om(method, path, body=None, ok404=False):
@@ -46,11 +46,17 @@ def om(method, path, body=None, ok404=False):
     return resp.json() if resp.content else None
 
 
-pipeline = om("GET", "/api/v1/services/ingestionPipelines/name/"
-                     f"{TABLE_FQN}.testSuite.orders_data_quality")
-print(f"pipeline: {pipeline['fullyQualifiedName']}")
-om("POST", f"/api/v1/services/ingestionPipelines/trigger/{pipeline['id']}")
-print("已触发一次检查,等结果落到各条断言上(最多 10 分钟)...")
+# **触发所有 TestSuite pipeline,不是只触发 orders 那一个。** scripts/34
+# 现在按表分组建 pipeline(每个 pipeline 只跑它绑定那张表的断言),这里
+# 只触发一个的话,另一张表的断言永远等不到结果,而脚本会报成超时失败。
+pipelines = [p for p in om("GET", "/api/v1/services/ingestionPipelines?limit=200")["data"]
+             if p.get("pipelineType") == "TestSuite"]
+if not pipelines:
+    sys.exit("FAIL:一个 TestSuite 类型的 pipeline 都没有,先跑 scripts/34")
+for p in pipelines:
+    om("POST", f"/api/v1/services/ingestionPipelines/trigger/{p['id']}")
+    print(f"已触发: {p['fullyQualifiedName']}")
+print("等结果落到各条断言上(最多 10 分钟)...")
 
 deadline = time.time() + 600
 results = {}
@@ -76,7 +82,10 @@ for name in sorted(EXPECTED):
     print(f"  {name}: {results.get(name) or '(没有结果)'}")
 for name in sorted(OPTIONAL):
     got = results.get(name)
-    print(f"  {name}(可选): {got or '(还没建出来,见 scripts/34 的说明)'}")
+    # 措辞要区分两种情况,不然会误导:断言可能是**刚建出来还没跑过**
+    # (正常),也可能是 scripts/34 因为参数名对不上跳过了(要处理)。
+    # 第一版只写"还没建出来",看到的人会以为是后者。
+    print(f"  {name}(可选): {got or '(还没有结果——可能刚建出来还没跑,也可能 scripts/34 跳过了它,看那个脚本的输出)'}")
 
 missing = [n for n in EXPECTED if not results.get(n)]
 if missing:

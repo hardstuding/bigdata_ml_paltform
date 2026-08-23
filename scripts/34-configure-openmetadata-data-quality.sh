@@ -69,8 +69,10 @@ TABLE_FQN = "trino.iceberg.demo.orders"
 SUITE_FQN = f"{TABLE_FQN}.testSuite"
 
 
-def om(method, path, body=None, ok=(200, 201)):
+def om(method, path, body=None, ok=(200, 201), ok404=False):
     resp = requests.request(method, f"{BASE}{path}", headers=HEADERS, json=body, timeout=60)
+    if ok404 and resp.status_code == 404:
+        return None
     if resp.status_code not in ok:
         raise RuntimeError(f"{method} {path} -> {resp.status_code} {resp.text[:400]}")
     return resp.json() if resp.content else None
@@ -121,9 +123,17 @@ CASES = [
 # 因为"猜 API 形状"栽过三次,见 ADR-065),所以下面**先把定义拉下来对一遍**,
 # 名字对不上就跳过并打印真实的参数名,不硬着头皮建一个必然失败的断言。
 FRESHNESS_DEF = "tableRowInsertedCountToBeBetween"
+
+# **新鲜度断言挂在流式表上,不是挂在 orders 上。** 2026-08-23 实测:先挂在
+# orders 上,结果 `Failed: insertedRows=0` ——这是**真阳性**,orders 是一张
+# 静态的 demo 表,本来就不会有新数据。但一条永远红的检查比没有检查更糟:
+# 人会学会忽略它,然后真出问题时也一起忽略了。新鲜度只有挂在"本来就该
+# 持续有新数据"的表上才有意义,所以改挂 device_events_stream(Kafka →
+# Flink → Iceberg 那条流式链路的落地表)。
+FRESHNESS_TABLE_FQN = "trino.iceberg.demo.device_events_stream"
 FRESHNESS_PARAMS = {
     "min": "1",              # 至少新增 1 行
-    "columnName": "order_date",
+    "columnName": "event_time",
     "rangeType": "DAY",
     "rangeInterval": "1",
 }
@@ -137,9 +147,13 @@ def add_freshness_case():
         print(f"!! 跳过新鲜度断言:{FRESHNESS_DEF} 不认识参数 {sorted(unknown)};"
               f"它实际接受的是 {sorted(declared)}。改好脚本里的 FRESHNESS_PARAMS 再跑。")
         return
+    if not om("GET", f"/api/v1/tables/name/{FRESHNESS_TABLE_FQN}", ok404=True):
+        print(f"!! 跳过新鲜度断言:目录里还没有 {FRESHNESS_TABLE_FQN}"
+              "(流式链路可能没启用,或者元数据采集还没跑到)。")
+        return
     CASES.append((
-        "orders_freshness_daily", FRESHNESS_DEF,
-        f"<#E::table::{TABLE_FQN}>",
+        "device_events_stream_freshness_daily", FRESHNESS_DEF,
+        f"<#E::table::{FRESHNESS_TABLE_FQN}>",
         [{"name": k, "value": v} for k, v in FRESHNESS_PARAMS.items()],
     ))
 
@@ -158,23 +172,42 @@ for name, definition, entity_link, params in CASES:
     else:
         raise RuntimeError(f"建断言 {name} 失败 -> {resp.status_code} {resp.text[:400]}")
 
-# 3. 执行这批断言的 pipeline。和 scripts/29 的 metadata 采集错开半小时跑
-#    (元数据采集在 0 分,这个在 30 分):质量检查读的是采集之后的目录状态,
-#    同时跑没有意义,还会同时压 Trino。
-pipeline = om("PUT", "/api/v1/services/ingestionPipelines", {
-    "name": "orders_data_quality",
-    "displayName": "orders 数据质量检查",
-    "pipelineType": "TestSuite",
-    "service": {"id": suite["id"], "type": "testSuite"},
-    "sourceConfig": {"config": {"type": "TestSuite", "entityFullyQualifiedName": TABLE_FQN}},
-    "airflowConfig": {"scheduleInterval": "30 */6 * * *"},
-    "loggerLevel": "INFO",
-})
-print(f"质量检查 pipeline: {pipeline['fullyQualifiedName']}")
+# 3. 执行这批断言的 pipeline。
+#
+# **每张表一个 pipeline,不能只建一个。** 2026-08-23 实测踩到:TestSuite
+# 类型的 IngestionPipeline 的 sourceConfig 里绑的是**一张表的 FQN**,它只
+# 会跑那张表的断言。新鲜度断言挂在 device_events_stream 上,如果只建
+# orders 那一个 pipeline,那条断言**永远不会被执行**——而且不报错,就是
+# 静静地一直没有结果,看起来像"还没跑到"。这正是这个项目最常见的失败
+# 形态,所以这里按表分组建。
+#
+# 时间和 scripts/29 的元数据采集错开半小时(采集在 0 分,这里 30 分):
+# 质量检查读的是采集之后的目录状态,同时跑没有意义,还会同时压 Trino。
+tables_with_cases = sorted({link.split("::")[2].split(">")[0] for _, _, link, _ in CASES})
+pipeline_ids = []
+for tfqn in tables_with_cases:
+    tsuite = requests.get(f"{BASE}/api/v1/dataQuality/testSuites/name/{tfqn}.testSuite",
+                          headers=HEADERS, timeout=30)
+    if tsuite.status_code != 200:
+        tsuite = om("POST", "/api/v1/dataQuality/testSuites/basic",
+                    {"name": f"{tfqn}.testSuite", "basicEntityReference": tfqn})
+    else:
+        tsuite = tsuite.json()
+    short = tfqn.split(".")[-1]
+    pl = om("PUT", "/api/v1/services/ingestionPipelines", {
+        "name": f"{short}_data_quality",
+        "displayName": f"{short} 数据质量检查",
+        "pipelineType": "TestSuite",
+        "service": {"id": tsuite["id"], "type": "testSuite"},
+        "sourceConfig": {"config": {"type": "TestSuite", "entityFullyQualifiedName": tfqn}},
+        "airflowConfig": {"scheduleInterval": "30 */6 * * *"},
+        "loggerLevel": "INFO",
+    })
+    om("POST", f"/api/v1/services/ingestionPipelines/deploy/{pl['id']}")
+    print(f"质量检查 pipeline: {pl['fullyQualifiedName']}")
+    pipeline_ids.append(pl["id"])
 
-om("POST", f"/api/v1/services/ingestionPipelines/deploy/{pipeline['id']}")
-print("deploy 请求已提交")
-print(f"PIPELINE_ID={pipeline['id']}")
+print(f"PIPELINE_ID={pipeline_ids[0]}")
 PYEOF
 
 log "建测试套件 + 3 条断言 + TestSuite pipeline(每 6 小时,和元数据采集错开半小时)..."
