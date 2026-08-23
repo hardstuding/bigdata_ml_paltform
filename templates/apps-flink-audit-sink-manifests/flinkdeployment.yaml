@@ -13,7 +13,7 @@ metadata:
   name: trino-audit-sink
   namespace: flink
 spec:
-  O8c9124a148d690e4fa9ceb25982f1a1803a959
+  image: ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg:178c9124a148d690e4fa9ceb25982f1a1803a959
   imagePullPolicy: IfNotPresent
   flinkVersion: v1_20
   serviceAccount: flink
