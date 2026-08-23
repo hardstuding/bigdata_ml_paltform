@@ -54,6 +54,24 @@ allow if {
 	not is_audit_data(input)
 }
 
+# openmetadata_service 是唯一被放行到审计表的服务账号,理由是**它采的是
+# 元数据不是数据**:scripts/29 配的 sourceConfig 是 `DatabaseMetadata`
+# (表名/字段名/类型),没有开 profiler 和 sample data,所以它看不到任何
+# 一行审计记录。
+#
+# 为什么值得单独开这个口子:挡住它的后果是**审计表永远不出现在数据目录
+# 里**(2026-08-23 实测确认 `trino.iceberg.audit.query_events` 在 OpenMetadata
+# 里是 404)。而数据治理这个角色恰恰需要知道"平台上存在这样一张表、它有
+# 哪些字段",否则合规审查的人连该去查什么都不知道。
+#
+# **如果哪天给 Trino 的采集打开了 profiler 或 sample data,这条必须撤掉**
+# ——那时候它就能读到真实数据行了。这行字是留给那个时候的。
+allow if {
+	is_service_account
+	is_audit_data(input)
+	input.context.identity.user == "openmetadata_service"
+}
+
 # ---- 审计表:只有平台管理组能读 ----
 #
 # **审计表泄露比业务表泄露更糟**——它记着每个人查过什么、导出过什么,

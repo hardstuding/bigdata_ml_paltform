@@ -152,3 +152,28 @@ test_new_audit_table_protected_without_policy_change if {
 		"context": {"identity": {"user": "dbt_demo_service", "groups": []}},
 	}
 }
+
+test_openmetadata_service_allowed_on_audit_schema_metadata_only if {
+	# 唯一被放行到审计表的服务账号:它采的是元数据不是数据(采集配置里
+	# 没开 profiler/sample data)。挡住它的后果是审计表永远不出现在数据
+	# 目录里,数据治理角色连该查什么都不知道。
+	trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "audit", "tableName": "query_events"}},
+		},
+		"context": {"identity": {"user": "openmetadata_service", "groups": []}},
+	}
+}
+
+test_other_service_accounts_still_denied_on_audit_schema if {
+	# 上面那个口子是**只给 openmetadata_service 一个**,别顺手扩大成
+	# "所有服务账号都行"。
+	not trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "audit", "tableName": "query_events"}},
+		},
+		"context": {"identity": {"user": "platform_sdk_demo_service", "groups": []}},
+	}
+}
