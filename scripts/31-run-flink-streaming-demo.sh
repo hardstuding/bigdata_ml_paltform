@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 端到端验证:Kafka(device-events topic)-> Flink 流式作业 -> Iceberg,见
+# 端到端验证:Kafka(device-events-avro topic,Avro + Schema Registry)-> Flink
+# 流式作业 -> Iceberg,见
 # docs/decisions/062-flink-streaming-pipeline.md。
 #
 # 编号说明:任务原计划用 scripts/30,但这一轮开工前发现 29/30 已经被另一条

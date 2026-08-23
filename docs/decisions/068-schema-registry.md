@@ -63,14 +63,57 @@ cloud-full 单副本。理由不是"省资源",是**它不在查询链路上**:r
 升级和节点故障时注册接口不中断——Karapace 自己有 master 选举,多副本时
 只有 master 负责写,这是它设计支持的形态。
 
+## 实机验证(cloud-full,2026-08-23)
+
+Karapace 起来之后直接打它的 REST API:
+
+| 动作 | 结果 |
+|---|---|
+| 注册 v1 schema | `200 {"id": 1}` |
+| 加一个带默认值的可选字段 | `200 {"id": 2}` —— BACKWARD 下这是合法演进 |
+| 把 `double` 改成 `string` | **`409 Incompatible schema, compatibility_mode=BACKWARD`** |
+
+最后一行就是这个组件存在的全部理由:**"上游改字段"现在拦得住了**。
+
+## 第二段:让流式链路真的用上它(2026-08-23,未验证)
+
+装了 registry 只是有了放 schema 的地方。上面那条 409 是我用 curl 手动触发
+的——**如果真实的 producer 不走 registry,它就只是一个没人用的服务**。
+
+所以把 `apps/kafka-producer/` 从 JSON 换成了 Avro:用 confluent-kafka 的
+`AvroSerializer`,schema 在第一次发送时注册到 `<topic>-value`,不兼容就
+409、消息根本发不出去——**把问题挡在发送这一侧**,而不是等下游解析炸。
+Flink 侧对应改成 `'format' = 'avro-confluent'`。
+
+### 顺带消掉一整类 bug
+
+时间字段从字符串变成 Avro 的 `timestamp-millis`(一个 long),**不再有
+"格式"这个概念**。2026-08-22 那次"格式差一个 `T` 就静默变 null、两个算子
+之后才以 `RowTime field should not be null` 炸出来"的坑
+([ADR-062](062-flink-streaming-pipeline.md)),从设计上不存在了。
+
+这不是附带好处,值得单独说:**引入 schema 之后,一整类"约定靠人记住"的
+bug 变成了"类型系统保证"**,这比多一道校验更有价值。
+
+### topic 改名,不是原地换格式
+
+`device-events` → `device-events-avro`。同一个 topic 里混着 JSON 和 Avro,
+任何从 `earliest-offset` 重放的消费端读到老消息都会炸——而这条 Flink 作业
+正是从 earliest 消费的。改名是最省事也最不会出错的迁移方式。
+
+### 三个配套改动(都写了"少了会怎样")
+
+- kafka-producer 镜像:`confluent-kafka[avro]`,不加 extra 直接 ImportError
+- flink-iceberg 镜像:`flink-sql-avro-confluent-registry-1.20.5.jar`,少了会
+  报 `Could not find any format factory for identifier 'avro-confluent'`
+- CronJob 加 `SCHEMA_REGISTRY_URL`
+
 ## 还没做的
 
-1. **没部署验证过。** manifest 里的 entrypoint(`python3 -m karapace`)和
-   环境变量名是从上游 `container/compose.yml` 的 6.2.2 tag 抄的,不是猜的,
-   但"抄对了"和"跑起来了"是两回事。
-2. **现有的 Flink 作业还没接**。装上 registry 只是有了地方放 schema,
-   真正消掉"上游改字段下游炸"这个风险,要把
-   `apps/flink-streaming-demo/` 的 SQL 从写死 schema 改成从 registry 拿。
-   这是下一步,而且**要有一次真实的"改上游字段看下游是否被拦住"的验证**
-   ——否则这个组件就只是装着好看。
+1. **第二段没有验证过。** 下次开机要验三件事:producer 发得出去、Flink
+   消费得到、Iceberg 行数增长;以及**故意改一个不兼容的字段类型,确认它在
+   producer 侧就被拦住**——最后这条才是这次改动的意义所在,不做等于没做。
+2. **审计链路的 schema 没进 registry。** Trino 的 event listener 只发 JSON,
+   格式由 Trino 决定,我们改不了。这是可以接受的:那条链路的"上游"是
+   Trino 自己,不是会随手改字段的业务方。
 3. local-lite 不启用(那一档连 Kafka 都没开)。
