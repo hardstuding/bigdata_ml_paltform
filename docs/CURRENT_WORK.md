@@ -13,7 +13,40 @@
 > 想知道"以前某个问题怎么解决的" → [`docs/journal/`](journal/) 和
 > [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 
-## CURRENT(2026-08-22 夜 → 08-23)
+## CURRENT(2026-08-23)
+
+### 这一轮上云验证的三条结论
+
+**1. OpenMetadata 自动采集 ✅ 端到端通过**(`OPENMETADATA_TRINO_INGESTION_OK`)。
+判据是直接查 API 确认 `trino.iceberg.demo.orders` 在目录里、六个字段和
+Trino 真实结构一致——这张表从没人手动登记过。目录里实测 100+ 张表。
+真部署修了 4 个前置:命名空间配额挡住采集 Job(伪装成 `Job Running 0/1`)、
+1.5GB 采集镜像没预缓存、`verify` 字段是证书路径不是开关、
+`openmetadata_service` 没进 OPA 白名单。
+
+**2. Flink 链路暴露了"跑通一次 ≠ 能用"**。08-22 夜验证通过,但云主机重启
+后作业变 FAILED 且**不会自己恢复**——它在 Hive Metastore 就绪前提交,
+`CREATE DATABASE` 失败,而那是**作业提交阶段**的失败,Flink 的
+restart-strategy 管不着。已修(脚本里等依赖 + operator 开自动重启),
+**复验还在进行中**。
+
+**3. Trino 列级/行级策略**:Trino 已加载 4 条 `opa.policy`(URI 生效了),
+但**还没有真正验证过脱敏/过滤的实际效果**,roles.md 那一格保持 🟡。
+
+### 验证工具本身出错了三次,这条比上面三条更值得记
+
+- 测网速量错目录(Docker 29 用 containerd 存储,不是 `/data/docker`)
+- 查配置 grep 明文,而值是 base64 存在 Secret 里
+- 查错了 Secret 名(`config-secret` vs `pipeline-secret`),连着两轮得出
+  "配置没生效"的错误结论,实际早就生效了
+- `scripts/30` 轮询的 `pipelineStatus` 接口在 1.13.3 上直接 404,导致采集
+  明明成功却一直判 FAIL
+
+**共同点:我倾向于相信自己写的检查命令是对的,而它恰恰是最可能错的一环。**
+`scripts/30` 已经改成直接轮询业务结果(表在不在目录里),不依赖任何任务
+状态接口——**验证工具自己出错、把成功报成失败,比没有验证更糟**。
+
+## 上一轮 CURRENT(2026-08-22 夜)
 
 ### Flink 流式链路:**端到端验证通过**,过程中修了 9 个 bug
 
