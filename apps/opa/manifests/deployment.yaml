@@ -57,9 +57,19 @@ spec:
             # 符号链接**,文件本身的 inode 没被改动,盯着具体文件路径的
             # inotify watch 收不到事件。盯目录才收得到。
             #
-            # 目录里的 `..data`、`..2026_xx_xx` 这些以点开头的条目 OPA 的
-            # 加载器会自动跳过,不会出现同一个 package 被加载两遍。
+            # 但盯目录会撞上第二个坑,**必须配 --ignore 一起用**:kubelet
+            # 的 ConfigMap 挂载目录里除了 `trino.rego` 这个符号链接,还有
+            # `..data` 和 `..2026_08_23_08_47_49.xxxx` 这两层真实目录,
+            # OPA 会把同一份策略**加载三遍**然后启动失败:
+            #   rego_type_error: multiple default rules data.trino.allow found
+            #   at /policies/..2026_.../trino.rego:13, /policies/..data/trino.rego:13,
+            #   /policies/trino.rego:13
+            # (2026-08-23 实测。原以为 OPA 会自动跳过点开头的条目,不会。
+            # 好在它是启动失败而不是静默加载错的东西,而且滚动更新时老 Pod
+            # 还在跑,Trino 没受影响——fail-closed 的组件配 rollout 策略,
+            # 这次真的兜住了。)
             - --watch
+            - --ignore=..*
             - /policies
           ports:
             - containerPort: 8181
