@@ -38,9 +38,14 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: registry.k8s.io/kueue/charts
-    chart: kueue
-    targetRevision: 0.19.2
+    # **chart 是 vendor 进仓库的,不是让 ArgoCD 去外网拉**(apps/kueue-chart/,
+    # 见 ADR-061 和 scripts/28-vendor-helm-chart.sh)。2026-08-23 实测:直接
+    # 配 oci://registry.k8s.io,repo-server 的 `helm pull` 在境内云主机上
+    # 3 分钟超时,Application 一直 ComparisonError 装不起来。这不是偶发的
+    # 网络抖动,是这个项目在 grafana/loki 上已经踩过一遍的同一个问题。
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/kueue-chart
     helm:
       valuesObject:
         # 平台已经有 kube-prometheus-stack,指标直接接进去——"借了多少、

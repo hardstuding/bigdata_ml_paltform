@@ -39,7 +39,14 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "==> helm pull ${CHART} ${VERSION} (来自 ${REPO_URL})"
-helm pull "$CHART" --repo "$REPO_URL" --version "$VERSION" --destination "$TMP"
+# OCI 仓库和传统 HTTP 仓库的 pull 语法不一样:OCI 是 `helm pull oci://<仓库>/<chart>`
+# 一个完整引用,传 `--repo` 会直接报 "invalid reference"。这里按前缀分流。
+# (2026-08-23 vendor kueue 时踩到——之前只 vendor 过 grafana 那种 HTTP 仓库。)
+if [ "${REPO_URL#oci://}" != "$REPO_URL" ]; then
+  helm pull "${REPO_URL%/}/${CHART}" --version "$VERSION" --destination "$TMP"
+else
+  helm pull "$CHART" --repo "$REPO_URL" --version "$VERSION" --destination "$TMP"
+fi
 TGZ="${TMP}/${CHART}-${VERSION}.tgz"
 [ -f "$TGZ" ] || { echo "没拉到 ${TGZ}" >&2; exit 1; }
 DIGEST="$(shasum -a 256 "$TGZ" | awk '{print $1}')"
