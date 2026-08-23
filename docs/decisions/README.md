@@ -113,6 +113,7 @@
 | [041](041-queue-resource-management.md) | ResourceQuota + LimitRange + PriorityClass | 已验证 |
 | [064](064-role-based-resource-quota.md) | 按组分配计算配额 + 空闲互借(Kueue) | 已实机验证 |
 | [065](065-data-quality-on-openmetadata.md) | 数据质量断言复用 OpenMetadata | 已实机验证 |
+| [066](066-trino-query-audit.md) | Trino 查询审计走 Kafka event listener | 第一段已验证 |
 | [022](022-ci-chart-validation.md) | CI:push/PR 前跑 `helm template` | 已采纳 |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 机制已实现并在 cloud-full 验证;ACME 和告警外推两档未在真实环境验证 |

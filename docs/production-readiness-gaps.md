@@ -59,7 +59,12 @@ ArgoCD Synced 不等于生效、Pod Running 不等于健康、Job Complete 不�
 提交时间,超期就告警。指标进 Prometheus,和现有 Grafana/Alertmanager 复用
 同一套通道,不另起炉灶。
 
-## 3. 查询审计:谁在什么时候查了哪张表,现在查不出来
+## 3. 查询审计 —— 🟡 第一段已做(2026-08-23,见 [ADR-066](decisions/066-trino-query-audit.md))
+
+事件已经在往 Kafka 里流了(这就是「不能再晚」的那部分),但**还没落到
+Iceberg**,现在只靠 Kafka 保留期兜着。下面是原始判断,保留。
+
+### 原始判断:谁在什么时候查了哪张表,现在查不出来
 
 **现状:**权限侧有 OPA 做**准入**判断(能不能查),但没有配 Trino 的
 event listener,**查询本身没有留痕**。

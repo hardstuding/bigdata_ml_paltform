@@ -64,6 +64,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 备份 / 恢复 | ✅ | Postgres 每日备份,恢复演练验证过(ADR-033) |
 | 资源治理(组件级上限) | ✅ | ResourceQuota / LimitRange / PriorityClass(ADR-041)——防「单个组件失控拖死机器」 |
 | 资源治理(按组分配 + 空闲互借) | ✅ | Kueue,按 `platform/iam/` 已有的组建队列,同一 cohort 内可借(ADR-064)。**实测有数字**:platform-team 标称 2 CPU,提一个要 3 CPU 的作业被 admit、队列状态里 `borrowed: 1`;提要 6 CPU 的被挡住 `insufficient quota`。队列标签由 SDK 按提交者的组自动打,不是用户手填 |
+| 查询审计留痕 | 🟡 | Trino event listener → Kafka 已跑通(ADR-066),实测一条事件 2KB,含用户/客户端 IP/完整 SQL/访问的表/成功与否。**还没落 Iceberg**,现在只靠 Kafka 保留期(cloud-full 30 天)兜着;也还没有「审计流断了」的告警 |
 | 网络隔离 | ✅ | NetworkPolicy 覆盖核心命名空间(ADR-035) |
 | 破坏性操作防护 | ✅ | `scripts/confirm-destructive-kubectl.sh`(历史上真误删过 namespace,见 `docs/operations/incidents.md`) |
 | 计费资源门禁 | ✅ | `cloud-full-preflight.sh` + 空闲自动关机看门狗(经济模式) |
