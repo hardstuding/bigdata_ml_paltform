@@ -41,6 +41,9 @@ jobs:
       - name: NetworkPolicy 消费者白名单校验(新命名空间用共享服务不能漏加白名单)
         run: python3 scripts/check-networkpolicy-consumers.py
 
+      - name: 每个工作负载都得有 image(见脚本头部那次真实事故)
+        run: python3 scripts/check-workloads-have-image.py
+
       - name: 镜像版本锁定校验(不允许 latest 这类浮动 tag,见 ADR-010)
         run: python3 scripts/check-image-tags.py
 
