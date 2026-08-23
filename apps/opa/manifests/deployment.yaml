@@ -38,6 +38,19 @@ spec:
             - --server
             - --addr=:8181
             - --log-level=info
+            # **没有 --watch 的话,策略改了永远不生效,直到有人手动重启这个
+            # Pod。** 2026-08-23 实测撞到:给审计表加了一条 OPA 规则,
+            # ConfigMap 已经同步进集群、`opa test` 本地 33/33 全过、ArgoCD
+            # 显示 Synced/Healthy——但活的 OPA 仍然按老策略放行,因为
+            # `opa run` 默认只在启动时加载一次策略文件。
+            #
+            # 这是这个项目最典型的那类失败:**每一层都显示成功,而效果
+            # 没有生效**,而且是在权限策略这种"错了不会报错、只会悄悄放行"
+            # 的地方。加 --watch 让它监听文件变化自己重载。
+            #
+            # 注意 ConfigMap 挂载的更新有约 1 分钟的 kubelet 缓存延迟
+            # (这个项目记录过),所以改完策略不是秒生效,是分钟级生效。
+            - --watch
             - /policies/trino.rego
           ports:
             - containerPort: 8181
