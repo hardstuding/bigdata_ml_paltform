@@ -1,0 +1,33 @@
+# Trino 查询审计事件持久化到 Iceberg(ADR-066 第二段)。
+#
+# 和 flink-streaming-demo 一样依赖 flink-kubernetes-operator 先把
+# FlinkDeployment 这个 CRD 装好,所以 sync-wave 排在它后面。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: flink-audit-sink
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/flink-audit-sink/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: flink
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=true

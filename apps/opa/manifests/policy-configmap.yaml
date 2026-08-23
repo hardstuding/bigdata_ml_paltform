@@ -62,6 +62,31 @@ data:
 
     allow if {
     	is_service_account
+    	not is_audit_data(input)
+    }
+
+    # ---- 审计表:只有平台管理组能读 ----
+    #
+    # **审计表泄露比业务表泄露更糟**——它记着每个人查过什么、导出过什么,
+    # 是一份"谁对什么感兴趣"的完整画像。所以它不能沿用普通表那套授权。
+    #
+    # 具体挡的是**服务账号那条口子**。审计表在 `default allow := false` 之下,
+    # 普通用户本来就读不到(要有 table-access-grants.csv 里的 grant 记录);
+    # 但 `is_service_account` 那条是**无条件放行**,意味着任何人只要能在
+    # Superset 里建一个查询,就能借 superset_service 这个账号读到全部审计
+    # 记录。这不是这次新引入的问题,是"服务账号无差别放行"这个既有设计撞上
+    # 一张新的敏感表——但撞上了就得处理,不能因为"老问题"就放着。
+    #
+    # platform-team 仍然能读(is_platform_admin 那条没加限制):合规调查本来
+    # 就是平台管理组的活,而且他们本来就能读所有表,在这里单独挡住没有意义。
+    #
+    # 判定只看 schema 名,不看 catalog:审计数据只会写进 `audit` 这个 schema
+    # (见 scripts/flink_trino_audit_sink.py),而**用 schema 名判断比枚举表名
+    # 安全**——以后往里加一张新的审计表,不用记得回来改这条策略。
+    audit_schema := "audit"
+
+    is_audit_data(inp) if {
+    	inp.action.resource.table.schemaName == audit_schema
     }
 
     # ---- 平台管理组:不受表级授权约束,方便排障 ----

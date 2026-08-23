@@ -1,0 +1,73 @@
+# Trino 查询审计事件的持久化作业:Kafka -> Flink -> Iceberg。
+# 见 docs/decisions/066-trino-query-audit.md。
+#
+# **这是渲染产物的源文件**,改这里,不要改 apps/flink-audit-sink/manifests/。
+#
+# 结构照抄 templates/apps-flink-streaming-demo-manifests/flinkdeployment.yaml
+# ——那条链路已经在真机上跑通过两轮,S3A 凭据、HADOOP_CONF 的取舍、镜像
+# 选择这些坑都在那边踩完了(ADR-062),这里不重新发明。**唯一刻意不同的
+# 是 upgradeMode**,理由见下面。
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: trino-audit-sink
+  namespace: flink
+spec:
+  image: ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg:89713c95a0481015bac7bedcbb11f164fb8e9369
+  imagePullPolicy: IfNotPresent
+  flinkVersion: v1_20
+  serviceAccount: flink
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "1"
+    execution.checkpointing.interval: "60s"
+    # 作业失败后让 operator 自己重新拉起来。审计链路断了不会有任何人
+    # 立刻发现(没人盯着它),所以自愈比 demo 链路更重要。
+    kubernetes.operator.job.restart.failed: "true"
+    flink.hadoop.fs.s3a.endpoint: "http://minio.minio.svc.cluster.local:9000"
+    flink.hadoop.fs.s3a.path.style.access: "true"
+    flink.hadoop.fs.s3a.connection.ssl.enabled: "false"
+    flink.hadoop.fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    flink.hadoop.fs.s3a.aws.credentials.provider: "com.amazonaws.auth.EnvironmentVariableCredentialsProvider"
+  podTemplate:
+    spec:
+      containers:
+        - name: flink-main-container
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: minio-root, key: rootUser}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: minio-root, key: rootPassword}
+          volumeMounts:
+            - name: job-script
+              mountPath: /opt/flink/usrlib
+      volumes:
+        - name: job-script
+          configMap:
+            name: flink-trino-audit-sink-script
+  jobManager:
+    resource:
+      memory: "{{RES:flink_jobmanager_memory}}"
+      cpu: {{RES:flink_jobmanager_cpu}}
+  taskManager:
+    resource:
+      memory: "{{RES:flink_taskmanager_memory}}"
+      cpu: {{RES:flink_taskmanager_cpu}}
+  job:
+    jarURI: local:///opt/flink/opt/flink-python-1.20.5.jar
+    entryClass: "org.apache.flink.client.python.PythonDriver"
+    args: ["-pyclientexec", "/usr/bin/python3", "-py", "/opt/flink/usrlib/trino_audit_sink.py"]
+    parallelism: {{RES:flink_job_parallelism}}
+    # **stateless 而不是 savepoint,而且这个选择对审计链路有真实代价,
+    # 必须说清楚。** stateless 升级 = 丢掉 Flink 的状态和消费位点重启,
+    # 配合下面的 earliest-offset,结果是**从头重放整个 topic**——会产生
+    # 重复记录。
+    #
+    # 为什么仍然选它:savepoint 模式要配持久化 savepoint 目录和恢复流程,
+    # 那是另一件要单独验证的事;而重复记录对审计的危害**远小于漏记录**
+    # (漏了就永远补不回来,重了至少能靠 query_id 去重)。查询审计表的
+    # 正确用法本来就该带 `SELECT DISTINCT` / 按 query_id 去重。
+    #
+    # 这条是明确的技术债,记在 ADR-066 里,不是没想到。
+    upgradeMode: stateless

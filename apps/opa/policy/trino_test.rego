@@ -97,3 +97,58 @@ test_insert_denied_for_regular_user_even_with_select_grant if {
 	}
 		with data.trino.grants as mock_grants
 }
+
+# ---------------------------------------------------------------- 审计表
+# 审计表记着每个人查过什么、导出过什么,是一份"谁对什么感兴趣"的完整
+# 画像,泄露危害比业务表大。下面几条锁住"服务账号那条无条件放行的口子
+# 对审计表不生效",别在以后重构 allow 规则时被顺手改回去。
+
+test_service_account_denied_on_audit_schema if {
+	not trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "audit", "tableName": "query_events"}},
+		},
+		"context": {"identity": {"user": "superset_service", "groups": []}},
+	}
+}
+
+test_service_account_still_allowed_on_normal_table if {
+	trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "demo", "tableName": "orders"}},
+		},
+		"context": {"identity": {"user": "superset_service", "groups": []}},
+	}
+}
+
+test_platform_admin_allowed_on_audit_schema if {
+	trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "audit", "tableName": "query_events"}},
+		},
+		"context": {"identity": {"user": "zhenghe", "groups": ["platform-team"]}},
+	}
+}
+
+test_regular_user_denied_on_audit_schema if {
+	not trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "audit", "tableName": "query_events"}},
+		},
+		"context": {"identity": {"user": "analyst", "groups": ["data-analysts"]}},
+	}
+}
+
+test_new_audit_table_protected_without_policy_change if {
+	not trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "audit", "tableName": "query_table_access"}},
+		},
+		"context": {"identity": {"user": "dbt_demo_service", "groups": []}},
+	}
+}

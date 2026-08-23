@@ -51,6 +51,7 @@ enabled_components:
   - feast.yaml
   - flink-kubernetes-operator.yaml
   - flink-streaming-demo.yaml
+  - flink-audit-sink.yaml
   - hive-metastore.yaml
   - iam-sync.yaml
   - jupyterhub.yaml

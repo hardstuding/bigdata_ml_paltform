@@ -69,14 +69,58 @@ created 事件让消息量翻倍,而它能回答的问题 completed 事件全都
 `context.source`、`metadata.query`(完整 SQL)、`metadata.queryState`、
 `metadata.tables`(catalog.schema.table 逐张列出)。
 
+## 第二段:持久化到 Iceberg(2026-08-23 加,未部署验证)
+
+`apps/flink-audit-sink/` —— Kafka → Flink → Iceberg,照
+[ADR-062](062-flink-streaming-pipeline.md) 那条已经跑通两轮的链路做,
+不重新发明。三个设计点值得单独说:
+
+### 写成两张表,不是一张
+
+一次查询可以访问多张表,事件里的 `tables` 是个数组。展开成两张表而不是
+在 Iceberg 里存 `ARRAY<ROW<...>>`:
+
+- `audit.query_events` —— **一次查询一行**,回答"谁在什么时候跑了什么 SQL"
+- `audit.query_table_access` —— **一次查询访问的每张表各一行**,回答
+  **"谁查过这张表"**
+
+第二张表存在的全部理由是:那才是合规场景真正要问的问题,展开成行之后
+它就是一句最普通的 `WHERE table_name = '...'`,不需要数组函数,也不依赖
+Iceberg 对嵌套类型的支持程度。
+
+### 时间用 Kafka 的记录时间戳,不解析 payload 里的
+
+payload 自带 `createTime`/`endTime`,但**它们的字符串格式没在真机上核对
+过**。这个平台在时间格式上栽过一次(ADR-062:格式对不上会静默变 null,
+然后在两个算子之后以完全不相干的报错炸出来)。所以排序用 Kafka 记录
+自带的时间戳元数据(由 Kafka 写入,不依赖任何解析),payload 那两个原样
+存成字符串,等真机确认格式后再决定要不要转。
+
+### `upgradeMode: stateless` 是一笔明确的技术债
+
+stateless 升级 = 丢掉消费位点重启,配合 `earliest-offset` 会**从头重放
+整个 topic**,产生重复记录。仍然选它,是因为 savepoint 模式要配持久化
+目录和恢复流程(另一件要单独验证的事),而**重复记录对审计的危害远小于
+漏记录**——漏了永远补不回来,重了至少能按 `query_id` 去重。查审计表本来
+就该按 query_id 去重。
+
+## 审计表的权限:补了一条 OPA 规则
+
+原来的策略里 `is_service_account` 是**无条件放行**,意味着任何人只要能在
+Superset 里建一个查询,就能借 `superset_service` 这个账号读到全部审计
+记录。**审计表记着每个人查过什么、导出过什么,是一份"谁对什么感兴趣"的
+完整画像**,不能沿用普通表那套。
+
+这不是这次新引入的问题,是"服务账号无差别放行"这个既有设计撞上一张新的
+敏感表——但撞上了就得处理。加的规则按 **schema 名**判断(`audit`),不
+枚举表名:以后往里加新的审计表,不用记得回来改策略。`opa test` 33/33 通过,
+其中 5 条是这次新加的,专门锁住"服务账号那条口子对审计表不生效"。
+
 ## 还没做的(按优先级)
 
-1. **持久化到 Iceberg**。现在只在 Kafka 里,保留期 cloud-full 30 天 /
-   prod 90 天(`environments/resource-profiles.yaml` 的
-   `audit_topic_retention_ms`)。超过保留期就滚掉了。做法是照
-   [ADR-062](062-flink-streaming-pipeline.md) 那条链路再来一遍,写进
-   `iceberg.audit.query_events`,然后**这张表本身要按最严格的权限管起来**
-   ——审计表泄露比业务表泄露更糟。
+1. **上面这一段没有部署验证过。** Flink SQL 里的嵌套 ROW 取值、
+   `CROSS JOIN UNNEST`、`METADATA FROM 'timestamp'` 都是照文档写的,
+   跑没跑得起来是另一回事。
 2. **"审计流断了"的告警**。见上面取舍 2,这是那个取舍的必要配套,不是
    可选项。
 3. 落表之后顺带能回答"哪些表其实没人用",正是
