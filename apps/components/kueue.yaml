@@ -53,6 +53,15 @@ spec:
         # (ADR-064 里专门点了这条)。
         enablePrometheus: true
         controllerManager:
+          # SparkApplication 集成在 0.19 还是 alpha,不开这个 feature gate 的话
+          # controller 直接启动失败(不是降级忽略):
+          #   Unable to setup controllers ... sparkoperator.k8s.io/sparkapplication
+          #   integration is alpha feature. please enable SparkApplicationIntegration
+          #   featuregate
+          # 也就是说"配了 integration 但没开 gate"是个致命组合,不会静默跳过。
+          featureGates:
+            - name: SparkApplicationIntegration
+              enabled: true
           replicas: 1
           manager:
             resources:
