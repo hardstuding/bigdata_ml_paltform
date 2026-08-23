@@ -44,17 +44,27 @@ Pod 恰好因别的原因重启过之后才真正生效。在权限策略上这�
 重启),连踩的三层记在
 [`troubleshooting.md`](operations/troubleshooting.md#opa-策略改了configmap-同步了argocd-全绿但活的策略还是老的)。
 
-### 下一步(都不需要立刻开机)
+### 下一步
 
-1. **告警出口**——质量断言失败、新鲜度失败、审计流断了,三个来源要接
-   **同一个**出口。真实阻塞是没有通知渠道凭据。
-2. **成本 Grafana 面板**——指标抓上去了不等于有人看得到。
-3. **Flink 作业接 Schema Registry**——装上 registry 只是有了放 schema 的
-   地方,真正消掉"上游改字段下游炸"要把作业改成从 registry 拿 schema,
-   **并且真做一次"改上游字段看下游是否被拦住"的验证**。
-4. **本机 colima 切 x86_64**(见 [`cpu-architecture.md`](operations/cpu-architecture.md))
-   ——CI 已经只建 amd64,切换之前本地拉不到能跑的新镜像。
-5. Trino 列级/行级脱敏的真实效果验证(一直挂着的老账,roles.md 仍是 🟡)。
+**下次开机的验证清单**(都已经准备到"开机就能跑"):
+
+1. **Schema Registry 端到端**——producer 发 Avro、Flink 消费、Iceberg 行数
+   增长;以及**故意改一个不兼容的字段类型,确认在 producer 侧就被拦住**。
+   最后这条才是 ADR-068 的意义所在,不做等于没做。
+2. **告警规则**——5 条 PrometheusRule 的表达式在集群上用 `/api/v1/query`
+   验一次(本机没有 promtool,只做了结构检查);顺带确认 Flink 的
+   PodMonitor 真的发现了 target(**少了命名端口的表现是一个 target 都没有、
+   而且哪里都不报错**)。
+3. **成本看板**——7 个 panel 在 Grafana 里看一眼,尤其"按组的成本"那个
+   (它依赖 kube-state-metrics 的 metricLabelsAllowlist 生效)。
+4. **Trino 列级/行级脱敏的真实效果**——一直挂着的老账,roles.md 仍是 🟡。
+
+**不需要开机的**:
+
+5. 本机 colima 切 x86_64(见 [`cpu-architecture.md`](operations/cpu-architecture.md)),
+   CI 已经只建 amd64。
+6. 数据质量/新鲜度断言的失败接进告警出口——真实阻塞是没有通知渠道凭据,
+   而且**三个来源(质量、新鲜度、审计断流)必须接同一个出口**。
 
 ### 云主机状态
 
