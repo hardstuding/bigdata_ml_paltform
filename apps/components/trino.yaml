@@ -104,6 +104,15 @@ spec:
           # 这条必须配套一个"审计事件流断了"的告警(见 ADR-066 待办),
           # 不能只靠这行注释。
           - kafka-event-listener.terminate-on-initialization-failure=false
+          # **不排掉这几个字段的话,一条审计事件 125KB**(实测,一个
+          # `select count(*)` 而已)。拆开看:payload 76KB(完整执行计划的
+          # JSON)、operatorSummaries 26KB、taskStatistics 9KB、
+          # jsonPlan/plan 各 ~2.8KB——**全是性能剖析数据,不是审计数据**。
+          # 审计要回答的是"谁、什么时候、查了哪张表、成功没有",这些在
+          # metadata/context/ioMetadata 里,加起来不到 1KB。
+          # 排掉之后一条事件约 1KB,存储和 Kafka 消息大小上限都不再是问题。
+          # 想看查询性能有 Trino 自己的 Web UI,不该由审计流兼职。
+          - kafka-event-listener.excluded-fields=payload,plan,jsonPlan,statistics
         additionalConfigProperties:
           - http-server.http.enabled=false
           # http-server.authentication.type 管的是"接受哪些认证方式"
