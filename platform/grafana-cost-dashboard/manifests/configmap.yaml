@@ -20,6 +20,16 @@
 # `kube_pod_labels` 的维度——已经在 platform/apps/kube-prometheus-stack.yaml
 # 的 metricLabelsAllowlist 里放行了。**没有那一行,这个 panel 会是空的**,
 # 而其它 panel 照常工作。
+#
+# 那个 panel 里 `max by (...) (kube_pod_labels{...})` 这层聚合看着多余,
+# **但少了它整个查询会直接 422**。2026-08-23 实测踩到:
+# `kube_pod_labels` 这个指标名有**两个来源**——kube-state-metrics 和
+# OpenCost 自己也导出一份同名指标,同一个 pod 因此有两条序列,join 时报
+#   found duplicate series for the match group {namespace=..., pod=...}
+#   on the right hand-side of the operation
+# 先按 (namespace, pod, 队列标签) 聚合一次就消掉了。
+# 顺带 `{label_...!=""}` 那个过滤也不是可有可无:不加的话没打队列标签的
+# 工作负载会汇成一条 legend 为空的线,把图弄脏。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -115,12 +125,12 @@ data:
           },
           "targets": [
             {
-              "expr": "sum by (queue) ((container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) * on (namespace, pod) group_left (queue) label_replace(kube_pod_labels, \"queue\", \"$1\", \"label_kueue_x_k8s_io_queue_name\", \"(.+)\"))",
+              "expr": "sum by (queue) ((container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) * on (namespace, pod) group_left (queue) label_replace(max by (namespace, pod, label_kueue_x_k8s_io_queue_name) (kube_pod_labels{label_kueue_x_k8s_io_queue_name!=\"\"}), \"queue\", \"$1\", \"label_kueue_x_k8s_io_queue_name\", \"(.+)\"))",
               "legendFormat": "{{queue}} CPU",
               "refId": "A"
             },
             {
-              "expr": "sum by (queue) ((container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost)) * on (namespace, pod) group_left (queue) label_replace(kube_pod_labels, \"queue\", \"$1\", \"label_kueue_x_k8s_io_queue_name\", \"(.+)\"))",
+              "expr": "sum by (queue) ((container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost)) * on (namespace, pod) group_left (queue) label_replace(max by (namespace, pod, label_kueue_x_k8s_io_queue_name) (kube_pod_labels{label_kueue_x_k8s_io_queue_name!=\"\"}), \"queue\", \"$1\", \"label_kueue_x_k8s_io_queue_name\", \"(.+)\"))",
               "legendFormat": "{{queue}} 内存",
               "refId": "B"
             }
