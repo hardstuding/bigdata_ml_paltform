@@ -60,11 +60,13 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 日志 | ✅ | Loki + Alloy 采集全部 pod stdout,和指标同一个 Grafana 界面(ADR-020) |
 | 告警产生 | ✅ | Alertmanager 已开,chart 自带规则生效,抓到过真实问题(ADR-034) |
 | 告警送达 | ❌ | **没有配任何外部通知渠道**——现在只能"打开界面查",不会推送到人。邮件/企微/Slack 的配置模板已经预留在 `platform/apps/kube-prometheus-stack.yaml` 里注释着,需要真实凭据才能激活 |
-| 数据质量断言 | ✅ | OpenMetadata 自带 Data Quality(ADR-065),三条断言实机跑通;另用一条故意失败的探针验证过「绿灯能变红」。局限:只覆盖 demo 一张表,断言失败时还没有告警通道 |
+| 数据质量断言 | ✅ | OpenMetadata 自带 Data Quality(ADR-065/070),三条断言 + 一条新鲜度断言实机跑通;用一条故意失败的探针验证过「绿灯能变红」。新鲜度实测 `insertedRows=1640`。局限:覆盖两张表,断言失败时还没有告警通道 |
 | 备份 / 恢复 | ✅ | Postgres 每日备份,恢复演练验证过(ADR-033) |
 | 资源治理(组件级上限) | ✅ | ResourceQuota / LimitRange / PriorityClass(ADR-041)——防「单个组件失控拖死机器」 |
 | 资源治理(按组分配 + 空闲互借) | ✅ | Kueue,按 `platform/iam/` 已有的组建队列,同一 cohort 内可借(ADR-064)。**实测有数字**:platform-team 标称 2 CPU,提一个要 3 CPU 的作业被 admit、队列状态里 `borrowed: 1`;提要 6 CPU 的被挡住 `insufficient quota`。队列标签由 SDK 按提交者的组自动打,不是用户手填 |
-| 查询审计留痕 | 🟡 | Trino event listener → Kafka **已实机跑通**(ADR-066),一条事件 2KB,含用户/客户端 IP/完整 SQL/访问的表/成功与否。落 Iceberg 的 Flink 作业(两张表:一次查询一行 + 一次表访问一行)和审计表的 OPA 保护(服务账号也读不到)**已写完但没部署**;「审计流断了」的告警还没做 |
+| 查询审计留痕 | ✅ | Trino → Kafka → Flink → Iceberg 全链路实机跑通(ADR-066)。`audit.query_events` 一次查询一行、`audit.query_table_access` 一次表访问一行,实测 3 条查询 → 5 行事件 / 4 行表访问(`select 1` 正确地不出现在表访问里)。审计表有 OPA 保护:服务账号读不到,只有 platform-team 和采元数据的 openmetadata_service 例外。**还差**「审计流断了」的告警 |
+| Schema 契约 | ✅ | Karapace(ADR-068)实机验证:加带默认值的可选字段放行、`double`→`string` 被 409 拦住(`compatibility_mode=BACKWARD`)。**Flink 作业还没接**,现在 schema 仍写死在 SQL 里 |
+| 成本可见性 | 🟡 | OpenCost(ADR-069)实机出数:29 个命名空间合计 ¥0.808/小时,flink 最贵。**没有 Grafana 面板**,现在只能调 API 看 |
 | 网络隔离 | ✅ | NetworkPolicy 覆盖核心命名空间(ADR-035) |
 | 破坏性操作防护 | ✅ | `scripts/confirm-destructive-kubectl.sh`(历史上真误删过 namespace,见 `docs/operations/incidents.md`) |
 | 计费资源门禁 | ✅ | `cloud-full-preflight.sh` + 空闲自动关机看门狗(经济模式) |

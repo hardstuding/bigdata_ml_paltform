@@ -20,7 +20,50 @@
 
 ## 症状索引
 
-### 集群 / 节点层
+### ArgoCD / GitOps 层(2026-08-23 追加)
+
+### OPA 策略改了、ConfigMap 同步了、ArgoCD 全绿,但活的策略还是老的
+
+**症状**:改了 `apps/opa/policy/trino.rego`,`opa test` 本地全过,push 之后
+ArgoCD 显示 Synced/Healthy,`kubectl -n opa get cm opa-policy -o yaml` 里也
+确实是新内容——但**权限行为一点没变**。
+
+在权限策略上这个症状特别危险:它不会报错,只会**继续按老策略放行**。
+
+**定位**:别看 ArgoCD,直接问活的 OPA 加载了什么:
+
+```bash
+kubectl -n opa port-forward svc/opa 18181:8181
+curl -s localhost:18181/v1/policies | python3 -c "import json,sys; print(len(json.load(sys.stdin)['result'][0]['raw'].splitlines()))"
+```
+
+行数对不上,就是没重载。
+
+**根因**:`opa run` **默认只在启动时加载一次策略**。2026-08-23 之前这个
+仓库的 OPA 就没有 `--watch`——也就是说,历史上所有 OPA 策略改动,只有在
+OPA Pod 恰好因为别的原因重启过之后,才真正生效过。
+
+**处置**(已经修进 `apps/opa/manifests/deployment.yaml`,这里记的是当时
+连续踩的三层):
+
+1. 加 `--watch` —— 但**盯文件路径没用**。kubelet 更新 ConfigMap 挂载用的是
+   原子替换 `..data` 符号链接,文件本身 inode 没变,盯具体文件的 inotify
+   收不到事件。实测:改完等两分多钟,`/v1/policies` 里还是老的 288 行。
+2. 改成盯目录 `--watch /policies` —— 直接 CrashLoopBackOff:
+   `rego_type_error: multiple default rules data.trino.allow found at
+   /policies/..2026_.../trino.rego:13, /policies/..data/trino.rego:13,
+   /policies/trino.rego:13`。**OPA 不会自动跳过点开头的条目**,同一份策略
+   被加载三遍。
+3. 最终解:`--watch --ignore=..* /policies`。实测 push 之后 **48 秒**活的
+   OPA 换成新策略,**Pod 没有重启**。
+
+**顺带一条值得记的好消息**:第 2 步那次 CrashLoop 没有造成任何影响——
+Deployment 的滚动更新策略让老 Pod 一直在跑,Trino 的鉴权全程正常。给
+fail-closed 的组件配好 rollout,这次真的兜住了。
+
+---
+
+## 集群 / 节点层
 
 - [CRD 太大报 "annotations too long",ServerSideApply=true 不是每次都管用](#crd-太大报-annotations-too-longserversideapplytrue-不是每次都管用)
 - [prometheus-operator 起来了但一直不创建 StatefulSet,CPU 几乎是 0](#prometheus-operator-起来了但一直不创建-statefulsetprometheus-cr-的-status-一直是空的)
@@ -38,6 +81,7 @@
 - [从 apps/definitions 挪走一个组件后,ArgoCD 里那个 Application 卡在 Missing 删不掉](#从-appsdefinitions-挪走一个组件后argocd-里那个-application-卡在-missing-删不掉)
 - [手动 `helm template | kubectl apply` 绕过 ArgoCD 之后,命名空间删不掉,卡在 Terminating](#手动-helm-template--kubectl-apply-绕过-argocd-之后命名空间删不掉卡在-terminating)
 - [ArgoCD Application 显示 Healthy,但里面唯一的 Job 其实从来没跑过](#argocd-application-显示-healthy但里面唯一的-job-其实从来没跑过)
+- [OPA 策略改了、ConfigMap 同步了、ArgoCD 全绿,但活的策略还是老的](#opa-策略改了configmap-同步了argocd-全绿但活的策略还是老的)
 - [ArgoCD 卡在 "waiting for healthy state of ..." 不动,手动改了 values 也没用](#argocd-卡在-waiting-for-healthy-state-of--不动手动改了-values-也没用)
 - [Airflow scheduler 反复长出两个并存 ReplicaSet、子 Application spec 一度没跟上 git——根因是 ArgoCD 控制面自己被 OOMKilled,不是 Airflow chart 的 bug](#airflow-scheduler-反复长出两个并存-replicaset子-application-spec-一度没跟上-git根因是-argocd-控制面自己被-oomkilled不是-airflow-chart-的-bug)
 - [一个 Application 的 SyncError 卡住不动,`operationState.phase=Terminating` 这条标准处置有时不够,还要重启 argocd-application-controller](#一个-application-的-syncerror-卡住不动operationstatephaseterminating-这条标准处置有时不够还要重启-argocd-application-controller)
