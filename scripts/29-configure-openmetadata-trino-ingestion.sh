@@ -114,7 +114,8 @@ def om(method, path, body=None):
 #    verify: "False" 是因为 Trino 走的是 cert-manager 自签证书(见
 #    apps/trino-tls/,docs/decisions/016),table-registration-app 自己连
 #    Trino 时(app.py 的 trino.dbapi.connect)也是同样传 verify=False,这里
-#    保持一致——具体字段名 "verify" 是从 OpenMetadata 1.13.3 的
+#    保持一致。**注意类型必须是布尔 false 不是字符串**(2026-08-23
+#    实测踩过,见下面那段注释)——具体字段名 "verify" 是从 OpenMetadata 1.13.3 的
 #    trinoConnection.json schema 源码核实的,不是猜的,但这条连接配置本身
 #    这次没有在真实集群里跑通过一次扫描,离线状态下没法确认
 #    OpenMetadata 内部真的会拿这个字段去跳过证书校验。
@@ -127,7 +128,15 @@ svc = om("PUT", "/api/v1/services/databaseServices", {
         "hostPort": "trino.trino.svc.cluster.local:8443",
         "username": "openmetadata_service",
         "authType": {"password": TRINO_PW},
-        "verify": "False",
+        # **必须是 JSON 布尔 false,不能是字符串 "False"。**
+        # 2026-08-23 第一次真实跑就栽在这:传字符串的话 OpenMetadata 把它
+        # 透传给 Python requests 的 verify 参数,requests 会把非空字符串
+        # 当成 **CA 证书文件路径**,于是报
+        #   CheckAccess - Could not find a suitable TLS CA certificate
+        #   bundle, invalid path: False
+        # 报错里那个 "invalid path: False" 就是它在找一个名叫 False 的文件。
+        # 只有布尔 false 才是"跳过证书校验"的意思。
+        "verify": False,
     }},
 })
 print(f"database service ready: {svc['fullyQualifiedName']} (id={svc['id']})")
