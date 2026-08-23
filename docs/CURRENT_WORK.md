@@ -22,47 +22,44 @@ zhenghe 2026-08-23 提了三个问题(门户/自建工具能不能优化、按�
 [`docs/production-readiness-gaps.md`](production-readiness-gaps.md)。
 zhenghe 回复"这 6 个挺重要的,都要做"。
 
-### 进度
+### 进度(2026-08-23 下午实机验证之后)
 
 | # | 缺口 | 状态 |
 |---|---|---|
 | 1 | 数据质量断言 | ✅ 实机验证([ADR-065](decisions/065-data-quality-on-openmetadata.md)) |
-| 2 | 数据新鲜度 SLO | 🟡 检测已落地(复用数据质量,[ADR-070](decisions/070-data-freshness-slo.md));**告警出口没做,卡在没有真实通知凭据** |
-| 3 | 查询审计 | 🟡 事件已在 Kafka 里流(**已实机验证**);落 Iceberg 的 Flink 作业 + 审计表的 OPA 保护已写完**未部署**([ADR-066](decisions/066-trino-query-audit.md));断流告警没做 |
-| 4 | 成本归属(OpenCost) | 🟡 配置完成([ADR-069](decisions/069-cost-attribution.md));**未部署;prod 单价要 zhenghe 提供** |
-| 5 | Schema Registry | 🟡 manifest 完成([ADR-068](decisions/068-schema-registry.md));**未部署;Flink 作业还没接** |
-| 6 | 门户改工作台 | 🟡 代码+52 个测试完成、镜像已构建([ADR-067](decisions/067-portal-as-workbench.md));**未上集群** |
+| 2 | 数据新鲜度 SLO | ✅ 检测实机跑通([ADR-070](decisions/070-data-freshness-slo.md),`insertedRows=1640`);**告警出口没做,卡在没有真实通知凭据** |
+| 3 | 查询审计 | ✅ Trino→Kafka→Flink→Iceberg 全链路 + 审计表 OPA 保护,实机验证([ADR-066](decisions/066-trino-query-audit.md));**「审计流断了」的告警没做** |
+| 4 | 成本归属 | 🟡 OpenCost 实机出数(29 个命名空间 ¥0.808/小时,[ADR-069](decisions/069-cost-attribution.md));**没有 Grafana 面板** |
+| 5 | Schema Registry | ✅ Karapace 实机验证兼容性拦截([ADR-068](decisions/068-schema-registry.md));**Flink 作业还没接,schema 仍写死在 SQL 里** |
+| 6 | 门户改工作台 | ✅ 实机验证([ADR-067](decisions/067-portal-as-workbench.md)):0.82s 出页面、配额表读活数据、作业按人过滤正确 |
 
-**下次开机要一次性验证的清单**(全部已经准备到"开机就能立刻跑"):
+### 这一轮最重要的发现和六条缺口无关
 
-1. 门户新版本(digest 已更新,同步即生效)—— 看"我的作业/计算配额"两块
-2. Karapace 起不起得来、`_schemas` topic 建没建出来
-3. OpenCost 能不能查到 Prometheus(**它不会 CrashLoop,成本全是 0 才是症状**)
-4. `scripts/34` 里新鲜度断言的参数名对不对得上(脚本自己会打印真实参数名)
-5. `scripts/23` 上次中断在 18/77,新加的 kueue/karapace/opencost 镜像要补拉
-6. flink-audit-sink 作业能不能起来 —— 里面的嵌套 ROW 取值、
-   `CROSS JOIN UNNEST`、`METADATA FROM 'timestamp'` 都是照文档写的,**没跑过**
-7. 审计表的 OPA 保护真的生效(用 superset_service 查 `iceberg.audit.query_events`
-   应该被拒),`opa test` 过了不等于活策略生效
+**OPA 的策略改动历史上从来没有自动生效过。** `opa run` 默认只在启动时
+加载一次策略,这个仓库一直没配 `--watch`——所有历史 OPA 策略改动,只有在
+Pod 恰好因别的原因重启过之后才真正生效。在权限策略上这个失败模式特别毒:
+不报错,只是继续按老策略放行,而 ArgoCD 一路 Synced/Healthy。
 
-同一轮里另外做完的:
-- **按组分配计算配额 + 空闲互借**(zhenghe 问的第 2 个问题)——Kueue,
-  [ADR-064](decisions/064-role-based-resource-quota.md),实机验证:
-  platform-team 标称 2 CPU,提要 3 CPU 的作业被 admit 且 `borrowed: 1`;
-  提要 6 CPU 的被挡住。11 个 webhook 全部限定在两个命名空间内。
-- **使用手册**(第 3 个问题)116 → 201 行,补齐大数据开发/算法工程师
-  两个原本空白的角色;新增 [`docs/QUICKSTART.md`](QUICKSTART.md) 带人
-  半小时跑通一条完整链路。
+已修(`--watch --ignore=..* /policies`,实测 push 后 48 秒生效、Pod 不
+重启),连踩的三层记在
+[`troubleshooting.md`](operations/troubleshooting.md#opa-策略改了configmap-同步了argocd-全绿但活的策略还是老的)。
 
-### 下一步
+### 下一步(都不需要立刻开机)
 
-按上表往下做。**门户(第 6 条)不要提前做**——它要显示的"你这个组还剩多少
-配额""这张表质量如何"依赖前面几条,先做只会做出一个更好看的链接目录。
+1. **告警出口**——质量断言失败、新鲜度失败、审计流断了,三个来源要接
+   **同一个**出口。真实阻塞是没有通知渠道凭据。
+2. **成本 Grafana 面板**——指标抓上去了不等于有人看得到。
+3. **Flink 作业接 Schema Registry**——装上 registry 只是有了放 schema 的
+   地方,真正消掉"上游改字段下游炸"要把作业改成从 registry 拿 schema,
+   **并且真做一次"改上游字段看下游是否被拦住"的验证**。
+4. **本机 colima 切 x86_64**(见 [`cpu-architecture.md`](operations/cpu-architecture.md))
+   ——CI 已经只建 amd64,切换之前本地拉不到能跑的新镜像。
+5. Trino 列级/行级脱敏的真实效果验证(一直挂着的老账,roles.md 仍是 🟡)。
 
 ### 云主机状态
 
-已停机(经济模式)。这一轮的 Kueue / 数据质量 / 查询审计三件事都是在
-2026-08-23 06:20–07:20 这一次开机窗口里验证完的。
+已停机。2026-08-23 共开了两次机:06:20–07:20(Kueue/数据质量/审计第一段)
+和 08:15–09:00(六条缺口全量实机验证)。
 
 ---
 
