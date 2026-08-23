@@ -50,6 +50,21 @@ spec:
         # 不保证 values 里手写的其它命名空间存在)。
         watchNamespaces:
           - flink
+
+        # 作业失败后自动重启。2026-08-23 真实踩到:云主机重启时 Flink 作业
+        # 在 Hive Metastore 还没就绪的窗口里提交,CREATE DATABASE 失败——
+        # 那是**作业提交阶段**的失败,Flink 自己的 restart-strategy 管不着
+        # (它只管运行期 task 失败),整个 application 进 FAILED 且**不会
+        # 自己恢复**。结果是集群重启一次,这条流式链路就永久停了,没人盯着
+        # 就一直停着。
+        #
+        # 作业脚本里已经加了"等 HMS 就绪再建库"的重试(治本),这条是兜底:
+        # 万一还有别的启动期竞态,让 operator 把它拉起来,而不是躺在 FAILED。
+        defaultConfiguration:
+          create: true
+          append: true
+          flink-conf.yaml: |
+            kubernetes.operator.job.restart.failed: true
         resources:
           # 规格分档,见 environments/resource-profiles.yaml
           requests:

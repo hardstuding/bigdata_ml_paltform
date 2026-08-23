@@ -95,7 +95,28 @@ def main() -> None:
             'warehouse' = '{ICEBERG_WAREHOUSE}'
         )
     """)
-    t_env.execute_sql("CREATE DATABASE IF NOT EXISTS iceberg_catalog.demo")
+    # **先等 Hive Metastore 真的可用再建库。**
+    #
+    # 2026-08-23 真实踩到:云主机重启后,Flink 作业在 HMS 还没起来的时候就
+    # 执行到这一句,报
+    #   TableException: Could not execute CREATE DATABASE:
+    #   (catalogName: [iceberg_catalog], databaseName: [demo])
+    # 而这是**作业提交阶段**的失败(不是运行期 task 失败),Flink 的
+    # restart-strategy 管不着,整个 application 直接 FAILED,而且不会自己
+    # 恢复——集群重启一次,这条流式链路就永久停了,没人看就一直停着。
+    #
+    # 有上限地重试:HMS 起来通常是分钟级,10 分钟还不行说明是真出问题了,
+    # 该让作业失败并暴露出来,而不是无限等下去装作还在初始化。
+    import time as _t
+    for _attempt in range(60):
+        try:
+            t_env.execute_sql("CREATE DATABASE IF NOT EXISTS iceberg_catalog.demo")
+            break
+        except Exception as _e:            # noqa: BLE001 - 这里就是要兜住所有连不上的情况
+            print(f"[{_attempt + 1}/60] Hive Metastore 还连不上,10 秒后重试: {_e}", flush=True)
+            _t.sleep(10)
+    else:
+        raise RuntimeError("等了 10 分钟 Hive Metastore 仍然不可用,放弃")
 
     t_env.execute_sql("""
         CREATE TABLE IF NOT EXISTS iceberg_catalog.demo.device_events_stream (
