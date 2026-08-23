@@ -121,13 +121,27 @@ def helm_template_images(app: dict) -> set[str]:
 
 
 def raw_manifest_images(app: dict) -> set[str]:
-    """没有 chart 字段的 Application,是纯 git 目录里的裸 manifest,直接读文件找 image:。"""
+    """没有 chart 字段的 Application:可能是裸 manifest 目录,也可能是
+    **vendor 进仓库的 chart**(apps/kueue-chart、platform/loki-chart 这种)。
+
+    vendor 的 chart 必须走 helm template,不能只 grep `image:`——chart 模板里
+    写的是 `{{ .Values.xxx.image.repository }}`,grep 一个都扫不到。后果不是
+    "少列几行",是**这些镜像不会被 scripts/23 预拉,一个只能走镜像站的环境
+    里对应组件直接 ImagePullBackOff 装不起来**,而且现象出现在部署时、离
+    这个脚本很远。2026-08-23 装 Kueue 时暴露:kueue 的镜像不在清单里,
+    ImagePullBackOff;顺带发现 loki/alloy 两个 vendor 的 chart 一直有同样的
+    问题,只是它们的镜像恰好被别处的文本扫描碰巧扫到了一部分。
+    """
     path = app["spec"]["source"].get("path")
     if not path:
         return set()
     target_dir = REPO_ROOT / path
     if not target_dir.is_dir():
         return set()
+
+    if (target_dir / "Chart.yaml").is_file():
+        return local_chart_images(app, target_dir)
+
     images = set()
     for f in target_dir.rglob("*.yaml"):
         for line in f.read_text().splitlines():
@@ -135,6 +149,36 @@ def raw_manifest_images(app: dict) -> set[str]:
             if m:
                 images.add(m.group(1))
     return images
+
+
+def local_chart_images(app: dict, chart_dir: Path) -> set[str]:
+    """对 vendor 进仓库的 chart 目录跑 helm template,带上 Application 里的
+    valuesObject(副本数/组件开关会影响渲染出哪些镜像)。"""
+    values_obj = app["spec"]["source"].get("helm", {}).get("valuesObject")
+    values_file = None
+    extra_args = []
+    if values_obj:
+        fd = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+        yaml.safe_dump(values_obj, fd)
+        fd.close()
+        values_file = fd.name
+        extra_args = ["-f", values_file]
+    try:
+        result = subprocess.run(
+            ["helm", "template", "scan", str(chart_dir)] + extra_args,
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            print(
+                f"  !! helm template 失败(本地 chart {chart_dir.relative_to(REPO_ROOT)}):"
+                f" {result.stderr.strip().splitlines()[-1] if result.stderr else '未知错误'}",
+                file=sys.stderr,
+            )
+            return set()
+        return {m.group(1) for line in result.stdout.splitlines() if (m := IMAGE_RE.match(line))}
+    finally:
+        if values_file:
+            Path(values_file).unlink(missing_ok=True)
 
 
 def scan_dir(d: Path) -> set[str]:

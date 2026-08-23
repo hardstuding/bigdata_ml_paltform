@@ -297,6 +297,10 @@ step "配 OpenMetadata 的 Trino 元数据自动采集(不配的话数据目录�
 # (scripts/27 注释里记过)。
 if kubectl -n table-registration-app get pod -l app=table-registration-app >/dev/null 2>&1; then
   run_optional "scripts/29-configure-openmetadata-trino-ingestion.sh" ./scripts/29-configure-openmetadata-trino-ingestion.sh
+  # 数据质量断言(ADR-065)。**必须排在 29 后面**:断言挂在表实体上,目录里
+  # 还没有 trino.iceberg.demo.orders 的话,只会建出一堆指向不存在实体的
+  # 孤儿对象——脚本自己会检查并报错,但顺序对了就不该走到那一步。
+  run_optional "scripts/34-configure-openmetadata-data-quality.sh" ./scripts/34-configure-openmetadata-data-quality.sh
 else
   log "--> table-registration-app 还没起来,跳过"
 fi
