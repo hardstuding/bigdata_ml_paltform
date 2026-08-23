@@ -205,7 +205,8 @@ accuracy 只可能是 0 或 1,拿它当阈值是自欺欺人;改成校验"模型
 | 审计留痕 | 🟡 | Keycloak 事件进 Loki(ADR-024);审批系统自带审计页。但**没有汇总视图** |
 | 组织架构同步 | ✅ | iam-sync 从 HR 表同步组织/角色进 Keycloak(ADR-028/031),职级数据目前是虚拟占位 |
 | 数据资产盘点 | ✅ | **2026-08-23 真实端到端验证通过**:`scripts/29` 配好 Trino DatabaseService + 每 6 小时的采集任务,`scripts/30` 输出 `OPENMETADATA_TRINO_INGESTION_OK`。判据是**直接查 OpenMetadata API 确认 `trino.iceberg.demo.orders` 在目录里、六个字段和 Trino 真实表结构一致**——这张表从没人手动登记过,是采集自动发现的。实测目录里已有 100+ 张表(system/tpcds/tpch/iceberg 各 catalog)。过程中修了 4 个只有真跑才暴露的前置,清单见 ADR |
-| 敏感字段行列级策略 | 🟡 | 2026-08-23 实现完成(ADR-063):列级按列名模式脱敏(phone/mobile/email 部分遮蔽需 security_level≥2,id_card/身份证 全遮蔽需 ≥3)+ 行级按部门过滤,权限数据复用 `platform/iam/` 已有的 grant 和 employees.csv,未知部门 fail-closed。`opa test` **28/28 通过**并接进 CI。**但云主机停机,没在真实集群验证过**——Trino 会不会真的调这两个新端点、返回的 SQL 表达式是否有效,都还是未知,所以这一格是 🟡 不是 ✅ |
+| 敏感字段列级脱敏 | ✅ | ADR-063,2026-08-23 **在真集群上用真实 SQL 验过**(`scripts/36-verify-trino-masking.sh`,可重复跑):1 级 grant 查到的是 `138****5678` / `al***@example.com` / `***MASKED***`;**2 级 grant 上 phone/email 恢复明文而 id_card 仍然打码**——验的是分级真的在起作用,不是「一律打码」也能过的那种测法。Trino 侧实测每条查询会调 18 次 `columnMask` + 2 次 `rowFilters` |
+| 敏感字段行级过滤 | 🟡 | 同一套策略里实现了(按 `employees.csv` 的部门过滤,未知部门 fail-closed),`opa test` 覆盖到,**Trino 确实在调这个端点**(上面那 2 次),但**还没有构造过跨部门数据来看实际过滤效果**——列级那半已经验完,行级这半还差一个 demo 场景 |
 | **管理驾驶舱** | ❌ | **从未开始**(E 线) |
 | 成本视图 | ❌ | 未开始 |
 
