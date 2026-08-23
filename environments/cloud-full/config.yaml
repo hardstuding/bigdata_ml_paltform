@@ -80,6 +80,7 @@ enabled_components:
   - postgres.yaml
   - resource-quotas.yaml
   - kueue.yaml
+  - opencost.yaml
   - kueue-queues.yaml
   - seatunnel.yaml
   - spark-history-server-oauth2-proxy.yaml

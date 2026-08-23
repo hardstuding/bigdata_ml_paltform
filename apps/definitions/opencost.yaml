@@ -1,0 +1,95 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/opencost.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/opencost.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
+# OpenCost —— 按命名空间/标签算成本,见 docs/decisions/069-cost-attribution.md。
+#
+# **它和 Kueue 是一体两面**:[ADR-064](../../docs/decisions/064-role-based-resource-quota.md)
+# 解决"能用多少"(事前配额),这里解决"实际用了多少、值不值"(事后账单)。
+# 只有配额没有账单,配额就变成一场纯粹的办公室政治——每个组都说自己不够
+# 用,没有数据支撑谁该多分。
+#
+# **customPricing 必须开,而且价格必须自己填。** 默认那套单价是按公有云
+# 一般水平写的(CPU $1.25/核/小时),放在阿里云 ECS 或者自有机房上算出来
+# 的数字**完全没有意义**——比不算更糟,因为它看起来是个数。这正是这个
+# 项目最忌讳的"看起来成功了"。单价按环境分档,理由和数字来源写在
+# environments/resource-profiles.yaml 里。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opencost
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://opencost.github.io/opencost-helm-chart
+    chart: opencost
+    targetRevision: 2.5.29
+    helm:
+      valuesObject:
+        opencost:
+          prometheus:
+            internal:
+              enabled: true
+              # kube-prometheus-stack 的 Prometheus Service。这个名字是
+              # "<Helm release 名>-prometheus",而 ArgoCD 默认用 Application
+              # 名做 release 名,所以是 kube-prometheus-stack-prometheus。
+              # **这是这个组件第一次部署时最可能出错的一处**,错了的表现是
+              # opencost 起得来但日志里一直报查不到 Prometheus、所有成本
+              # 都是 0——不会 CrashLoop,所以要主动看日志确认。
+              serviceName: kube-prometheus-stack-prometheus
+              namespaceName: monitoring
+              port: 9090
+              scheme: http
+          customPricing:
+            enabled: true
+            createConfigmap: true
+            provider: custom
+            costModel:
+              description: "按环境实际计价方式配置,见 resource-profiles.yaml"
+              CPU: 0.168
+              RAM: 0.021
+              storage: 0.0005
+              # GPU 这一档现在没有 GPU 节点,填 0 而不是留默认值——
+              # 留一个假的 GPU 单价,等哪天真加了 GPU 节点,算出来的账
+              # 会静默偏掉。
+              GPU: 0
+              spotCPU: 0.168
+              spotRAM: 0.021
+              zoneNetworkEgress: 0
+              regionNetworkEgress: 0
+              internetNetworkEgress: 0
+          exporter:
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "256Mi"
+              limits:
+                memory: "512Mi"
+          # UI 不开:成本数据的正确去处是已有的 Grafana(平台已经有
+          # kube-prometheus-stack),再开一个自带 UI 就是第二个要配 SSO、
+          # 要维护 Ingress 的入口。OpenCost 本身就暴露 Prometheus 指标。
+          ui:
+            enabled: false
+          # 指标要被 Prometheus 抓到,不然上面那套计价配了也没人看得见。
+          # 注意这个键在 chart 里是 opencost.metrics.serviceMonitor,不是
+          # 顶层的 serviceMonitor(第一版写错了位置,helm template 不会
+          # 报错——多余的 values 键被静默忽略,ServiceMonitor 就是不生成)。
+          metrics:
+            serviceMonitor:
+              enabled: true
+              namespace: monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: opencost
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
