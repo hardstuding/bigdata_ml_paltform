@@ -85,23 +85,6 @@ jobs:
             image: spark-iceberg
           - context: apps/flink-iceberg-image
             image: flink-iceberg
-            # **只建 amd64,不是偷懒。** apache-flink 1.20.5 在 PyPI 上
-            # 没有 linux/aarch64 的 wheel(只有 x86_64 的 manylinux,和
-            # macOS 的 arm64——容器里用不上),arm64 那条腿只能从 sdist
-            # 现编译,在 QEMU 模拟下必然失败。2026-08-22 第一次构建就是
-            # 这样挂的。
-            #
-            # 为什么可以只建 amd64:唯一的 arm64 环境是 local-lite
-            # (colima/Mac M2),而 Flink 相关组件**没有出现在
-            # environments/local-lite/config.yaml 的 enabled_components
-            # 里**(那一档只有 17 个轻量组件,连 Kafka 都没启用)。
-            #
-            # ⚠️ 如果以后要在 local-lite 上启用 Flink,不能直接加进
-            # enabled_components 了事——这个仓库踩过"amd64 镜像在 arm64
-            # 节点上靠 QEMU 跑、触发 client-go 并发 bug"的坑(见 iam-sync
-            # 那次)。届时要么等上游出 aarch64 wheel,要么接受在 arm64 上
-            # 用原生 runner 构建。
-            platforms: linux/amd64
           - context: apps/kafka-producer-image
             image: kafka-device-events-producer
     steps:
@@ -120,13 +103,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 默认建 amd64+arm64;个别镜像上游没有 arm64 依赖的,在 matrix 里
-      # 用 `platforms:` 单独覆盖(见 flink-iceberg 那条的说明)。
+      # **只建 amd64。** 2026-08-23 起三档环境统一 x86_64(生产是已有的
+      # x86_64 服务器,云主机规格购买时定死,本机 colima 也重建成 x86_64
+      # + Rosetta),见 docs/operations/cpu-architecture.md。
+      #
+      # 之前建 arm64 的唯一理由是本机开发环境是 Mac M2;统一之后这条腿
+      # 是纯浪费——构建时间翻倍,而且 apps/flink-iceberg-image 还得为它
+      # 单独写一条"只建 amd64"的特例(apache-flink 没有 aarch64 wheel,
+      # arm64 那条腿在 QEMU 下必然构建失败)。那条特例这次一起删掉了。
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
-          platforms: ${{ matrix.platforms || 'linux/amd64,linux/arm64' }}
+          platforms: linux/amd64
           push: true
           tags: |
             ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ github.sha }}

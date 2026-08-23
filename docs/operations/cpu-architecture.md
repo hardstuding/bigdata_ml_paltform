@@ -28,9 +28,9 @@
 
 ## 怎么把本机 colima 切成 x86_64
 
-**这一步是破坏性的**:重建 colima 虚拟机 = 现有的 k3s 集群和里面所有数据
-都没了。local-lite 是可以从零重建的环境(`./scripts/bootstrap-all.sh`),
-但要挑一个手上没有半截活的时候做。
+这一步会重建 colima 虚拟机,现有 k3s 集群和里面的数据都没了。**zhenghe
+2026-08-23 明确说过这没关系**("未来 mac 上的基本都要删了"),local-lite
+本来也是可以从零重建的环境(`./scripts/bootstrap-all.sh`)。
 
 ```bash
 colima delete            # 会问一次确认
@@ -56,12 +56,11 @@ colima start --arch x86_64 --vm-type vz --vz-rosetta   --cpu 4 --memory 6 --disk
   python3 scripts/check-image-arch.py --arch amd64
   ```
 
-- **CI 现在仍然同时构建 amd64+arm64。** 等本机 colima 确认切完之后,可以
-  降成只建 amd64:构建时间减半,而且 `apps/flink-iceberg-image` 那条
-  "只建 amd64"的特例注释可以直接删掉(那个特例存在的唯一原因就是
-  apache-flink 没有 aarch64 wheel)。**没有现在就改**,是因为在本机切换
-  完成之前把 arm64 那条腿砍掉,会让本地立刻拉不到能跑的镜像。这条记在
-  `docs/BACKLOG.md` 里,不是忘了。
+- **CI 已经降成只建 amd64**(2026-08-23)。构建时间减半,而且
+  `apps/flink-iceberg-image` 那条"只建 amd64"的特例整段删掉了——那个特例
+  存在的唯一原因就是 apache-flink 没有 aarch64 wheel。
+  **代价**:在本机 colima 切成 x86_64 之前,新构建的镜像在现在这台
+  arm64 colima 上拉不到能跑的版本。这是有意的顺序,不是疏忽。
 
 ## 附:切换前的实测数据(2026-08-23)
 
