@@ -24,11 +24,12 @@ Trino 真实结构一致——这张表从没人手动登记过。目录里实�
 1.5GB 采集镜像没预缓存、`verify` 字段是证书路径不是开关、
 `openmetadata_service` 没进 OPA 白名单。
 
-**2. Flink 链路暴露了"跑通一次 ≠ 能用"**。08-22 夜验证通过,但云主机重启
-后作业变 FAILED 且**不会自己恢复**——它在 Hive Metastore 就绪前提交,
-`CREATE DATABASE` 失败,而那是**作业提交阶段**的失败,Flink 的
-restart-strategy 管不着。已修(脚本里等依赖 + operator 开自动重启),
-**复验还在进行中**。
+**2. Flink 链路暴露了"跑通一次 ≠ 能用",已修并复验通过**。08-22 夜验证
+通过,但云主机重启后作业变 FAILED 且**不会自己恢复**——它在 Hive
+Metastore 就绪前提交,`CREATE DATABASE` 失败,而那是**作业提交阶段**的
+失败,Flink 的 restart-strategy 管不着。修法:作业脚本里等依赖就绪(有
+上限的重试)+ operator 开 `job.restart.failed`。复验:
+`FLINK_STREAMING_DEMO_OK: 明细表行数从 120 增加到 440,聚合表 160 行`。
 
 **3. Trino 列级/行级策略**:Trino 已加载 4 条 `opa.policy`(URI 生效了),
 但**还没有真正验证过脱敏/过滤的实际效果**,roles.md 那一格保持 🟡。
