@@ -45,7 +45,16 @@ data:
     #     报 PERMISSION_DENIED,和账号密码本身对不对是两回事(先排查完
     #     Trino 的 password.db 是 subPath 挂载、账号新建后要重启 Trino
     #     pod 才能生效那个坑,才轮到这条)。
-    service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service", "platform_sdk_demo_service"}
+    #   - openmetadata_service:OpenMetadata 的 Trino 元数据自动采集用
+    #     (scripts/29-configure-openmetadata-trino-ingestion.sh)。它要读
+    #     `system.information_schema.schemata` / `.tables` / `.columns` 才能
+    #     发现有哪些表——**这是元数据发现的本质,不是在查业务数据**。
+    #     2026-08-23 真实踩到:建了 Trino 账号(scripts/00)但没加进这个集合,
+    #     采集 Job 的 GetSchemas 步骤报
+    #       PERMISSION_DENIED: Cannot select from columns [schema_name] in
+    #       table or view system.information_schema.schemata
+    #     "建账号"和"给授权"是两处代码、两个地方改,漏一个就是这个结果。
+    service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service", "platform_sdk_demo_service", "openmetadata_service"}
 
     is_service_account if {
     	input.context.identity.user in service_accounts

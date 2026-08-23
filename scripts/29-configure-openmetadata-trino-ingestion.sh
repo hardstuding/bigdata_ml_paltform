@@ -128,15 +128,23 @@ svc = om("PUT", "/api/v1/services/databaseServices", {
         "hostPort": "trino.trino.svc.cluster.local:8443",
         "username": "openmetadata_service",
         "authType": {"password": TRINO_PW},
-        # **必须是 JSON 布尔 false,不能是字符串 "False"。**
-        # 2026-08-23 第一次真实跑就栽在这:传字符串的话 OpenMetadata 把它
-        # 透传给 Python requests 的 verify 参数,requests 会把非空字符串
-        # 当成 **CA 证书文件路径**,于是报
-        #   CheckAccess - Could not find a suitable TLS CA certificate
-        #   bundle, invalid path: False
-        # 报错里那个 "invalid path: False" 就是它在找一个名叫 False 的文件。
-        # 只有布尔 false 才是"跳过证书校验"的意思。
-        "verify": False,
+        # **不要用顶层的 `verify` 字段。** 2026-08-23 实测两次:
+        #   "verify": "False"  → CheckAccess 报 `invalid path: False`
+        #   "verify": False    → 同样报 `invalid path: false`
+        # 说明 OpenMetadata 这个字段的语义是 **CA 证书文件的路径**,不是
+        # "要不要校验"的开关——不管传什么它都当路径去找文件。
+        #
+        # 正确做法是走 connectionArguments:这是个透传给底层 SQLAlchemy /
+        # trino 客户端的通用 map,JSON 的 false 反序列化成 Python False,
+        # 正好就是 trino 客户端 `verify` 参数认的那个布尔。这条和这个平台
+        # 里已经跑通的那份 Trino 连接是同一个用法——
+        # apps/table-registration-app/src/app.py 里就是
+        # `trino.dbapi.connect(..., http_scheme="https", verify=False)`。
+        #
+        # Trino 走 https 是因为它的 OAuth2 认证硬性要求自己的 https 监听器
+        # 打开(见 apps/trino-tls/),证书是 cert-manager 自签的,集群内这
+        # 一跳不需要被信任,跳过校验是合理的。
+        "connectionArguments": {"verify": False},
     }},
 })
 print(f"database service ready: {svc['fullyQualifiedName']} (id={svc['id']})")
