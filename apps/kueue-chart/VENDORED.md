@@ -20,7 +20,7 @@
 升级:
 
 ```bash
-./scripts/28-vendor-helm-chart.sh oci://registry.k8s.io/kueue/charts kueue <新版本> apps/kueue-chart --exclude-crds
+./scripts/28-vendor-helm-chart.sh oci://registry.k8s.io/kueue/charts kueue <新版本> apps/kueue-chart --exclude-crds kueue-system
 ```
 
 为什么要 vendor 而不是让 ArgoCD 直接拉:见

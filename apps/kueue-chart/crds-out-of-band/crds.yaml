@@ -382,7 +382,7 @@ spec:
       clientConfig:
         service:
           name: kueue-webhook-service
-          namespace: default
+          namespace: kueue-system
           path: /convert
       conversionReviewVersions:
       - v1
@@ -2406,7 +2406,7 @@ spec:
       clientConfig:
         service:
           name: kueue-webhook-service
-          namespace: default
+          namespace: kueue-system
           path: /convert
       conversionReviewVersions:
       - v1
@@ -3201,7 +3201,7 @@ spec:
       clientConfig:
         service:
           name: kueue-webhook-service
-          namespace: default
+          namespace: kueue-system
           path: /convert
       conversionReviewVersions:
       - v1
@@ -4071,7 +4071,7 @@ spec:
       clientConfig:
         service:
           name: kueue-webhook-service
-          namespace: default
+          namespace: kueue-system
           path: /convert
       conversionReviewVersions:
       - v1
@@ -5895,7 +5895,7 @@ spec:
       clientConfig:
         service:
           name: kueue-webhook-service
-          namespace: default
+          namespace: kueue-system
           path: /convert
       conversionReviewVersions:
       - v1

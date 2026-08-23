@@ -1,7 +1,7 @@
 # ADR-064:按角色/组分配计算资源,支持空闲时互相借用(Kueue)
 
 日期:2026-08-23
-状态:设计已定,**尚未实现**
+状态:**已实机验证**(cloud-full,2026-08-23)
 
 ## 背景:现在这套和用户要的不是一回事
 
@@ -82,16 +82,48 @@ Trino coordinator、Superset 这类常驻服务不进队列——让一个 BI �
 的多组仲裁。**不要在 local-lite 上按生产比例配**,那样只会让所有作业都
 排队排死。
 
+## 实机验证证据(cloud-full,2026-08-23)
+
+三个队列(platform-team / data-analysts / algorithm-team)在同一个 cohort
+`platform` 里,配额按 `resource-profiles.yaml` 的 cloud-full 档:各自
+2/2/4 CPU 标称,borrowingLimit 等于自己的标称值。
+
+| 验的是什么 | 做法 | 结果 |
+|---|---|---|
+| **共享集群安全性** | 查所有 kueue 的 MutatingWebhookConfiguration | 11 个 webhook(含 `mpod.kb.io`)的 namespaceSelector 全部是 `In [argo-workflows, spark-operator]`——**Codex 的命名空间和其它一切都碰不到**,这是选 Kueue 的核心理由,现在有证据了 |
+| **配额真的挡得住** | 往 platform-team 提一个要 6 CPU 的 Job(上限 2+2=4) | `QuotaReserved=False`,`insufficient quota for cpu`,Job 一直 Suspended。不是"先跑起来再说" |
+| **正常作业不受影响** | 提一个 500m 的 Job | 立刻 `Admitted=True`,跑完 |
+| **空闲时能借别人的**(用户真正要的那条) | 往 platform-team 提一个要 3 CPU 的 Job(自己只有 2) | `Admitted=True`,且 ClusterQueue 状态里明确写着 `"borrowed": "1"`, `"total": "3"` ——2 个用自己的,1 个借的 |
+
+最后这条就是 CDH/YARN 里"队列空闲时超用到 max capacity"在 Kubernetes 上的
+等价物,**有数字为证,不是"配置写上去了"**。
+
+## 部署时踩到的坑(都在正式部署路径上修掉了)
+
+1. `oci://registry.k8s.io` 在境内云主机上 `helm pull` 3 分钟超时,ArgoCD
+   永远 ComparisonError。→ chart vendor 进仓库(第三次用这条路,ADR-061)。
+2. `workloads` CRD 单文件 1.4MB,超过 K8s 对 annotation 的 262144 字节硬
+   限制,**`ServerSideApply=true` 解决不了**(实测,和 CNPG 那次记录一致)。
+   → 把"摘 CRD"固化进 `scripts/28-vendor-helm-chart.sh` 的 `--exclude-crds`,
+   不再像前三次那样每个组件写一个一次性脚本。
+3. 配了 sparkapplication 集成但没开 `SparkApplicationIntegration` feature
+   gate,**controller 直接启动失败**,不是降级忽略。
+4. 渲染 CRD 时没传 `--namespace`,conversion webhook 指向了
+   `kueue-webhook-service.default.svc`。现象极具欺骗性:**CRD 装得上、
+   controller Running、一切看着正常,但任何队列对象都建不出来**。所以
+   `--exclude-crds` 现在强制要求显式传命名空间,不给默认值。
+
 ## 后果与还没解决的问题
 
 - **Airflow 拉起的任务 Pod 怎么进队列**:Airflow 的 KubernetesExecutor 直接
   建 Pod,不是 Job,Kueue 对裸 Pod 的支持需要单独开
   (`pod` integration + 命名空间选择器),这一块要实测。
-- **"某个人属于哪个组"怎么传到作业上**:作业要打
-  `kueue.x-k8s.io/queue-name` 标签才受管。谁提交的作业该打哪个队列的标签,
-  需要在 `platform_sdk.submit_job()` 这一层根据提交者的组自动填,而不是
-  让人手写——手写就一定会有人填错队列去占别人的配额。这条是这个设计里
-  **最容易被做成摆设**的地方。
+- ~~**"某个人属于哪个组"怎么传到作业上**~~ —— 已做:JupyterHub 加了
+  `pre_spawn_hook` 把 Keycloak 的组注入 `PLATFORM_GROUPS`,
+  `config.queue_name()` 据此推断队列,`submit_job()` 自动把标签打在
+  **Pod** 上(不是 Workflow 上,Argo 不往下传)。四个单元测试盯着这个
+  失效模式。推断不出组时不打标签也不报错——本机 IDE 和 Airflow 系统身份
+  没有"提交人的组"这个概念,宁可不受配额管,也不能让作业提交失败。
 - **借用行为要能看见**:借了多少、被抢占了几次,如果没有看板,用户只会
   感觉"我的任务有时候慢有时候快"。Kueue 有 Prometheus 指标,要接进现有的
   Grafana(平台已经有 kube-prometheus-stack)。

@@ -25,7 +25,7 @@ echo "=== install-kueue-crds $(date -u +%FT%TZ) ===" >> "$LOG_FILE"
 CRD_FILE="apps/kueue-chart/crds-out-of-band/crds.yaml"
 [ -f "$CRD_FILE" ] || {
   echo "找不到 $CRD_FILE ——先跑:" >&2
-  echo "  ./scripts/28-vendor-helm-chart.sh oci://registry.k8s.io/kueue/charts kueue <版本> apps/kueue-chart --exclude-crds" >&2
+  echo "  ./scripts/28-vendor-helm-chart.sh oci://registry.k8s.io/kueue/charts kueue <版本> apps/kueue-chart --exclude-crds kueue-system" >&2
   exit 1
 }
 

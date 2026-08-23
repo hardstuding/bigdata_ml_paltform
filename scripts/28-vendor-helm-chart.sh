@@ -18,9 +18,9 @@
 # 不需要任何外网访问就能部署。
 #
 # 用法:
-#   ./scripts/28-vendor-helm-chart.sh <repoURL> <chart> <版本> <目标目录> [--exclude-crds]
+#   ./scripts/28-vendor-helm-chart.sh <repoURL> <chart> <版本> <目标目录> [--exclude-crds <发布命名空间>]
 #
-# `--exclude-crds`:把 chart 渲染出来的 CRD 从 templates/ 里摘出去,单独存成
+# `--exclude-crds <发布命名空间>`:把 chart 渲染出来的 CRD 从 templates/ 里摘出去,单独存成
 # 一份纯 YAML(`<目标目录>/crds-out-of-band/crds.yaml`),由 kubectl
 # --server-side 单独装,不走 ArgoCD。
 #
@@ -44,13 +44,23 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ $# -lt 4 ] || [ $# -gt 5 ]; then
-  echo "用法: $0 <repoURL> <chart> <版本> <目标目录> [--exclude-crds]" >&2
+if [ $# -ne 4 ] && [ $# -ne 6 ]; then
+  echo "用法: $0 <repoURL> <chart> <版本> <目标目录> [--exclude-crds <发布命名空间>]" >&2
   exit 1
 fi
-REPO_URL="$1"; CHART="$2"; VERSION="$3"; DEST="$4"; EXCLUDE_CRDS="${5:-}"
+REPO_URL="$1"; CHART="$2"; VERSION="$3"; DEST="$4"; EXCLUDE_CRDS="${5:-}"; RELEASE_NS="${6:-}"
 if [ -n "$EXCLUDE_CRDS" ] && [ "$EXCLUDE_CRDS" != "--exclude-crds" ]; then
   echo "第 5 个参数只能是 --exclude-crds(收到:$EXCLUDE_CRDS)" >&2
+  exit 1
+fi
+# **命名空间必须显式给,不给默认值。** 2026-08-23 实测:第一版没传 -n,
+# helm 用了默认的 `default`,渲染出来的 CRD 里 conversion webhook 指向
+# `kueue-webhook-service.default.svc` ——CRD 装得上、controller 也 Running,
+# 但**任何 ClusterQueue/LocalQueue 对象都建不出来**,报 "service not found"。
+# 这类"装完了看着都对、用的时候才炸"正是这个项目最忌讳的失败模式,所以
+# 宁可多传一个参数,也不给一个大概率错的默认值。
+if [ "$EXCLUDE_CRDS" = "--exclude-crds" ] && [ -z "$RELEASE_NS" ]; then
+  echo "--exclude-crds 后面必须跟这个 chart 实际部署到的命名空间" >&2
   exit 1
 fi
 
@@ -80,12 +90,13 @@ tar xzf "$TGZ" -C "$DEST" --strip-components=1
 if [ "$EXCLUDE_CRDS" = "--exclude-crds" ]; then
   echo "==> 摘出 CRD:先用 helm template 渲染,再从 templates/ 删掉"
   # 必须先渲染再删:CRD 文件里有 {{- if .Values.xxx }} 这类模板语法,直接
-  # 复制原文件出去的话 kubectl 根本 apply 不了。渲染用 chart 默认 values
-  # ——CRD 的内容不该依赖我们在 Application 里覆盖的那些 values(资源规格、
-  # 副本数),如果哪天真的依赖了,那是 chart 本身的设计问题,应该停下来看,
-  # 而不是在这里补一个 --set 把它糊过去。
+  # 复制原文件出去的话 kubectl 根本 apply 不了。
+  #
+  # values 用 chart 默认值(CRD 内容不该依赖我们覆盖的资源规格/副本数),
+  # **但命名空间必须传对**——CRD 里的 conversion webhook 地址是
+  # `{{ .Release.Namespace }}` 渲染出来的,这条真的依赖上下文。
   mkdir -p "${DEST}/crds-out-of-band"
-  helm template "$CHART" "$DEST" | python3 -c "
+  helm template "$CHART" "$DEST" --namespace "$RELEASE_NS" | python3 -c "
 import sys, yaml
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d and d.get('kind') == 'CustomResourceDefinition']
 if not docs:
@@ -120,7 +131,7 @@ ${EXCLUDE_CRDS:+**CRD 不在 \`templates/\` 里**,被摘到了 \`crds-out-of-ban
 升级:
 
 \`\`\`bash
-./scripts/28-vendor-helm-chart.sh ${REPO_URL} ${CHART} <新版本> ${DEST} ${EXCLUDE_CRDS}
+./scripts/28-vendor-helm-chart.sh ${REPO_URL} ${CHART} <新版本> ${DEST} ${EXCLUDE_CRDS} ${RELEASE_NS}
 \`\`\`
 
 为什么要 vendor 而不是让 ArgoCD 直接拉:见
