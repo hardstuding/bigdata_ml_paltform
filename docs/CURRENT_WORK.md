@@ -22,54 +22,54 @@ zhenghe 2026-08-23 提了三个问题(门户/自建工具能不能优化、按�
 [`docs/production-readiness-gaps.md`](production-readiness-gaps.md)。
 zhenghe 回复"这 6 个挺重要的,都要做"。
 
-### 进度(2026-08-23 下午实机验证之后)
+### 进度(2026-08-23 晚,第三轮实机验证之后)
 
 | # | 缺口 | 状态 |
 |---|---|---|
 | 1 | 数据质量断言 | ✅ 实机验证([ADR-065](decisions/065-data-quality-on-openmetadata.md)) |
-| 2 | 数据新鲜度 SLO | ✅ 检测实机跑通([ADR-070](decisions/070-data-freshness-slo.md),`insertedRows=1640`);**告警出口没做,卡在没有真实通知凭据** |
-| 3 | 查询审计 | ✅ Trino→Kafka→Flink→Iceberg 全链路 + 审计表 OPA 保护,实机验证([ADR-066](decisions/066-trino-query-audit.md));**「审计流断了」的告警没做** |
-| 4 | 成本归属 | 🟡 OpenCost 实机出数(29 个命名空间 ¥0.808/小时,[ADR-069](decisions/069-cost-attribution.md));**没有 Grafana 面板** |
-| 5 | Schema Registry | ✅ Karapace 实机验证兼容性拦截([ADR-068](decisions/068-schema-registry.md));**Flink 作业还没接,schema 仍写死在 SQL 里** |
-| 6 | 门户改工作台 | ✅ 实机验证([ADR-067](decisions/067-portal-as-workbench.md)):0.82s 出页面、配额表读活数据、作业按人过滤正确 |
+| 2 | 数据新鲜度 SLO | ✅ 检测实机跑通([ADR-070](decisions/070-data-freshness-slo.md));告警出口卡在没凭据 |
+| 3 | 查询审计 | ✅ 全链路 + 审计表 OPA 保护([ADR-066](decisions/066-trino-query-audit.md));断流告警**已加规则**(ADR-071) |
+| 4 | 成本归属 | ✅ OpenCost 出数 + Grafana 看板,**按组的成本实测 ¥0.168/核·小时对得上**([ADR-069](decisions/069-cost-attribution.md)) |
+| 5 | Schema Registry | ✅ 端到端:producer 发 Avro、Flink 消费、**不兼容改动被 409 拦在发送侧**([ADR-068](decisions/068-schema-registry.md)) |
+| 6 | 门户改工作台 | ✅ 实机验证([ADR-067](decisions/067-portal-as-workbench.md)) |
 
-### 这一轮最重要的发现和六条缺口无关
+**六条全部落地并实机验证。** 另外这一轮顺带关掉的老账:
 
-**OPA 的策略改动历史上从来没有自动生效过。** `opa run` 默认只在启动时
-加载一次策略,这个仓库一直没配 `--watch`——所有历史 OPA 策略改动,只有在
-Pod 恰好因别的原因重启过之后才真正生效。在权限策略上这个失败模式特别毒:
-不报错,只是继续按老策略放行,而 ArgoCD 一路 Synced/Healthy。
+- **列级脱敏**从 🟡 转 ✅([`scripts/36-verify-trino-masking.sh`](../scripts/36-verify-trino-masking.sh)):
+  1 级看到 `138****5678`,2 级 phone 恢复明文而 id_card 仍打码——**验的是
+  分级,不是"有没有打码"**。
+- **平台自定义告警规则**从 0 条到 5 条(ADR-071),之前那套通知设施从来
+  没有东西可以送。
 
-已修(`--watch --ignore=..* /policies`,实测 push 后 48 秒生效、Pod 不
-重启),连踩的三层记在
-[`troubleshooting.md`](operations/troubleshooting.md#opa-策略改了configmap-同步了argocd-全绿但活的策略还是老的)。
+### 这一轮抓到的三个"建出来了但没接上"
+
+这类失败的共同点是**每一层都显示成功**,只有直接问最终消费方才看得见:
+
+1. **OPA 从来没有热加载过策略**——`opa run` 默认只在启动时读一次,仓库
+   一直没配 `--watch`。修的过程还连踩两层(盯文件收不到 ConfigMap 的
+   符号链接替换;盯目录会把同一份策略加载三遍)。
+2. **opencost / kueue 的 ServiceMonitor 没被 Prometheus 选中**——
+   `serviceMonitorSelector` 要 `release: kube-prometheus-stack` 标签,两个
+   chart 生成的都不带。成本看板会永远空白、Kueue 告警永远不触发,而没有
+   任何一层报错。
+3. **`kube_pod_labels` 有两个来源**(kube-state-metrics 和 OpenCost 各导
+   一份同名指标),join 时 422。
 
 ### 下一步
 
-**下次开机的验证清单**(都已经准备到"开机就能跑"):
-
-1. **Schema Registry 端到端**——producer 发 Avro、Flink 消费、Iceberg 行数
-   增长;以及**故意改一个不兼容的字段类型,确认在 producer 侧就被拦住**。
-   最后这条才是 ADR-068 的意义所在,不做等于没做。
-2. **告警规则**——5 条 PrometheusRule 的表达式在集群上用 `/api/v1/query`
-   验一次(本机没有 promtool,只做了结构检查);顺带确认 Flink 的
-   PodMonitor 真的发现了 target(**少了命名端口的表现是一个 target 都没有、
-   而且哪里都不报错**)。
-3. **成本看板**——7 个 panel 在 Grafana 里看一眼,尤其"按组的成本"那个
-   (它依赖 kube-state-metrics 的 metricLabelsAllowlist 生效)。
-4. **Trino 列级/行级脱敏的真实效果**——一直挂着的老账,roles.md 仍是 🟡。
-
-**不需要开机的**:
-
-5. 本机 colima 切 x86_64(见 [`cpu-architecture.md`](operations/cpu-architecture.md)),
+1. **告警出口**——质量、新鲜度、审计断流三个来源接**同一个**出口。真实
+   阻塞是没有通知渠道凭据(zhenghe:"等后面上生产来测试")。
+2. **行级过滤的实际效果**——端点在被调用、`opa test` 覆盖了,但还没构造
+   跨部门数据看过滤结果。列级那半已经验完。
+3. **本机 colima 切 x86_64**(见 [`cpu-architecture.md`](operations/cpu-architecture.md)),
    CI 已经只建 amd64。
-6. 数据质量/新鲜度断言的失败接进告警出口——真实阻塞是没有通知渠道凭据,
-   而且**三个来源(质量、新鲜度、审计断流)必须接同一个出口**。
+4. flink-operator 那 4 个 CRD 常年 OutOfSync(见 BACKLOG,老问题,现在有
+   `--exclude-crds` 这条现成解法)。
 
 ### 云主机状态
 
-已停机。2026-08-23 共开了两次机:06:20–07:20(Kueue/数据质量/审计第一段)
-和 08:15–09:00(六条缺口全量实机验证)。
+已停机。2026-08-23 共开了三次机:06:20–07:20、08:15–09:00、09:20–09:50,
+每次都是"先把要做的事准备到开机就能立刻跑"再开(按量付费,见全局协作规则)。
 
 ---
 
