@@ -109,6 +109,30 @@ spec:
                 #    让它进得了缓存清单,是这类问题的预防手段而不是事后
                 #    补救。
                 ingestionImage: "docker.getcollate.io/openmetadata/ingestion-base:1.13.3"
+                # chart 默认给采集 Job 的是 limits 2 core / 4Gi。2026-08-23
+                # 真实撞到:openmetadata 这个命名空间的 ResourceQuota
+                # (compute-quota,limits.memory 上限 6Gi)已经被组件本体占了
+                # 3328Mi,再要 4Gi 就超了,Job 被 quota 拦住建不出 Pod——
+                #   `exceeded quota: compute-quota, requested:
+                #    limits.memory=4Gi, used: 3328Mi, limited: 6Gi`
+                #
+                # **最坑的是它的表现**:Job 的状态是 `Running 0/1`,一个 Pod
+                # 都没有,`kubectl get jobs` 看着像在跑;只有 describe 才能
+                # 看到 FailedCreate 事件。和 2026-08-19 那次 MLflow 改
+                # resources 被 quota 卡住(ArgoCD 显示 Synced/Healthy 但流量
+                # 还在旧 pod 上)是同一类,这个仓库栽过两次了。
+                #
+                # 扫一个 demo 规模的 Trino catalog 用不着 4Gi。压到 1.5Gi,
+                # 在剩余配额(6Gi - 3328Mi ≈ 2.6Gi)之内还留了余量。真接上
+                # 大规模生产 catalog 时要回头调这个值 + 一并调大命名空间配额,
+                # 两个要一起改,只改一个还是会被拦。
+                resources:
+                  limits:
+                    cpu: "1"
+                    memory: "1536Mi"
+                  requests:
+                    cpu: "200m"
+                    memory: "512Mi"
             authentication:
               enabled: true
               clientType: confidential
