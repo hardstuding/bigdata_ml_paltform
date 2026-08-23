@@ -1,0 +1,39 @@
+# 抓 Kueue 的指标。**这份是我们自己写的,不是 chart 里那个。**
+#
+# **这是渲染产物的源文件**,改这里,不要改 apps/kueue/manifests/。
+#
+# 为什么要自己写一份:Prometheus 的 serviceMonitorSelector 是
+# `matchLabels: {release: kube-prometheus-stack}`,而 kueue chart 生成的
+# ServiceMonitor **没有办法加自定义标签**(它的 values 里只有
+# `metrics.serviceMonitor.tlsConfig` 一项,没有 additionalLabels;chart 也
+# 没有 commonLabels)。chart 那份因此永远不会被选中——**对象好好地存在、
+# ArgoCD 全绿,就是一条指标都抓不到**。2026-08-23 实测确认:
+# `kueue_pending_workloads` 在 Prometheus 里 0 条序列。
+#
+# 不改 vendor 进来的 chart(那会在下次升级时被整个覆盖,见
+# apps/kueue-chart/VENDORED.md),自己补一份带正确标签的。chart 那份留着
+# 也无害——它不被任何 Prometheus 选中,不会造成重复抓取。
+#
+# endpoint 的 scheme/认证方式照抄 chart 那份(HTTPS + ServiceAccount token
+# + 跳过证书校验),不是自己发明:Kueue 的 metrics 端口是 8443 的 HTTPS,
+# 用自签证书。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kueue-metrics
+  namespace: kueue-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: metrics-service
+      app.kubernetes.io/name: kueue
+  endpoints:
+    - port: https
+      path: /metrics
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        insecureSkipVerify: true
+      interval: 30s

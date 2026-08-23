@@ -84,6 +84,15 @@ spec:
             serviceMonitor:
               enabled: true
               namespace: monitoring
+              # **必须打这个标签,否则 ServiceMonitor 建出来了也没人抓。**
+              # 2026-08-23 实测:Prometheus 的 serviceMonitorSelector 是
+              # `matchLabels: {release: kube-prometheus-stack}`,不带这个
+              # 标签的 ServiceMonitor 根本不会被选中——现象是对象好好地
+              # 存在、ArgoCD 全绿、opencost 日志也正常,**就是一条指标都
+              # 抓不到**,成本看板永远空白。这类"建出来了但没接上"是这个
+              # 平台最常见的失败形态。
+              additionalLabels:
+                release: kube-prometheus-stack
   destination:
     server: https://kubernetes.default.svc
     namespace: opencost
