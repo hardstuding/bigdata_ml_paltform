@@ -9,7 +9,7 @@
 | 你是 | 看哪几节 |
 |---|---|
 | 数据分析师 | 查数据 / 查表权限 / 看板 BI |
-| 大数据开发 | 批处理作业 / 流式作业 / 作业排障 |
+| 大数据开发 | 批处理作业 / 流式作业 / Schema Registry / 作业排障 |
 | 算法工程师 | Notebook / 提交训练任务 / 模型上线 |
 | 数据治理 | 数据目录与血缘 / 建表 |
 | 平台运维 | 这份不适合你,看 [`docs/operations/`](operations/) |
@@ -154,6 +154,37 @@ notebook pod 里调 `submit_job()` 目前连不上 K8s API server(NetworkPolicy
 - **时间字段格式要和 Flink 的 `json.timestamp-format.standard` 对上**,
   而且**不要开 `json.ignore-parse-errors`**:开着的话解析失败会静默变成
   null,然后在两个算子之后以完全不相干的报错炸出来。
+
+## 改 Kafka 消息的字段?先看 Schema Registry
+
+流式 topic 的消息格式**不再是"约定俗成"**,而是登记在 Schema Registry
+(Karapace)里的([ADR-068](decisions/068-schema-registry.md))。
+
+这对你意味着一件很具体的事:**你改字段的时候,不兼容的改动会在发送那一侧
+就被拒掉**,不会等下游作业炸了才发现。
+
+```
+加一个带默认值的可选字段   → 放行
+删一个字段                 → 放行
+改字段类型(double→string) → 409 拒绝
+```
+
+规则是 `BACKWARD`:**新版本的消费者要能读老数据**。这条规则是按"消费端
+先升级、生产端后升级"这个真实顺序选的——如果你的改动被拒了,先想想下游
+读老数据会不会坏,通常答案就在那里。
+
+看当前登记了哪些 schema(registry 没有对外的 Ingress,故意的——谁能往里
+写 schema 谁就能决定下游怎么解析数据):
+
+```bash
+kubectl -n schema-registry port-forward svc/karapace 8081:8081
+curl -s localhost:8081/subjects | python3 -m json.tool
+curl -s localhost:8081/subjects/device-events-avro-value/versions/latest | python3 -m json.tool
+```
+
+> Karapace 兼容 Confluent Schema Registry 的 API 和 wire format,所以
+> Confluent 那套文档和客户端库直接可用:
+> https://docs.confluent.io/platform/current/schema-registry/
 
 ## 提交训练任务 / 跑在集群上
 
