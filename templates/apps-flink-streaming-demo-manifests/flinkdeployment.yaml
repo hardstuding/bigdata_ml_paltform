@@ -48,6 +48,16 @@ spec:
   serviceAccount: flink
   flinkConfiguration:
     taskmanager.numberOfTaskSlots: "1"
+    # 把 Flink 自己的指标暴露给 Prometheus。**这不是"顺手加个监控",是
+    # 审计/流式链路能不能被告警覆盖的前提**:Pod 层面的健康(Deployment
+    # 有几个副本可用)和作业层面的健康是两回事——ADR-062 实测过"JM/TM
+    # 都 Running 而作业已经 FAILED"。只监控 Pod 就是在盯错的那一层
+    # (docs/production-readiness-gaps.md 第 2 条批评的正是这个)。
+    # 有了 flink_jobmanager_numRunningJobs 才能告警"作业没了"。
+    #
+    # flink-metrics-prometheus 的 jar 在官方镜像的 /opt 里自带,不用额外装。
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: "9249"
     # Iceberg sink 靠 checkpoint 提交,见 script-configmap.yaml 里
     # device_events_stream.py 顶部注释——这里的间隔和作业代码里
     # t_env.get_config() 设的是同一个值,写两处是因为 flinkConfiguration
@@ -84,6 +94,13 @@ spec:
     spec:
       containers:
         - name: flink-main-container
+          # PodMonitor 按**端口名**选抓取目标,所以这个命名端口必须显式
+          # 声明——Flink operator 不会因为配了 metrics reporter 就自动加。
+          # 少了它的表现是:reporter 在跑、9249 端口有数据,但 Prometheus
+          # 一个 target 都发现不了,而且哪里都不报错。
+          ports:
+            - name: metrics
+              containerPort: 9249
           env:
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

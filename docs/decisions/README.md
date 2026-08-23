@@ -118,6 +118,7 @@
 | [068](068-schema-registry.md) | Schema Registry 选 Karapace | manifest 完成,未部署 |
 | [069](069-cost-attribution.md) | 成本归属用 OpenCost,单价自己填 | 配置完成,未部署 |
 | [070](070-data-freshness-slo.md) | 新鲜度当成一条数据质量断言 | 检测已落地,告警未做 |
+| [071](071-platform-alert-rules.md) | 平台自定义告警规则 + Flink 作业级指标 | 未部署验证 |
 | [022](022-ci-chart-validation.md) | CI:push/PR 前跑 `helm template` | 已采纳 |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 机制已实现并在 cloud-full 验证;ACME 和告警外推两档未在真实环境验证 |

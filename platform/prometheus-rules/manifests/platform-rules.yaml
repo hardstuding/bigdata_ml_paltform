@@ -1,0 +1,104 @@
+# 平台自己的告警规则(ADR-071)。
+#
+# **在这份文件之前,这个平台一条自定义告警规则都没有。** Alertmanager 装了、
+# 外部通知渠道的配置模板也留好了(platform/alertmanager-notification/),
+# 但中间"什么情况该告警"这一层是空的——也就是说那套通知设施从来没有东西
+# 可以送。
+#
+# 选题标准是**"坏了不会有任何人发现"**,不是"重要的组件"。Trino 挂了会有
+# 一堆人来问,不需要告警;而下面这几条的共同点是:没有人天天盯着它们,
+# 坏了可以安静地坏几周。
+#
+# `for` 都给得比较长(10~30 分钟),因为这几件事都不是秒级要救的:目的是
+# "别让它悄悄坏几周",不是"三分钟内响应"。给短了只会制造噪音,而**被习惯
+# 性忽略的告警比没有告警更糟**。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-rules
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: platform.audit
+      rules:
+        # 审计链路断了。这条是 ADR-066 里那个取舍的**必要配套**:
+        # Trino 的 event listener 配了
+        # `terminate-on-initialization-failure=false`(否则 Kafka 挂了
+        # Trino 起不来),代价就是审计事件会**静默丢失**。没有这条告警,
+        # 那个取舍是不成立的。
+        - alert: AuditSinkJobNotRunning
+          expr: |
+            sum(flink_jobmanager_numRunningJobs{namespace="flink", pod=~"trino-audit-sink-.*"}) < 1
+            or absent(flink_jobmanager_numRunningJobs{namespace="flink", pod=~"trino-audit-sink-.*"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Trino 查询审计的 Flink 作业没在跑"
+            description: >-
+              审计事件还在往 Kafka 里写,但没有人在消费落库。Kafka 保留期一到
+              就永久丢失(cloud-full 30 天)。**审计记录补不回来**,越早处理越好。
+              查:kubectl -n flink get flinkdeployment trino-audit-sink
+
+        # 上面那条盯的是"作业还在不在"。这条盯的是更隐蔽的一层:作业在跑,
+        # 但**消费停滞**(比如卡在某个算子)。用 Kafka 的消费位点推进速度看。
+        # 注意 `absent()` 单独成条,不和上面合并:两种情况的处置方向不一样。
+        - alert: FlinkMetricsMissing
+          expr: absent(flink_jobmanager_numRunningJobs)
+          for: 30m
+          labels:
+            severity: info
+          annotations:
+            summary: "抓不到任何 Flink 指标"
+            description: >-
+              可能是 PodMonitor 没选中(端口名 metrics 是否声明),也可能
+              Flink 那边的 metrics reporter 没配上。**这条本身不代表作业有
+              问题,但它意味着上面那条审计告警是瞎的**——盯不到指标就等于
+              没有监控。
+
+    - name: platform.quota
+      rules:
+        # 队列配额配错的典型表现:作业永远排队,而且**不报错**。
+        # ADR-064 里专门警告过这个(local-lite 那一档配额刻意给得很松,
+        # 就是为了避免这种情况)。inadmissible 意味着"按当前配额,这个作业
+        # 永远不可能被放行",不是"再等等就好了"。
+        - alert: KueueWorkloadsInadmissible
+          expr: sum by (cluster_queue) (kueue_pending_workloads{status="inadmissible"}) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "队列 {{ $labels.cluster_queue }} 里有作业永远排不上"
+            description: >-
+              inadmissible 不是"排队等资源",是"按当前配额永远放行不了"——
+              多半是作业要的资源超过了这个组的配额上限(标称 + 可借)。
+              查:kubectl get clusterqueue {{ $labels.cluster_queue }} -o yaml
+
+    - name: platform.newcomponents
+      rules:
+        # 下面这几个组件都是 2026-08-23 新加的,共同点是**没人会天天看**:
+        # 坏了不影响任何人当下的工作,只会在几周后需要它的时候发现是空的。
+        - alert: SchemaRegistryDown
+          expr: kube_deployment_status_replicas_available{namespace="schema-registry", deployment="karapace"} < 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Schema Registry 不可用"
+            description: >-
+              新 schema 注册不了,而且**兼容性校验也就不生效了**——这段时间里
+              上游可以随便改字段,没有东西拦。
+
+        - alert: CostMetricsMissing
+          expr: absent(node_total_hourly_cost)
+          for: 30m
+          labels:
+            severity: info
+          annotations:
+            summary: "OpenCost 没有在出成本数据"
+            description: >-
+              成本看板会是空的。这条是 info 不是 warning:少一段成本数据不
+              影响任何人干活,但拖久了会让"这个组花了多少"的历史出现空洞。
+              先看 opencost 的日志有没有连上 Prometheus。

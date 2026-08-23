@@ -1,0 +1,34 @@
+# 抓 Flink 的指标(JobManager / TaskManager 都抓)。
+#
+# **这是渲染产物的源文件**,改这里,不要改 apps/flink-audit-sink/manifests/。
+# 放在 audit-sink 这个 app 下面是因为它是这轮为审计链路告警加的,但它
+# 覆盖 flink 命名空间里的所有作业(包括 device-events-stream)。
+#
+# **为什么是 PodMonitor 而不是 ServiceMonitor**:Flink 的 JM/TM 由
+# flink-kubernetes-operator 动态创建,TM 更是随并行度增减,没有一个稳定的
+# Service 覆盖它们;PodMonitor 按标签选 Pod,正好合适。
+#
+# selector 用 operator 自己打的 `app` 标签(值就是 FlinkDeployment 的名字),
+# 两个 Flink 作业都覆盖到,以后再加作业不用改这里——只要它们都在 flink
+# 这个命名空间里。
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flink
+  namespace: flink
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["flink"]
+  selector:
+    matchExpressions:
+      - key: app
+        operator: Exists
+      - key: type
+        operator: In
+        values: ["flink-native-kubernetes"]
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
