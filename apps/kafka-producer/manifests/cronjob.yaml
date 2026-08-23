@@ -39,7 +39,12 @@ spec:
                 - name: KAFKA_BOOTSTRAP_SERVERS
                   value: platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
                 - name: KAFKA_TOPIC
-                  value: device-events
+                  # 2026-08-23 改名(ADR-068):producer 换成 Avro 之后新开
+                  # 了一个 topic,没有在老 topic 上原地换格式——混着两种
+                  # 格式的话,从 earliest 重放的消费端读到老消息会炸。
+                  value: device-events-avro
+                - name: SCHEMA_REGISTRY_URL
+                  value: http://karapace.schema-registry.svc.cluster.local:8081
                 - name: EVENTS_PER_RUN
                   value: "20"
               volumeMounts:

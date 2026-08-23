@@ -83,4 +83,11 @@ RUN set -eux; \
     curl -fsSL -O https://repo1.maven.org/maven2/commons-logging/commons-logging/1.2/commons-logging-1.2.jar; \
     curl -fsSL -O https://repo1.maven.org/maven2/org/antlr/antlr-runtime/3.5.2/antlr-runtime-3.5.2.jar; \
     curl -fsSL -O https://repo1.maven.org/maven2/org/apache/thrift/libfb303/0.9.3/libfb303-0.9.3.jar; \
+    # Avro + Confluent Schema Registry 格式(ADR-068)。**不是可选的**:
+    # producer 2026-08-23 起发的是 Avro(Confluent wire format,消息头里带
+    # schema id),没有这个 jar 时 Flink SQL 里写 `'format' = 'avro-confluent'`
+    # 直接报 `Could not find any format factory for identifier
+    # 'avro-confluent'`,作业提交就失败。
+    # 这个 fat jar 自带 avro 和 Schema Registry 客户端,不用再单独加 avro jar。
+    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/flink/flink-sql-avro-confluent-registry/1.20.5/flink-sql-avro-confluent-registry-1.20.5.jar; \
     chown -R flink:flink "${FLINK_HOME}/lib"

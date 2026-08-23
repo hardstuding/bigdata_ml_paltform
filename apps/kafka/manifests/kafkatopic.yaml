@@ -1,4 +1,11 @@
-# 给流式接入 demo 用的 topic。apiVersion 是 v1(不是 v1beta2)——
+# 给流式接入 demo 用的 topic。
+#
+# **2026-08-23 从 `device-events` 改名成 `device-events-avro`**:那次把
+# producer 从 JSON 换成 Avro + Schema Registry(ADR-068)。没有原地换格式
+# 而是改名,是因为**同一个 topic 里混着两种格式的话,任何从
+# earliest-offset 重放的消费端读到老消息都会炸**——Flink 那条流式作业正是
+# 从 earliest 开始消费的。改名是最省事也最不会出错的迁移方式;老 topic 的
+# KafkaTopic CR 已经删掉,ArgoCD prune 会把 broker 上那个 topic 一起清掉。apiVersion 是 v1(不是 v1beta2)——
 # 这个仓库的 Strimzi 是 1.1.0,查过它随包的 CRD 源码
 # (043-Crd-kafkatopic.yaml)确认这一版 KafkaTopic 只有 v1 一个存量版本,
 # 和 apps/kafka/manifests/kafka-cluster.yaml 里 Kafka/KafkaNodePool 用的
@@ -17,7 +24,7 @@
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
-  name: device-events
+  name: device-events-avro
   namespace: kafka
   labels:
     strimzi.io/cluster: platform-kafka

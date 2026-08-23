@@ -14,4 +14,9 @@
 # 2.15.0 是当前 PyPI 最新稳定版(查过 PyPI 而不是猜的)。
 FROM python:3.12-slim
 
-RUN pip install --no-cache-dir confluent-kafka==2.15.0
+# `[avro]` 这个 extra 带的是 fastavro + Schema Registry 客户端所需的依赖。
+# 2026-08-23 producer 从 JSON 改成 Avro + Schema Registry(ADR-068),
+# 不加 extra 的话 `from confluent_kafka.schema_registry.avro import
+# AvroSerializer` 直接 ImportError——base 包里有 SchemaRegistryClient,
+# 但没有 Avro 序列化器需要的 fastavro。
+RUN pip install --no-cache-dir "confluent-kafka[avro]==2.15.0"

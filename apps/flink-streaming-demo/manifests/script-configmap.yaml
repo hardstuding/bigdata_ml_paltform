@@ -52,7 +52,8 @@ data:
     from pyflink.table import EnvironmentSettings, TableEnvironment
 
     KAFKA_BOOTSTRAP_SERVERS = "platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
-    KAFKA_TOPIC = "device-events"
+    KAFKA_TOPIC = "device-events-avro"
+    SCHEMA_REGISTRY_URL = "http://karapace.schema-registry.svc.cluster.local:8081"
     HIVE_METASTORE_URI = "thrift://hive-metastore.data.svc.cluster.local:9083"
     ICEBERG_WAREHOUSE = "s3a://lakehouse/warehouse"
 
@@ -82,19 +83,21 @@ data:
                 'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP_SERVERS}',
                 'properties.group.id' = 'flink-device-events-stream',
                 'scan.startup.mode' = 'earliest-offset',
-                'format' = 'json',
-                -- 时间格式必须和 Producer 产出的一致。Producer 写的是
-                -- `yyyy-MM-dd HH:mm:ss.SSS`(见
-                -- scripts/kafka_device_events_producer.py 里的说明),对应
-                -- Flink 的 SQL 标准;写成 ISO-8601 会解析不出来。
-                'json.timestamp-format.standard' = 'SQL',
-                -- **不要开 ignore-parse-errors。** 2026-08-22 夜被它坑惨:
-                -- 开着的时候,时间戳解析失败不会报错,而是**静默变成 null**,
-                -- 然后在两个算子之后以 `RowTime field should not be null` 的
-                -- 形式炸出来——报错信息和真正的原因(格式对不上)完全对不上号,
-                -- 排查时一直在怀疑数据本身有问题,反复 dump topic 验证格式。
-                -- 让它在解析失败的那一刻就失败,报错才有指向性。
-                'json.ignore-parse-errors' = 'false'
+                -- **2026-08-23 从 json 改成 avro-confluent(ADR-068)。**
+                --
+                -- 这里的 schema 定义仍然写在 SQL 里,但它的性质变了:以前它是
+                -- **唯一**的 schema 声明,生产端改了字段这边毫无感知;现在
+                -- registry 才是权威,这段声明只是"我按这个形状去读",而
+                -- avro-confluent 会拿消息头里的 schema id 去 registry 取实际
+                -- schema 做兼容性解析——对不上会**明确报错**,不会静默变 null。
+                --
+                -- 顺带整类消失的 bug:时间字段现在是 Avro 的 timestamp-millis
+                -- (一个 long),不再需要 `json.timestamp-format.standard`。
+                -- 2026-08-22 那次"格式差一个 T 就静默变 null、两个算子之后才
+                -- 以 RowTime field should not be null 炸出来"的坑,从设计上
+                -- 不存在了(ADR-062)。
+                'format' = 'avro-confluent',
+                'avro-confluent.url' = '{SCHEMA_REGISTRY_URL}'
             )
         """)
 
