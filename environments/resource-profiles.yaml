@@ -148,6 +148,10 @@ local-lite:
   kueue_algorithm_team_memory: "8Gi"
   kueue_algorithm_team_borrow_cpu: "4"
   kueue_algorithm_team_borrow_memory: "8Gi"
+  # 审计 topic(ADR-066)。本机磁盘小,保留 3 天够开发验证用。
+  audit_topic_partitions: "1"
+  audit_topic_retention_ms: "259200000"
+
 
 
 cloud-full:
@@ -262,6 +266,11 @@ cloud-full:
   kueue_algorithm_team_memory: "8Gi"
   kueue_algorithm_team_borrow_cpu: "4"
   kueue_algorithm_team_borrow_memory: "8Gi"
+  # 审计 topic(ADR-066)。30 天——审计记录"事后才知道需要它",
+  # 保留期短了等需要时已经滚掉,而且补不回来。
+  audit_topic_partitions: "3"
+  audit_topic_retention_ms: "2592000000"
+
 
 
 prod:
@@ -401,4 +410,10 @@ prod:
   kueue_algorithm_team_memory: "256Gi"
   kueue_algorithm_team_borrow_cpu: "64"
   kueue_algorithm_team_borrow_memory: "256Gi"
+  # 审计 topic(ADR-066)。90 天;真正的长期留存靠下游 Iceberg 表,
+  # Kafka 这段是缓冲 + 下游挂掉时的兜底。具体多久要按公司合规要求定,
+  # 90 天是起步值不是合规结论。
+  audit_topic_partitions: "6"
+  audit_topic_retention_ms: "7776000000"
+
 

@@ -89,6 +89,28 @@ spec:
               port: 8443
               keystore:
                 path: /secrets/trino-tls/tls-combined.pem
+        # 查询审计(ADR-066)。**这一条和权限控制不是一回事**:上面的 OPA
+        # 管的是"能不能查"(准入判断),这里管的是"查过什么"(事后留痕)。
+        # 两者缺一不可,而且审计这条**没法事后补**——没记就是没记,现在
+        # 晚装一天就永久少一天记录。
+        eventListenerProperties:
+          - event-listener.name=kafka
+          - kafka-event-listener.broker-endpoints=platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
+          # 只发 completed 事件。created 事件会让消息量翻倍,而它能回答的
+          # 问题(谁发起过查询)completed 事件全都包含——**除了一种情况:
+          # 查询发起后 Trino 崩了,没有 completed 事件**。真要追这种场景
+          # 再打开,现在不为一个边缘场景付双倍存储。
+          - kafka-event-listener.publish-created-event=false
+          - kafka-event-listener.publish-completed-event=true
+          - kafka-event-listener.completed-event.topic=trino-query-events
+          - kafka-event-listener.client-id=trino-cloud-full
+          # **默认是 true,必须显式关掉**:true 的话 Kafka 连不上时 Trino
+          # 直接启动失败。让整个平台的查询能力依赖 Kafka 的可用性,是拿
+          # 一个合规需求去换核心组件的可用性,不划算。代价要写清楚:
+          # Kafka 挂掉期间的查询**不会有审计记录**,而且是静默的——所以
+          # 这条必须配套一个"审计事件流断了"的告警(见 ADR-066 待办),
+          # 不能只靠这行注释。
+          - kafka-event-listener.terminate-on-initialization-failure=false
         additionalConfigProperties:
           - http-server.http.enabled=false
           # http-server.authentication.type 管的是"接受哪些认证方式"

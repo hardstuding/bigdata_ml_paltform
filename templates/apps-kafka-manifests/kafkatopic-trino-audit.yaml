@@ -1,0 +1,25 @@
+# Trino 查询审计事件的 topic(ADR-066)。
+#
+# **为什么审计要先落 Kafka 而不是直接写库**:Trino 的内置事件监听器只有
+# http / kafka / mysql 三种,写 Iceberg 没有现成的。而这个平台已经跑通了
+# Kafka → Flink → Iceberg 这条链路(ADR-062),复用它比自己写一个 HTTP
+# 接收端再自己管持久化要少一个自研组件。
+#
+# **保留期是这个 topic 唯一真正重要的参数**。审计记录的特性是"事后才知道
+# 需要它"——出了数据泄露要回答"谁导出过这张表",员工离职要回答"他走之前
+# 碰过什么"。保留期短了,等到需要的时候记录已经滚掉了,而且**补不回来**。
+# 所以这里给的比一般业务 topic 长得多(cloud-full 30 天),真正的长期留存
+# 靠下游的 Iceberg 表(那才是最终归宿,Kafka 这段只是缓冲 + 兜底)。
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: trino-query-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: platform-kafka
+spec:
+  partitions: {{RES:audit_topic_partitions}}
+  replicas: {{RES:kafka_replication_factor}}
+  config:
+    retention.ms: {{RES:audit_topic_retention_ms}}
+    min.insync.replicas: {{RES:kafka_min_insync_replicas}}
