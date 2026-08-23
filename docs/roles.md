@@ -59,7 +59,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 指标 | ✅ | kube-prometheus-stack,Grafana 接 Keycloak SSO(本次会话端到端验证过登录) |
 | 日志 | ✅ | Loki + Alloy 采集全部 pod stdout,和指标同一个 Grafana 界面(ADR-020) |
 | 告警产生 | ✅ | Alertmanager 已开,chart 自带规则生效,抓到过真实问题(ADR-034) |
-| 告警送达 | 🟡 | 2026-08-23 补上了**规则**(ADR-071,5 条,选题标准是「坏了不会有任何人发现」)+ Flink 作业级指标。在此之前不只是缺凭据,**是一条平台自定义规则都没有**——就算把企微 webhook 配上也不会有任何告警发出来。现在仍然**没有配外部通知渠道**——现在只能"打开界面查",不会推送到人。邮件/企微/Slack 的配置模板已经预留在 `platform/apps/kube-prometheus-stack.yaml` 里注释着,需要真实凭据才能激活 |
+| 告警送达 | 🟡 | 2026-08-23 补上了**规则**(ADR-071,5 条,选题标准是「坏了不会有任何人发现」)+ Flink 作业级指标。在此之前不只是缺凭据,**是一条平台自定义规则都没有**——就算把企微 webhook 配上也不会有任何告警发出来。现在仍然**没有外部通知渠道**,告警只会停在 Alertmanager 界面里;配置模板留在 `platform/alertmanager-notification/`,需要真实凭据才能激活。质量/新鲜度断言的失败还没接进来(结果在 OpenMetadata 里,不是 Prometheus 指标)|
 | 数据质量断言 | ✅ | OpenMetadata 自带 Data Quality(ADR-065/070),三条断言 + 一条新鲜度断言实机跑通;用一条故意失败的探针验证过「绿灯能变红」。新鲜度实测 `insertedRows=1640`。局限:覆盖两张表,断言失败时还没有告警通道 |
 | 备份 / 恢复 | ✅ | Postgres 每日备份,恢复演练验证过(ADR-033) |
 | 资源治理(组件级上限) | ✅ | ResourceQuota / LimitRange / PriorityClass(ADR-041)——防「单个组件失控拖死机器」 |
