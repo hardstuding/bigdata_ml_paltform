@@ -50,8 +50,17 @@ spec:
             #
             # 注意 ConfigMap 挂载的更新有约 1 分钟的 kubelet 缓存延迟
             # (这个项目记录过),所以改完策略不是秒生效,是分钟级生效。
+            # **watch 的必须是目录,不能是文件。** 2026-08-23 实测:写成
+            # `--watch /policies/trino.rego` 时,ConfigMap 更新之后活的 OPA
+            # 仍然是老策略(直接查 /v1/policies 确认过,还是旧的 288 行)。
+            # 原因是 kubelet 更新 ConfigMap 挂载用的是**原子替换 `..data`
+            # 符号链接**,文件本身的 inode 没被改动,盯着具体文件路径的
+            # inotify watch 收不到事件。盯目录才收得到。
+            #
+            # 目录里的 `..data`、`..2026_xx_xx` 这些以点开头的条目 OPA 的
+            # 加载器会自动跳过,不会出现同一个 package 被加载两遍。
             - --watch
-            - /policies/trino.rego
+            - /policies
           ports:
             - containerPort: 8181
               name: http
