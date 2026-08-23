@@ -1,0 +1,246 @@
+# 平台成本归属看板(ADR-069)。和 grafana-audit-dashboard 一样走
+# kube-prometheus-stack 的 Grafana sidecar 自动发现:扫描所有命名空间里带
+# `grafana_dashboard: "1"` 标签的 ConfigMap,不用在 UI 里手动导入。
+#
+# **所有 panel 都不写 datasource 字段**,让 Grafana 用默认数据源
+# (kube-prometheus-stack 把 Prometheus 设成了默认)。这是刻意和
+# grafana-audit-dashboard 不同的做法——那份看板把 Loki 的 uid 硬编码进
+# JSON 了,它自己的注释里就写着"数据源被删掉重建时 uid 会变,看板会失联"。
+# 能不硬编码就不硬编码。
+#
+# **指标名不是猜的**,是从 OpenCost 源码 pkg/costmodel/metrics.go 里核实的:
+#   container_cpu_allocation           labels: namespace/pod/container/instance/node/uid
+#   container_memory_allocation_bytes  同上
+#   node_cpu_hourly_cost               labels: instance/node/instance_type/region/...
+#   node_ram_hourly_cost               **单位是每 GB 每小时**,所以内存要先 /1024^3
+# 单价本身来自 apps/components/opencost.yaml 的 customPricing(按环境分档,
+# 见 environments/resource-profiles.yaml 里那段"为什么必须自己填单价")。
+#
+# "按组的成本"那个 panel 依赖 kube-state-metrics 把 Kueue 队列标签暴露成
+# `kube_pod_labels` 的维度——已经在 platform/apps/kube-prometheus-stack.yaml
+# 的 metricLabelsAllowlist 里放行了。**没有那一行,这个 panel 会是空的**,
+# 而其它 panel 照常工作。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-cost-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  platform-cost.json: |
+    {
+      "title": "平台成本归属",
+      "uid": "platform-cost",
+      "schemaVersion": 39,
+      "timezone": "browser",
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "refresh": "5m",
+      "panels": [
+        {
+          "id": 1,
+          "title": "平台总成本(每小时)",
+          "type": "stat",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "sum(container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) + sum(container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost))",
+              "legendFormat": "总计",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          }
+        },
+        {
+          "id": 2,
+          "title": "节点标价(每小时)",
+          "type": "stat",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "sum(node_total_hourly_cost)",
+              "legendFormat": "整机",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "description": "整机标价。它和左边的差额就是**没有被任何工作负载占用的部分**——差得越多,说明机器买大了或者用得越松。"
+        },
+        {
+          "id": 3,
+          "title": "按组的成本(每小时)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 5
+          },
+          "targets": [
+            {
+              "expr": "sum by (queue) ((container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) * on (namespace, pod) group_left (queue) label_replace(kube_pod_labels, \"queue\", \"$1\", \"label_kueue_x_k8s_io_queue_name\", \"(.+)\"))",
+              "legendFormat": "{{queue}} CPU",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (queue) ((container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost)) * on (namespace, pod) group_left (queue) label_replace(kube_pod_labels, \"queue\", \"$1\", \"label_kueue_x_k8s_io_queue_name\", \"(.+)\"))",
+              "legendFormat": "{{queue}} 内存",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          },
+          "description": "只统计打了 Kueue 队列标签的工作负载(也就是走 platform_sdk 提交的作业)。常驻服务不进队列,所以不在这里,它们看下面的按命名空间。"
+        },
+        {
+          "id": 4,
+          "title": "按命名空间的成本(每小时)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 13
+          },
+          "targets": [
+            {
+              "expr": "sum by (namespace) (container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost))",
+              "legendFormat": "{{namespace}} CPU",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (namespace) (container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost))",
+              "legendFormat": "{{namespace}} 内存",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 5,
+          "title": "最贵的 10 个命名空间",
+          "type": "bargauge",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 13
+          },
+          "targets": [
+            {
+              "expr": "topk(10, sum by (namespace) (container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) + sum by (namespace) (container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost)))",
+              "legendFormat": "{{namespace}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "title": "CPU vs 内存 各占多少钱",
+          "type": "piechart",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 21
+          },
+          "targets": [
+            {
+              "expr": "sum(container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost))",
+              "legendFormat": "CPU",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost))",
+              "legendFormat": "内存",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 7,
+          "title": "最贵的 10 个 Pod",
+          "type": "table",
+          "gridPos": {
+            "h": 8,
+            "w": 16,
+            "x": 8,
+            "y": 21
+          },
+          "targets": [
+            {
+              "expr": "topk(10, sum by (namespace, pod) (container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) + sum by (namespace, pod) (container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost)))",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true
+          }
+        }
+      ]
+    }

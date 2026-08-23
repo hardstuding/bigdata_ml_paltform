@@ -1,0 +1,29 @@
+# 平台成本归属看板(ADR-069)。和 grafana-audit-dashboard 同一个模式:
+# 一份带 grafana_dashboard 标签的 ConfigMap,由 kube-prometheus-stack 的
+# Grafana sidecar 自动发现。
+#
+# **为什么单独一个 Application 而不是塞进 opencost 那个**:opencost 是
+# helm chart 源,这份是 git 目录里的裸 manifest,一个 Application 只能有
+# 一个 source;而且看板和采集器本来就该能分别改、分别回滚。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana-cost-dashboard
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/grafana-cost-dashboard/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

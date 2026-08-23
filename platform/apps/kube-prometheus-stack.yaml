@@ -270,6 +270,21 @@ spec:
             limits:
               memory: 64Mi
         kube-state-metrics:
+          # 把这两个 pod 标签暴露成 `kube_pod_labels` 的维度,**这是"成本
+          # 按组归属"能不能成立的前提**(ADR-069)。
+          #
+          # OpenCost 自己的指标(container_cpu_allocation 等)只带
+          # namespace/pod/node,不带任意 pod 标签,所以"这个组花了多少钱"
+          # 算不出来——而只有配额没有账单,配额就变成办公室政治
+          # (ADR-064/069 都点了这一条)。把队列标签暴露出来之后,Grafana
+          # 里就能 `on(namespace,pod) group_left(...) kube_pod_labels` join
+          # 出按组的成本。
+          #
+          # **只放行这两个标签,不开全量**:kube-state-metrics 默认不暴露
+          # 任意标签是有道理的,pod 标签是用户可控的高基数维度,全放开会
+          # 让 Prometheus 的时间序列数量失控。
+          metricLabelsAllowlist:
+            - pods=[kueue.x-k8s.io/queue-name,app.kubernetes.io/managed-by]
           resources:
             requests:
               cpu: 25m

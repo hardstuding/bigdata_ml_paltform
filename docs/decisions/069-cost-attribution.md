@@ -69,9 +69,36 @@ GPU 单价显式填 0 而不是留默认值:留一个假的 GPU 单价,等哪天
   名)。错了的表现是 **opencost 起得来、不 CrashLoop,只是所有成本都是 0**
   ——所以首次部署要主动看它的日志,不能只看 Pod Running。
 
+## 实机验证(cloud-full,2026-08-23)
+
+- OpenCost 连上了 Prometheus:日志里 `Success: retrieved the 'up' query
+  against prometheus at: http://kube-prometheus-stack-prometheus.monitoring...`
+  ——上面担心的那个 Service 名猜对了。
+- 真实出数:29 个命名空间合计 **¥0.808/小时**,最贵的是 flink(¥0.152)、
+  airflow(¥0.069)、openmetadata(¥0.063)。整机标价 ¥4.04/小时,也就是
+  说**现在被工作负载占用的只有五分之一**——这个差额本身就是有用的信号。
+
+## Grafana 看板(2026-08-23 加,未在集群上看过效果)
+
+`platform/grafana-cost-dashboard/`,7 个 panel。两个设计点:
+
+**所有 panel 都不写 datasource,用 Grafana 的默认数据源。** 这是刻意和
+`grafana-audit-dashboard` 不同的做法——那份把 Loki 的 uid 硬编码进 JSON 了,
+它自己的注释就写着"数据源被删掉重建时 uid 会变,看板会失联"。
+
+**"按组的成本"这个 panel 是整个看板的重点**,也是唯一需要额外配置的:
+OpenCost 自己的指标只带 namespace/pod/node,不带任意 pod 标签,所以"这个组
+花了多少钱"算不出来。解法是让 kube-state-metrics 把 Kueue 的队列标签暴露成
+`kube_pod_labels` 的维度(已加进 `platform/apps/kube-prometheus-stack.yaml`
+的 `metricLabelsAllowlist`),然后在 PromQL 里 join。**只放行两个标签,
+不开全量**——pod 标签是用户可控的高基数维度,全放开会让时间序列数量失控。
+
+没有那一行的话,这个 panel 会是空的,其它 panel 照常工作。
+
 ## 还没做的
 
-1. 没部署验证。
-2. **没有 Grafana 面板。** 指标被抓上去了不等于有人看得到。面板要能回答
-   "这个月各组花了多少""哪个作业最贵",而不是一堆原始指标。
-3. prod 单价还是 0,要 zhenghe 提供实际数字才有意义。
+1. **看板没在集群上看过效果**(PromQL 是照 OpenCost 源码里的指标名写的,
+   指标名核实过,但查询本身没跑过)。
+2. **成本数据没有接告警**。"某个组这个月突然翻倍"这种事现在只能靠人看。
+3. 空闲成本(整机标价减去被占用的部分)现在只能靠两个数字相减,没有单独
+   的口径。真要做容量决策,这个数比任何一个命名空间的成本都重要。
