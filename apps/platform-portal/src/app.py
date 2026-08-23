@@ -19,13 +19,40 @@ table-registration-app)同一个"不用前端框架"的路线,见 ADR-032。
 已经踩过不止一次这个坑,见 docs/operations/troubleshooting.md)。改成
 页面加载时**现场探测**每个工具在集群内部是否能连通,状态自己刷新,不需要
 人记得回来更新这份清单。
+
+2026-08-23 改造(ADR-067):zhenghe 的原话是"ui 设计和功能感觉都不是很好"。
+拆开看是三个不同的问题,这次一起处理:
+
+1. **它只是个链接目录。** 一个人打开门户真正想知道的是"我昨天那个任务
+   跑成功了吗""我们组配额还剩多少",这些数据平台里全都有,只是没有一个
+   地方按"人"聚合过——现在的做法是让人自己去五个系统里各翻一遍。这次
+   加了"我的作业"和"计算配额"两块真实数据。
+2. **13 个探测是串行的**,每个超时 1.5 秒,最坏情况页面要等 19.5 秒。
+   这大概率就是"感觉不好"里很实在的一部分。改成线程池并发,最坏 ~2 秒。
+3. **HTML/CSS 内联在 Python 字符串里**,改一个样式要动源码文件。移到
+   Flask 标准的 templates/ 目录——这不违反 ADR-032 的"不用前端框架",
+   Jinja 模板本来就是 Flask 自带的,和引入 React 是两回事。
+
+**取数一律容错**:任何一块数据取不到(集群 API 连不上、RBAC 没配、
+本机开发环境根本没有 k8s),对应区块显示一句说明,**不影响页面其它部分**。
+门户是"哪里都进不去时最后能打开的那个页面",它自己不能因为某个后端挂了
+而打不开。
 """
+import concurrent.futures
 import os
 
 import requests
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template, request
 
 app = Flask(__name__)
+
+# 队列 → 显示名。和 platform/iam/groups.yaml 里的组同名(ADR-064 决定
+# 队列直接按已有的组切,不另发明一套组织结构)。
+QUEUE_LABELS = {
+    "platform-team": "平台组",
+    "data-analysts": "数据分析",
+    "algorithm-team": "算法组",
+}
 
 # 每一项:分类、显示名、一句话说明、外部访问地址(浏览器打开用)、
 # 内部探测地址(server 端探活用,不需要认证,能连上就算"在"——不管
@@ -169,56 +196,141 @@ def probe(tool):
         return False
 
 
-TEMPLATE = """
-<!doctype html>
-<html><head><meta charset="utf-8"><title>平台门户</title>
-<style>
-  body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; color: #222; }
-  h1 { font-size: 1.5em; margin-bottom: 4px; }
-  .sub { color: #888; margin-top: 0; }
-  h2 { font-size: 1.05em; margin-top: 2em; color: #555; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85em; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-  .card { border: 1px solid #ddd; border-radius: 8px; padding: 14px 16px; text-decoration: none; color: inherit; display: block; transition: box-shadow 0.15s; }
-  .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: #bbb; }
-  .card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-  .card-name { font-weight: 600; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .dot-up { background: #2ea043; } .dot-down { background: #ccc; }
-  .card-desc { color: #666; font-size: 0.88em; line-height: 1.4; }
-  .status-hint { color: #999; font-size: 0.78em; margin-top: 6px; }
-</style></head><body>
-<h1>平台门户</h1>
-<p class="sub">当前登录:<b>{{ username }}</b> · 统一 SSO(Keycloak / realm: platform),点开任何一个工具都不用重新输密码</p>
+def probe_all(tools):
+    """并发探测所有工具,返回 {工具名: 是否在线}。
 
-{% for category, items in categories.items() %}
-<h2>{{ category }}</h2>
-<div class="grid">
-{% for t in items %}
-<a class="card" href="{{ t.url }}" target="_blank">
-  <div class="card-top">
-    <span class="card-name">{{ t.name }}</span>
-    <span class="dot {{ 'dot-up' if t.up else 'dot-down' }}" title="{{ '现在能连上' if t.up else '现在连不上(可能是 park 状态,或者刚好在重启)' }}"></span>
-  </div>
-  <div class="card-desc">{{ t.description }}</div>
-</a>
-{% endfor %}
-</div>
-{% endfor %}
+    **串行探测是这个页面之前最实在的体验问题**:13 个工具 × 1.5 秒超时,
+    只要有几个是 park 状态,页面就要转好几秒;全 park 的极端情况要等
+    19.5 秒。并发之后最坏就是一个超时的时间(约 2 秒)。
 
-<p class="status-hint">绿点=页面加载时现场探测到能连通;灰点=连不上,不代表永久下线,这台机器按需 park/unpark 组件是常态,过一会再看可能就上了。</p>
-</body></html>
-"""
+    线程数给得比工具数多一点,保证一轮跑完;探测是纯 IO 等待,线程多
+    并不费 CPU。
+    """
+    def safe(tool):
+        # **必须在这里兜住异常**:线程池的 map 会把任何异常原样抛回主线程,
+        # 一个工具探测出意外就是整页 500。probe() 现在只吞 RequestException,
+        # 将来谁在里面加一行别的逻辑就可能抛别的——门户不该因为一个状态点
+        # 算不出来就打不开。测试里专门有一条锁这个行为。
+        try:
+            return probe(tool)
+        except Exception:
+            return False
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, len(tools))) as pool:
+        return dict(zip([t["name"] for t in tools], pool.map(safe, tools)))
+
+
+# --------------------------------------------------------------- 集群取数
+#
+# 下面这几个函数都遵守同一条规则:**取不到就返回一个带 error 的结构,
+# 绝不抛异常**。门户是"哪里都进不去的时候最后还能打开的那个页面",它
+# 自己不能因为 Argo 挂了或者 RBAC 没配就打不开。本机开发环境根本没有
+# k8s,也走同一条降级路径,所以本地跑这个 app 不需要任何 mock。
+
+
+def _k8s():
+    from kubernetes import client, config as kube_config
+
+    try:
+        kube_config.load_incluster_config()
+    except Exception:
+        kube_config.load_kube_config()
+    return client.CustomObjectsApi()
+
+
+def queue_usage():
+    """读 Kueue 的 ClusterQueue,回答"哪个组能用多少、现在用了多少、
+    借了多少、还有多少在排队"(ADR-064)。
+
+    这是把 CDH/YARN 里"打开 RM 队列页面看一眼"那个习惯搬过来——**配额
+    如果看不见,用户只会感觉"我的任务有时候快有时候慢"**,根本不会意识到
+    是配额在起作用。
+
+    这里显示的是**所有队列**,不是只显示当前用户的。两个原因:一是平台
+    内部各组用了多少本来就不该互相保密,能看到别人在忙反而解释了自己
+    为什么在排队;二是要只显示"我的",得先知道当前用户属于哪个组,那
+    需要 oauth2-proxy 透传 groups 头,改那份配置有真实的登录风险(它的
+    注释里记着两次血泪史),留到能在集群上验证时再做。
+    """
+    try:
+        api = _k8s()
+        items = api.list_cluster_custom_object(
+            "kueue.x-k8s.io", "v1beta1", "clusterqueues")["items"]
+    except Exception as exc:
+        return {"error": f"读不到队列信息({type(exc).__name__})", "rows": []}
+
+    rows = []
+    for cq in items:
+        name = cq["metadata"]["name"]
+        nominal, used, borrowed = {}, {}, {}
+        for fl in cq.get("spec", {}).get("resourceGroups", [{}])[0].get("flavors", []):
+            for r in fl.get("resources", []):
+                nominal[r["name"]] = r.get("nominalQuota")
+        for fl in cq.get("status", {}).get("flavorsUsage", []):
+            for r in fl.get("resources", []):
+                used[r["name"]] = r.get("total")
+                borrowed[r["name"]] = r.get("borrowed")
+        rows.append({
+            "name": name,
+            "label": QUEUE_LABELS.get(name, name),
+            "cpu_quota": nominal.get("cpu", "-"),
+            "cpu_used": used.get("cpu", "0"),
+            "cpu_borrowed": borrowed.get("cpu", "0"),
+            "mem_quota": nominal.get("memory", "-"),
+            "mem_used": used.get("memory", "0"),
+            "pending": cq.get("status", {}).get("pendingWorkloads", 0),
+        })
+    return {"error": None, "rows": sorted(rows, key=lambda r: r["name"])}
+
+
+def my_jobs(username, limit=8):
+    """当前用户最近提交的作业。
+
+    靠 platform_sdk 提交时打的 `platform-sdk/submitted-by` 标签来认人
+    ——**不是靠猜 workflow 名字**。没有这个标签的作业(比如平台自己的
+    定时任务)不会出现在这里,这是对的:这一栏回答的是"我的东西怎么样
+    了",不是"集群里在跑什么"。
+    """
+    if not username:
+        return {"error": "还没识别出当前登录用户", "rows": []}
+    try:
+        api = _k8s()
+        wfs = api.list_namespaced_custom_object(
+            "argoproj.io", "v1alpha1", ARGO_NAMESPACE, "workflows",
+            label_selector=f"platform-sdk/submitted-by={username}",
+        )["items"]
+    except Exception as exc:
+        return {"error": f"读不到作业列表({type(exc).__name__})", "rows": []}
+
+    wfs.sort(key=lambda w: w["metadata"].get("creationTimestamp", ""), reverse=True)
+    rows = [{
+        "name": w["metadata"]["name"],
+        "phase": w.get("status", {}).get("phase") or "Pending",
+        "started": w["metadata"].get("creationTimestamp", ""),
+        "queue": w["metadata"].get("labels", {}).get("platform-sdk/job", ""),
+    } for w in wfs[:limit]]
+    return {"error": None, "rows": rows}
+
+
+ARGO_NAMESPACE = os.environ.get("PLATFORM_ARGO_NAMESPACE", "argo-workflows")
 
 
 @app.route("/")
 def index():
     username = request.headers.get("X-Forwarded-User", "")
+    up = probe_all(TOOLS)
     categories = {}
     for tool in TOOLS:
         t = dict(tool)
-        t["up"] = probe(tool)
+        t["up"] = up.get(tool["name"], False)
         categories.setdefault(tool["category"], []).append(t)
-    return render_template_string(TEMPLATE, username=username, categories=categories)
+    return render_template(
+        "index.html",
+        username=username,
+        categories=categories,
+        queues=queue_usage(),
+        jobs=my_jobs(username),
+    )
 
 
 @app.route("/healthz")

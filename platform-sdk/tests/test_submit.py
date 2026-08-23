@@ -76,15 +76,21 @@ def test_run_workflow_template_generate_name_uses_template_name():
 # 不是"函数被调用了"。
 
 
-def _build(monkeypatch, groups=None, explicit=None):
+def _build(monkeypatch, groups=None, explicit=None, user=None, hub_user=None):
     import platform_sdk.submit as submit_mod
 
     monkeypatch.delenv("PLATFORM_QUEUE", raising=False)
     monkeypatch.delenv("PLATFORM_GROUPS", raising=False)
+    monkeypatch.delenv("PLATFORM_USER", raising=False)
+    monkeypatch.delenv("JUPYTERHUB_USER", raising=False)
     if groups is not None:
         monkeypatch.setenv("PLATFORM_GROUPS", groups)
     if explicit is not None:
         monkeypatch.setenv("PLATFORM_QUEUE", explicit)
+    if user is not None:
+        monkeypatch.setenv("PLATFORM_USER", user)
+    if hub_user is not None:
+        monkeypatch.setenv("JUPYTERHUB_USER", hub_user)
 
     from platform_sdk import config
 
@@ -98,6 +104,7 @@ def _build(monkeypatch, groups=None, explicit=None):
         memory="128Mi",
         service_account="argo-workflow",
         queue=config.queue_name(),
+        submitted_by=config.submitter(),
     )
 
 
@@ -129,3 +136,36 @@ def test_推断不出组时不打标签也不报错(monkeypatch):
 def test_viewers_组拿不到队列(monkeypatch):
     wf = _build(monkeypatch, groups="viewers")
     assert "kueue.x-k8s.io/queue-name" not in _pod_labels(wf)
+
+
+# ------------------------------------------- 提交人归属(门户"我的作业")
+
+
+def _wf_labels(wf):
+    return wf["metadata"]["labels"]
+
+
+def test_提交人标签打在_workflow_上供门户过滤(monkeypatch):
+    wf = _build(monkeypatch, groups="algorithm-team", hub_user="zhenghe")
+    assert _wf_labels(wf)["platform-sdk/submitted-by"] == "zhenghe"
+
+
+def test_认不出提交人时不编一个默认值(monkeypatch):
+    # 编 "unknown"/os.getlogin() 会让门户上出现一堆归属错误的作业,
+    # 比不显示更糟。
+    wf = _build(monkeypatch)
+    assert "platform-sdk/submitted-by" not in _wf_labels(wf)
+
+
+def test_用户名不合法时宁可不打标签也不能让提交失败(monkeypatch):
+    # 邮箱形态的用户名带 @,K8s 会直接拒绝这个标签值——为了一个锦上添花
+    # 的归属标签把作业提交搞挂是不能接受的。
+    wf = _build(monkeypatch, hub_user="zhenghe@example.com")
+    assert "platform-sdk/submitted-by" not in _wf_labels(wf)
+    # 但作业本身该有的标签一个不少
+    assert _wf_labels(wf)["platform-sdk/job"] == "j"
+
+
+def test_PLATFORM_USER_优先于_JUPYTERHUB_USER(monkeypatch):
+    wf = _build(monkeypatch, hub_user="hubuser", user="override")
+    assert _wf_labels(wf)["platform-sdk/submitted-by"] == "override"

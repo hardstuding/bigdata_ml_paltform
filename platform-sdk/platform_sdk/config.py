@@ -189,3 +189,26 @@ def queue_name() -> str | None:
         if candidate in groups:
             return candidate
     return None
+
+
+def submitter() -> str | None:
+    """提交这个作业的人是谁,认不出来就返回 None。
+
+    **为什么需要**:平台门户要回答"我昨天那个任务跑成功了吗"(ADR-067),
+    而作业对象上如果不带提交人信息,门户只能列出集群里所有作业——那不是
+    "我的作业",是"集群监控",对一个普通分析师没用。
+
+    JupyterHub 给每个 notebook pod 注入 `JUPYTERHUB_USER`,这是最可靠的
+    来源(它就是 Keycloak 的 preferred_username,和门户从 oauth2-proxy
+    拿到的 `X-Forwarded-User` 是同一个值,两边能对上)。
+
+    返回 None 是正常情况:本机 IDE 里跑、Airflow 系统身份跑,都没有
+    "提交人"这个概念。这时候不打标签,门户上就不显示——**不要在这里
+    编一个默认值(比如 "unknown" 或者 os.getlogin()),那会让门户上出现
+    一堆归属错误的作业,比不显示更糟。**
+    """
+    for var in ("PLATFORM_USER", "JUPYTERHUB_USER"):
+        value = os.environ.get(var, "").strip()
+        if value:
+            return value
+    return None

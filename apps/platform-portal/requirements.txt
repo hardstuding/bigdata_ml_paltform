@@ -1,2 +1,4 @@
 flask==3.1.3
 requests==2.34.2
+# 读 Kueue 队列用量和 Argo 作业列表(ADR-067)。只读,RBAC 见 manifests/rbac.yaml。
+kubernetes==36.0.3

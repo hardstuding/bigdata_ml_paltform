@@ -21,6 +21,10 @@ spec:
     spec:
       # 见 ADR-041(队列资源管理):人在看这个页面找工具入口,归 interactive 档。
       priorityClassName: interactive
+      # 只读队列用量和作业列表(ADR-067),权限见 manifests/rbac.yaml。
+      # 没有这个 SA 的话页面照样打开,只是那两块显示"读不到"——这是刻意
+      # 设计的降级,门户不能因为少个权限就打不开。
+      serviceAccountName: platform-portal
       containers:
         - name: app
           # 2026-08-20(BACKLOG 2.1):构建期固化依赖 + 源码,见

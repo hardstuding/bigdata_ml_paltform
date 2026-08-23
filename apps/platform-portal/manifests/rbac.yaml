@@ -1,0 +1,60 @@
+# 门户读集群数据用的只读权限(ADR-067)。
+#
+# **只给 get/list/watch,而且只给这两类资源**——门户是个所有人登录后都能
+# 打开的页面,它的 ServiceAccount 权限就是"任何一个能登录的人间接能拿到
+# 的权限"上限。多给一点都是在扩大攻击面,给写权限更是没有任何理由:
+# 这个页面上没有一个按钮会改集群状态。
+#
+# ClusterQueue 是集群级资源,只能用 ClusterRole;Workflow 限定在
+# argo-workflows 这一个命名空间里,用 Role 就够,不要图省事写成 ClusterRole。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-portal
+  namespace: platform-portal
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-portal-read-queues
+rules:
+  - apiGroups: ["kueue.x-k8s.io"]
+    resources: ["clusterqueues", "localqueues"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-portal-read-queues
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-portal-read-queues
+subjects:
+  - kind: ServiceAccount
+    name: platform-portal
+    namespace: platform-portal
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-portal-read-workflows
+  namespace: argo-workflows
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-portal-read-workflows
+  namespace: argo-workflows
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-portal-read-workflows
+subjects:
+  - kind: ServiceAccount
+    name: platform-portal
+    namespace: platform-portal

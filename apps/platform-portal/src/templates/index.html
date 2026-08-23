@@ -1,0 +1,170 @@
+{#
+  平台门户页面。ADR-067。
+
+  这份模板从 src/app.py 里的 render_template_string 大字符串搬出来的——
+  改样式不该动 Python 源码。用 Flask 自带的 Jinja,不引任何前端框架
+  (ADR-032 那条约束仍然成立:Jinja 是 Flask 的一部分,和引 React 是
+  两回事)。
+
+  页面顺序是刻意的:**先回答"我的东西怎么样了",再回答"资源够不够",
+  最后才是工具入口**。原来的版本只有最后这一块,所以它本质上是个书签栏。
+#}
+<!doctype html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>平台门户</title>
+<style>
+  /* 颜色全部走变量,深色模式只重定义变量,不重写规则——不然每加一条
+     样式就要在两个地方各写一遍,迟早漏。 */
+  :root {
+    --bg: #ffffff; --fg: #1c1f23; --muted: #6b7280; --faint: #9ca3af;
+    --line: #e5e7eb; --card: #ffffff; --card-hover: #f9fafb;
+    --up: #16a34a; --down: #d1d5db; --warn: #b45309; --accent: #2563eb;
+    --chip: #f3f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a; --fg: #e6e8eb; --muted: #9aa3ad; --faint: #6b7280;
+      --line: #2a2f36; --card: #1b1f24; --card-hover: #21262d;
+      --up: #3fb950; --down: #3a4048; --warn: #d29922; --accent: #58a6ff;
+      --chip: #22272e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+                 "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--fg);
+    max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px;
+    line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 16px; margin-bottom: 28px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0; font-size: 0.9rem; }
+  .who { color: var(--fg); font-weight: 600; }
+  h2 {
+    font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--faint); margin: 32px 0 12px; font-weight: 600;
+  }
+  h2:first-of-type { margin-top: 8px; }
+
+  .note { color: var(--muted); font-size: 0.86rem; margin: 0 0 8px; }
+  .empty {
+    color: var(--muted); font-size: 0.88rem; border: 1px dashed var(--line);
+    border-radius: 8px; padding: 14px 16px;
+  }
+
+  /* 表格在窄屏上必须能横向滚,不能把整个 body 撑出横向滚动条 */
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 520px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--faint); font-weight: 600; font-size: 0.76rem;
+       text-transform: uppercase; letter-spacing: 0.05em; }
+  td.num { font-variant-numeric: tabular-nums; }
+
+  .chip {
+    display: inline-block; padding: 1px 8px; border-radius: 999px;
+    background: var(--chip); font-size: 0.75rem; color: var(--muted);
+  }
+  .chip-warn { color: var(--warn); font-weight: 600; }
+  .chip-run  { color: var(--accent); font-weight: 600; }
+  .chip-ok   { color: var(--up); font-weight: 600; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px;
+    background: var(--card); text-decoration: none; color: inherit; display: block;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .card:hover { background: var(--card-hover); border-color: var(--faint); }
+  .card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .card-name { font-weight: 600; font-size: 0.95rem; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+  .dot-up { background: var(--up); } .dot-down { background: var(--down); }
+  .card-desc { color: var(--muted); font-size: 0.84rem; margin-top: 3px; }
+
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line);
+           color: var(--faint); font-size: 0.8rem; }
+</style></head><body>
+
+<header>
+  <h1>平台门户</h1>
+  <p class="sub">
+    {% if username %}当前登录 <span class="who">{{ username }}</span> ·{% endif %}
+    统一 SSO(Keycloak / realm <code>platform</code>),点开任何一个工具都不用重新输密码
+  </p>
+</header>
+
+<h2>我的作业</h2>
+{% if jobs.error %}
+  <p class="empty">{{ jobs.error }}。这一栏取不到不影响下面的内容。</p>
+{% elif not jobs.rows %}
+  <p class="empty">
+    还没有你提交的作业。在 notebook 里用
+    <code>platform_sdk.submit_job("名字", "脚本.py")</code> 提交的作业会出现在这里。
+  </p>
+{% else %}
+  <div class="scroll"><table>
+    <tr><th>作业</th><th>状态</th><th>提交时间</th></tr>
+    {% for j in jobs.rows %}
+    <tr>
+      <td>{{ j.name }}</td>
+      <td>
+        {% if j.phase == 'Succeeded' %}<span class="chip chip-ok">成功</span>
+        {% elif j.phase == 'Running' %}<span class="chip chip-run">运行中</span>
+        {% elif j.phase in ('Failed', 'Error') %}<span class="chip chip-warn">{{ j.phase }}</span>
+        {% else %}<span class="chip">{{ j.phase }}</span>{% endif %}
+      </td>
+      <td class="num">{{ j.started }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+{% endif %}
+
+<h2>计算配额</h2>
+{% if queues.error %}
+  <p class="empty">{{ queues.error }}。</p>
+{% elif not queues.rows %}
+  <p class="empty">还没有配置队列。</p>
+{% else %}
+  <p class="note">
+    每个组有自己的配额;<b>空闲时可以借用其它组的</b>,别人要用时会被收回
+    (和 CDH 的队列一个道理)。“借用中”大于 0 说明这个组现在用的比自己的份额多。
+  </p>
+  <div class="scroll"><table>
+    <tr><th>组</th><th>CPU 配额</th><th>已用</th><th>其中借用</th><th>内存配额</th><th>排队中</th></tr>
+    {% for q in queues.rows %}
+    <tr>
+      <td>{{ q.label }} <span class="chip">{{ q.name }}</span></td>
+      <td class="num">{{ q.cpu_quota }}</td>
+      <td class="num">{{ q.cpu_used }}</td>
+      <td class="num">{% if q.cpu_borrowed and q.cpu_borrowed != '0' %}<span class="chip-warn">{{ q.cpu_borrowed }}</span>{% else %}0{% endif %}</td>
+      <td class="num">{{ q.mem_quota }}</td>
+      <td class="num">{% if q.pending %}<span class="chip-warn">{{ q.pending }}</span>{% else %}0{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+{% endif %}
+
+{% for category, items in categories.items() %}
+<h2>{{ category }}</h2>
+<div class="grid">
+{% for t in items %}
+<a class="card" href="{{ t.url }}" target="_blank" rel="noopener">
+  <div class="card-top">
+    <span class="card-name">{{ t.name }}</span>
+    <span class="dot {{ 'dot-up' if t.up else 'dot-down' }}"
+          title="{{ '现在能连上' if t.up else '现在连不上(可能是 park 状态,或者刚好在重启)' }}"></span>
+  </div>
+  <div class="card-desc">{{ t.description }}</div>
+</a>
+{% endfor %}
+</div>
+{% endfor %}
+
+<footer>
+  绿点 = 打开这个页面时现场探测到能连通;灰点 = 连不上。<b>灰点不代表永久下线</b>——
+  这台机器按需 park/unpark 组件是常态,过一会再看可能就上了。
+</footer>
+</body></html>

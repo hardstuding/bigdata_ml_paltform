@@ -28,6 +28,9 @@ _CONFIGMAP_LIMIT_BYTES = 900 * 1024
 # K8s 对象名规则(RFC 1123):小写字母数字和 -,不能以 - 开头结尾。
 _NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
+# K8s 标签值的规则:字母数字开头结尾,中间可以有 - _ .,最长 63 个字符。
+_LABEL_VALUE_RE = re.compile(r"^[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$")
+
 
 def _k8s_clients():
     """拿到 k8s 客户端,自动适配"在集群里跑"和"在本机跑"两种情况。
@@ -104,6 +107,7 @@ def _build_workflow(
     memory: str,
     service_account: str,
     queue: str | None,
+    submitted_by: str | None,
 ) -> dict[str, Any]:
     """拼出 Argo Workflow 对象。
 
@@ -130,15 +134,27 @@ def _build_workflow(
     if queue:
         pod_labels["kueue.x-k8s.io/queue-name"] = queue
 
+    # 提交人标签打在 **Workflow** 上(不是 Pod 上,和队列标签正相反):
+    # 门户查的是 Workflow 列表,按这个标签过滤出"我的作业"(ADR-067)。
+    wf_labels = {
+        "app.kubernetes.io/managed-by": "platform-sdk",
+        "platform-sdk/job": name,
+    }
+    if submitted_by:
+        # 标签值必须符合 K8s 的规则(字母数字加 -_. ,最长 63)。Keycloak
+        # 的用户名一般没问题,但邮箱形态的用户名带 @ 就会被 API server
+        # 直接拒绝——**那会让整个作业提交失败**,为了一个"锦上添花"的
+        # 归属标签把主流程搞挂是不能接受的,所以这里过滤掉不合法的值,
+        # 宁可门户上少显示一个作业。
+        if _LABEL_VALUE_RE.match(submitted_by):
+            wf_labels["platform-sdk/submitted-by"] = submitted_by
+
     return {
         "apiVersion": "argoproj.io/v1alpha1",
         "kind": "Workflow",
         "metadata": {
             "generateName": f"{name}-",
-            "labels": {
-                "app.kubernetes.io/managed-by": "platform-sdk",
-                "platform-sdk/job": name,
-            },
+            "labels": wf_labels,
         },
         "spec": {
             "entrypoint": "main",
@@ -218,6 +234,7 @@ def submit_job(
     namespace = namespace or config.argo_namespace()
     image = image or config.default_job_image()
     queue = queue or config.queue_name()
+    submitted_by = config.submitter()
 
     core_api, custom_api = _k8s_clients()
     cm_name = _upload_script(core_api, name, script_path, namespace)
@@ -231,6 +248,7 @@ def submit_job(
         memory=memory,
         service_account=service_account,
         queue=queue,
+        submitted_by=submitted_by,
     )
 
     created = custom_api.create_namespaced_custom_object(

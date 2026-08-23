@@ -9,7 +9,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
+# 2026-08-23:HTML 从 Python 字符串里搬进 templates/(ADR-067),这里要跟着
+# 一起拷进去——只拷 app.py 的话镜像跑起来会 TemplateNotFound。
 COPY src/app.py .
+COPY src/templates/ ./templates/
 
 EXPOSE 8080
 CMD ["python3", "app.py"]
