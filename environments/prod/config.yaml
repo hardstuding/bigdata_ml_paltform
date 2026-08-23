@@ -40,6 +40,23 @@ tls_acme_email: platform-ops@your-real-domain.example.com
 # templates/platform-alertmanager-notification/alertmanagerconfig-webhook.yaml
 alert_notification_mode: webhook
 
+# Postgres 备份传到哪。**prod 必须指向真正独立于这几台服务器之外的对象
+# 存储**(公有云 S3 / 另一个机房的 MinIO),否则"机房整个出问题"这类场景
+# 下备份和数据一起没,备份等于没做(ADR-033 明确记过这个缺口)。
+#
+# 下面是占位值,上生产前必须换成真实地址,并且**手工建好
+# `postgres-backup-target` 这个 Secret**(key 沿用 rootUser/rootPassword,
+# 和集群内 MinIO 那份字段名一致,这样 CronJob 不用改):
+#   kubectl -n data create secret generic postgres-backup-target \
+#     --from-literal=rootUser=<异地存储的 access key> \
+#     --from-literal=rootPassword=<secret key>
+#
+# **这一档没有在真实环境验证过**,和域名/告警那两块一样属于"配置结构就位、
+# 改配置就生效",不代表备份真的传得过去。
+backup_s3_endpoint: https://s3.your-offsite-storage.example.com
+backup_s3_bucket: bigdata-platform-backups
+backup_s3_secret: postgres-backup-target
+
 # 2026-08-21 补:之前这份文件**没有 enabled_components**,导致
 # `render-environment-config.py prod` 跑一半失败——模板替换那步已经把
 # platform/apps/*.yaml 的域名改成 prod 占位域名了,组件选择那步才报错,

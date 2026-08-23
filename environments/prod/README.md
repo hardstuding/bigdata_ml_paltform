@@ -72,7 +72,14 @@ Encrypt 或企业内部 CA,看有没有公网出口决定用哪种 ACME 方式)�
 删掉(见那个 ConfigMap 顶部注释,是 local-lite 专用的临时方案)。这一条
 还没做,是 `render-if` 机制的下一个适用场景。
 
-### 3. 备份目标从本地 MinIO 换成真正异地的存储
+### 3. 备份目标从本地 MinIO 换成真正异地的存储 —— **已做成配置项**
+
+**2026-08-23 更新**:备份目标现在是 `environments/<env>/config.yaml` 里的
+`backup_s3_endpoint` / `backup_s3_bucket` / `backup_s3_secret` 三个键,
+prod 那一档已经指向占位的异地地址,上生产前换成真实地址 + 手工建好
+`postgres-backup-target` 这个 Secret 即可,不用改 manifest。
+**但这一档没有在真实环境验证过**,和域名/告警一样属于"配置结构就位"。
+备份加密仍然没做,见下面原文。
 
 [ADR-033](../../docs/decisions/033-postgres-backup.md) 的 Postgres
 备份现在传到集群自己的 MinIO——如果 MinIO 本身也在这几台服务器上

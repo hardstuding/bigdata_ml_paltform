@@ -88,6 +88,7 @@ DIR_MAP = {
     # 的注释,这次不是新机制,是同一个机制第三/四次使用)。
     "apps-flink-streaming-demo-manifests": REPO_ROOT / "apps" / "flink-streaming-demo" / "manifests",
     "apps-kafka-producer-manifests": REPO_ROOT / "apps" / "kafka-producer" / "manifests",
+    "apps-postgres-backup-manifests": REPO_ROOT / "apps" / "postgres-backup" / "manifests",
 }
 
 # 模板文件第一行可以写 `# render-if: <config键> == <值>`,表示"只有当前
@@ -162,7 +163,8 @@ def render_text(text: str, config: dict) -> str:
     # 顶部那份"每个环境都必须有"的必填校验**——local-lite 的 config.yaml 里
     # 塞一个假的 ACME 邮箱纯属噪音。代价是缺键要在这里报错,报错信息里要
     # 说清楚该去哪补,不能只抛一个 KeyError。
-    for key in ("tls_acme_server", "tls_acme_email"):
+    for key in ("tls_acme_server", "tls_acme_email",
+                "backup_s3_endpoint", "backup_s3_bucket", "backup_s3_secret"):
         token = "{{" + key.upper() + "}}"
         if token not in text:
             continue

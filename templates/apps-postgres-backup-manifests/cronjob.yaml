@@ -103,17 +103,17 @@ spec:
               env:
                 - name: BACKUP_S3_USER
                   valueFrom:
-                    secretKeyRef: {name: minio-root, key: rootUser}
+                    secretKeyRef: {name: {{BACKUP_S3_SECRET}}, key: rootUser}
                 - name: BACKUP_S3_PASSWORD
                   valueFrom:
-                    secretKeyRef: {name: minio-root, key: rootPassword}
+                    secretKeyRef: {name: {{BACKUP_S3_SECRET}}, key: rootPassword}
               command:
                 - sh
                 - -c
                 - |
                   set -e
-                  mc alias set backuptarget http://minio.minio.svc.cluster.local:9000 "$BACKUP_S3_USER" "$BACKUP_S3_PASSWORD"
-                  mc mb --ignore-existing backuptarget/backups
+                  mc alias set backuptarget {{BACKUP_S3_ENDPOINT}} "$BACKUP_S3_USER" "$BACKUP_S3_PASSWORD"
+                  mc mb --ignore-existing backuptarget/{{BACKUP_S3_BUCKET}}
                   for f in /backup/*.sql.gz; do
                     # 第二道防线,不指望它是唯一防线:dump 那一步已经改成
                     # 会在 pg_dumpall 真的失败时让整个 Job 失败(见
@@ -128,13 +128,13 @@ spec:
                       echo "!!! $f 只有 ${SIZE} 字节,明显不是一份完整的备份,拒绝上传" >&2
                       exit 1
                     fi
-                    mc cp "$f" "backuptarget/backups/postgres/$(basename "$f")"
+                    mc cp "$f" "backuptarget/{{BACKUP_S3_BUCKET}}/postgres/$(basename "$f")"
                   done
                   # 【可调参数,见 docs/operations/tuning.md】保留 14 天,更久的自动清掉,
                   # 不然会一直无限增长。
-                  mc rm --older-than 14d --recursive --force backuptarget/backups/postgres/ || true
+                  mc rm --older-than 14d --recursive --force backuptarget/{{BACKUP_S3_BUCKET}}/postgres/ || true
                   echo "=== 当前 backups/postgres/ 下的文件 ==="
-                  mc ls backuptarget/backups/postgres/
+                  mc ls backuptarget/{{BACKUP_S3_BUCKET}}/postgres/
               volumeMounts:
                 - name: backup
                   mountPath: /backup

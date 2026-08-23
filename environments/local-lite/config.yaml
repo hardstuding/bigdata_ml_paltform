@@ -20,6 +20,12 @@ tls_issuer_mode: selfsigned
 # 本机验证环境,没有也不需要外部通知渠道。
 alert_notification_mode: none
 
+# Postgres 备份传到哪。默认就是集群自己的 MinIO。
+# **这一档没有异地可言**——本机验证环境,备份和数据在同一台笔记本上。
+backup_s3_endpoint: http://minio.minio.svc.cluster.local:9000
+backup_s3_bucket: backups
+backup_s3_secret: minio-root
+
 # 2026-08-20 新增(ADR-057 第三批):**这份清单是按 docs/architecture.md
 # 组件表里"local-lite(设计归属)"这一列的 ✅/⚠️ 推出来的,不是对着这台
 # 机器当前真实状态核对过的**——写这份清单的时候 colima 没有在跑,没办法

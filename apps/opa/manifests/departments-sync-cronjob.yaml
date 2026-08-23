@@ -1,0 +1,78 @@
+# 把 platform/iam/employees.csv 的 username -> department 映射同步进 OPA
+# 的运行时数据(ADR-063,行级过滤用)。和 grants-sync-cronjob.yaml 是同一个
+# 模式(同一个原因:公开仓库读 raw content 不用认证、OPA Data API PUT 立即
+# 生效不用重启、python:3.12-slim 只用标准库不装包),单独一个 CronJob 而不是
+# 塞进 grants-sync 那个,是因为两者读的是不同的 CSV、写的是不同的 data 路径,
+# 一个失败不该影响另一个(grants 断了会导致误拒表访问,department 断了会
+# 导致行级过滤全部按"未知部门"处理、查询返回空结果——两种失败模式的影响面
+# 不一样,分开更容易看出问题出在哪一半)。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opa-departments-sync
+  namespace: opa
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 60
+      template:
+        metadata:
+          # 要和 platform/network-policies/manifests/opa.yaml 里
+          # allow-grants-sync-to-opa 那条规则的 podSelector 对上——这个
+          # CronJob 的 pod label 和 opa-grants-sync 用同一个 app label
+          # (app: opa-grants-sync),复用同一条 NetworkPolicy,不用再加一条
+          # 几乎一样的规则。
+          labels:
+            app: opa-grants-sync
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: python:3.12-slim
+              command:
+                - python3
+                - -c
+                - |
+                  import csv, io, json, os, socket, sys, urllib.request
+
+                  # 和 opa-grants-sync 同样的代理探测逻辑(见那边注释里记的
+                  # 2026-08-16 教训:写死代理地址在 cloud-full 上连不上)。
+                  _s = socket.socket()
+                  _s.settimeout(2)
+                  if _s.connect_ex(("192.168.5.2", 1087)) == 0:
+                      os.environ["HTTP_PROXY"] = "http://192.168.5.2:1087"
+                      os.environ["HTTPS_PROXY"] = "http://192.168.5.2:1087"
+                      os.environ["NO_PROXY"] = "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,192.168.0.0/16"
+
+                  RAW_URL = "https://raw.githubusercontent.com/hardstuding/bigdata_ml_paltform/main/platform/iam/employees.csv"
+                  OPA_URL = "http://opa.opa.svc.cluster.local:8181/v1/data/trino/user_departments"
+
+                  req = urllib.request.Request(RAW_URL, headers={"User-Agent": "opa-departments-sync"})
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      csv_text = resp.read().decode("utf-8")
+
+                  rows = list(csv.DictReader(io.StringIO(csv_text)))
+                  departments = [
+                      {"username": r["username"], "department": r["department"]}
+                      for r in rows
+                      if r.get("username") and r.get("department")
+                  ]
+
+                  body = json.dumps(departments).encode("utf-8")
+                  put_req = urllib.request.Request(OPA_URL, data=body, method="PUT", headers={"Content-Type": "application/json"})
+                  with urllib.request.urlopen(put_req, timeout=20) as resp:
+                      status = resp.status
+                  print(f"同步完成:{len(departments)} 条部门记录,OPA 返回 {status}")
+                  if status not in (200, 204):
+                      sys.exit(1)
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi

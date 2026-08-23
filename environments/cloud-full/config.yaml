@@ -27,6 +27,14 @@ tls_issuer_mode: selfsigned
 # 集成环境,告警看 Alertmanager 自己的 UI 就够,不往外推。
 alert_notification_mode: none
 
+# Postgres 备份传到哪。默认就是集群自己的 MinIO。
+# **注意:这不是真正的异地备份。** MinIO 就跑在这台云主机上,机器整个出
+# 问题(磁盘损坏、实例被释放)时备份和数据一起没。集成环境接受这个风险,
+# prod 不行——见 ADR-033 和 environments/prod/README.md。
+backup_s3_endpoint: http://minio.minio.svc.cluster.local:9000
+backup_s3_bucket: backups
+backup_s3_secret: minio-root
+
 # 2026-08-20 新增(ADR-057 第三批):cloud-full 是"功能完整"环境,目前
 # `apps/components/` 下的全部组件都要启用——这份清单和 2026-08-20 渲染
 # 这份配置之前 `apps/definitions/` 里实际常驻的 43 个文件逐一核对过,
