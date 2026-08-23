@@ -60,8 +60,10 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 日志 | ✅ | Loki + Alloy 采集全部 pod stdout,和指标同一个 Grafana 界面(ADR-020) |
 | 告警产生 | ✅ | Alertmanager 已开,chart 自带规则生效,抓到过真实问题(ADR-034) |
 | 告警送达 | ❌ | **没有配任何外部通知渠道**——现在只能"打开界面查",不会推送到人。邮件/企微/Slack 的配置模板已经预留在 `platform/apps/kube-prometheus-stack.yaml` 里注释着,需要真实凭据才能激活 |
+| 数据质量断言 | ✅ | OpenMetadata 自带 Data Quality(ADR-065),三条断言实机跑通;另用一条故意失败的探针验证过「绿灯能变红」。局限:只覆盖 demo 一张表,断言失败时还没有告警通道 |
 | 备份 / 恢复 | ✅ | Postgres 每日备份,恢复演练验证过(ADR-033) |
-| 资源治理 | ✅ | ResourceQuota / LimitRange / PriorityClass(ADR-041) |
+| 资源治理(组件级上限) | ✅ | ResourceQuota / LimitRange / PriorityClass(ADR-041)——防「单个组件失控拖死机器」 |
+| 资源治理(按组分配 + 空闲互借) | ✅ | Kueue,按 `platform/iam/` 已有的组建队列,同一 cohort 内可借(ADR-064)。**实测有数字**:platform-team 标称 2 CPU,提一个要 3 CPU 的作业被 admit、队列状态里 `borrowed: 1`;提要 6 CPU 的被挡住 `insufficient quota`。队列标签由 SDK 按提交者的组自动打,不是用户手填 |
 | 网络隔离 | ✅ | NetworkPolicy 覆盖核心命名空间(ADR-035) |
 | 破坏性操作防护 | ✅ | `scripts/confirm-destructive-kubectl.sh`(历史上真误删过 namespace,见 `docs/operations/incidents.md`) |
 | 计费资源门禁 | ✅ | `cloud-full-preflight.sh` + 空闲自动关机看门狗(经济模式) |
