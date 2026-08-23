@@ -26,6 +26,22 @@
 
 ---
 
+### CI 降成只构建 amd64(等本机 colima 切完之后)
+
+2026-08-23 定了三档环境统一 x86_64(见
+[`docs/operations/cpu-architecture.md`](operations/cpu-architecture.md)),
+本机 colima 要重建成 `--arch x86_64 --vm-type vz --vz-rosetta`。
+
+**那一步做完之后**,`.github/workflows/build-images.yml` 里的
+`platforms: linux/amd64,linux/arm64` 可以降成只建 amd64:构建时间减半,
+而且 `apps/flink-iceberg-image` 那条"只建 amd64"的特例注释可以整段删掉
+——那个特例存在的唯一原因就是 apache-flink 没有 aarch64 wheel。
+
+**为什么不现在就改**:本机切换完成之前砍掉 arm64 那条腿,local-lite 会
+立刻拉不到能跑的镜像。顺序不能反。
+
+---
+
 ### flink-kubernetes-operator 的 4 个 CRD 一直 OutOfSync(2026-08-23 记录)
 
 `kubectl -n argocd get app flink-kubernetes-operator` 常年 OutOfSync/Healthy,
