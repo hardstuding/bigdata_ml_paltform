@@ -86,33 +86,34 @@ if not triggered:
     sys.exit(1)
 print("triggered ok")
 
-# 3. 轮询这次运行的状态,最多等 10 分钟——第一次跑很可能要现拉
-#    docker.getcollate.io/openmetadata/ingestion-base 这个镜像(未验证过大小,
-#    如果这台集群从来没缓存过,可能是这个脚本超时的最常见原因,不代表配置
-#    本身是错的,见 scripts/29 头部注释里关于镜像缓存的风险标注)。
-state = None
-deadline = time.time() + 600
-while time.time() < deadline:
-    statuses = om("GET", f"/api/v1/services/ingestionPipelines/{pid}/pipelineStatus", ok404=True)
-    entries = statuses.get("data") if isinstance(statuses, dict) else statuses
-    if entries:
-        latest = sorted(entries, key=lambda x: x.get("timestamp", 0))[-1]
-        state = latest.get("pipelineState")
-        print(f"  pipelineState={state}")
-        if state in ("success", "partialSuccess", "failed"):
-            break
-    time.sleep(15)
-
-if state not in ("success", "partialSuccess"):
-    print(f"FAIL: 扫描没有在 10 分钟内跑到 success/partialSuccess(最终状态: {state})")
-    sys.exit(1)
-print(f"扫描完成,状态: {state}")
+# 3. 采集已触发。**等 Job 跑完这一步放在脚本的 shell 部分做**,不在这里
+#    ——这段 Python 是 kubectl exec 进 table-registration-app 的 Pod 里跑的,
+#    Pod 里没有 kubectl。2026-08-23 第一版就是把 kubectl 写在这里,直接
+#    FileNotFoundError。
 
 # 4. 独立核实:不信任务状态,直接查一张我们知道真实结构的表有没有真的出现
 #    在目录里,字段名对不对——scripts/08-create-demo-data.sh 建的
 #    iceberg.demo.orders,列是 order_id/customer_name/region/product/
 #    amount/order_date。
-table = om("GET", "/api/v1/tables/name/trino.iceberg.demo.orders?fields=columns", ok404=True)
+# **轮询业务结果本身,不依赖任何任务状态接口。**
+#
+# 2026-08-23 的教训:原来这里先轮询
+# `/api/v1/services/ingestionPipelines/{id}/pipelineStatus` 判断扫描成没成功
+# ——那个路径在 OpenMetadata 1.13.3 上**直接 404**(照文档猜的),于是采集
+# 明明跑成功了、目录里表也进来了,脚本却一直判 FAIL。**验证工具自己出错、
+# 把成功报成失败,比没有验证更糟**:它会让人去查一个根本不存在的问题,
+# 那天为此白折腾了好几轮。
+#
+# 现在直接盯"表有没有出现在目录里"——这既是我们真正想要的结果,也不依赖
+# 对任何一个 REST 接口形状的猜测。扫描没跑完就是查不到,继续等即可。
+table = None
+deadline = time.time() + 600
+while time.time() < deadline:
+    table = om("GET", "/api/v1/tables/name/trino.iceberg.demo.orders?fields=columns", ok404=True)
+    if table and table.get("columns"):
+        break
+    print("  目录里还没有 trino.iceberg.demo.orders,等采集跑完...")
+    time.sleep(20)
 if not table:
     print("FAIL: OpenMetadata 目录里找不到 trino.iceberg.demo.orders,采集没有真的把这张表发现出来。")
     sys.exit(1)
