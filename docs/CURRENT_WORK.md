@@ -13,9 +13,48 @@
 > 想知道"以前某个问题怎么解决的" → [`docs/journal/`](journal/) 和
 > [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 
-## CURRENT(2026-08-23)
+## CURRENT(2026-08-23 下午):按"企业级生产可用"补缺口
 
-### 这一轮上云验证的三条结论
+zhenghe 2026-08-23 提了三个问题(门户/自建工具能不能优化、按角色的资源
+管理做了没有、有没有部署使用运维手册),并说"有些设计可能是我没想到的,
+你可以给我建议一下,我们的目的是企业级生产可用好用"。据此主动盘点出六条
+"不做会出事"的缺口,清单和挑选标准在
+[`docs/production-readiness-gaps.md`](production-readiness-gaps.md)。
+zhenghe 回复"这 6 个挺重要的,都要做"。
+
+### 进度
+
+| # | 缺口 | 状态 |
+|---|---|---|
+| 1 | 数据质量断言 | ✅ 实机验证([ADR-065](decisions/065-data-quality-on-openmetadata.md)) |
+| 2 | 数据新鲜度 SLO | ❌ 没开始 |
+| 3 | 查询审计 | 🟡 第一段跑通,事件在 Kafka;**还没落 Iceberg、没有断流告警**([ADR-066](decisions/066-trino-query-audit.md)) |
+| 4 | 成本归属(OpenCost) | ❌ 没开始 |
+| 5 | Schema Registry | ❌ 没开始 |
+| 6 | 门户改工作台 | ❌ 没开始(刻意排最后,它依赖 1/4 的数据) |
+
+同一轮里另外做完的:
+- **按组分配计算配额 + 空闲互借**(zhenghe 问的第 2 个问题)——Kueue,
+  [ADR-064](decisions/064-role-based-resource-quota.md),实机验证:
+  platform-team 标称 2 CPU,提要 3 CPU 的作业被 admit 且 `borrowed: 1`;
+  提要 6 CPU 的被挡住。11 个 webhook 全部限定在两个命名空间内。
+- **使用手册**(第 3 个问题)116 → 201 行,补齐大数据开发/算法工程师
+  两个原本空白的角色;新增 [`docs/QUICKSTART.md`](QUICKSTART.md) 带人
+  半小时跑通一条完整链路。
+
+### 下一步
+
+按上表往下做。**门户(第 6 条)不要提前做**——它要显示的"你这个组还剩多少
+配额""这张表质量如何"依赖前面几条,先做只会做出一个更好看的链接目录。
+
+### 云主机状态
+
+已停机(经济模式)。这一轮的 Kueue / 数据质量 / 查询审计三件事都是在
+2026-08-23 06:20–07:20 这一次开机窗口里验证完的。
+
+---
+
+## 上一轮(2026-08-22~23 上午):上云验证的三条结论
 
 **1. OpenMetadata 自动采集 ✅ 端到端通过**(`OPENMETADATA_TRINO_INGESTION_OK`)。
 判据是直接查 API 确认 `trino.iceberg.demo.orders` 在目录里、六个字段和
