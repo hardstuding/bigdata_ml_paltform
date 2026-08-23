@@ -89,6 +89,7 @@ enabled_components:
   - iam-sync.yaml
   - jupyterhub.yaml
   - kafka-cluster.yaml
+  - schema-registry.yaml
   - kafka-operator.yaml
   - kafka-producer-device-events.yaml
   - keycloak-db-init.yaml

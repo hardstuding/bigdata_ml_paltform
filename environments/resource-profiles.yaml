@@ -151,6 +151,12 @@ local-lite:
   # 审计 topic(ADR-066)。本机磁盘小,保留 3 天够开发验证用。
   audit_topic_partitions: "1"
   audit_topic_retention_ms: "259200000"
+  # Karapace(ADR-068)。local-lite 连 Kafka 都没启用,这几个值只是占位。
+  karapace_replicas: "1"
+  karapace_cpu: "50m"
+  karapace_memory_request: "256Mi"
+  karapace_memory_limit: "512Mi"
+
 
 
 
@@ -270,6 +276,14 @@ cloud-full:
   # 保留期短了等需要时已经滚掉,而且补不回来。
   audit_topic_partitions: "3"
   audit_topic_retention_ms: "2592000000"
+  # Karapace(ADR-068)。单副本够用:它是无状态的,状态全在 Kafka 的
+  # _schemas topic 里,挂了重启几秒就恢复,而且**它不在查询链路上**——
+  # registry 短暂不可用只影响新 schema 注册,不影响已有作业读写数据。
+  karapace_replicas: "1"
+  karapace_cpu: "100m"
+  karapace_memory_request: "384Mi"
+  karapace_memory_limit: "768Mi"
+
 
 
 
@@ -415,5 +429,13 @@ prod:
   # 90 天是起步值不是合规结论。
   audit_topic_partitions: "6"
   audit_topic_retention_ms: "7776000000"
+  # Karapace(ADR-068)。prod 两副本:不是为了扛量(量很小),是为了
+  # 滚动升级和节点故障时注册接口不中断。Karapace 自己有 master 选举,
+  # 多副本时只有一个是 master 负责写,其余提供读,这是它设计支持的形态。
+  karapace_replicas: "2"
+  karapace_cpu: "500m"
+  karapace_memory_request: "1Gi"
+  karapace_memory_limit: "2Gi"
+
 
 

@@ -1,0 +1,132 @@
+# Karapace —— Kafka 的 Schema Registry(ADR-068)。
+#
+# **这是渲染产物的源文件**,改这里,不要改 apps/schema-registry/manifests/。
+#
+# 为什么是 Karapace 而不是 Confluent Schema Registry / Apicurio,见 ADR-068。
+# 一句话:Confluent 的是 Confluent Community License(不是 OSI 开源,正是
+# 这个项目想躲开的那类授权陷阱);Apicurio 要装 operator + 一套 CRD,对一个
+# 单进程服务来说不成比例;Karapace 是 Apache 2.0,一个 Deployment 就够,
+# 而且原生兼容 Confluent 的 wire protocol,Flink/Spark 客户端不用改。
+#
+# **没有 Ingress**,这是刻意的:schema registry 的消费者全部在集群内
+# (Flink / Spark / 生产端),对外开一个没有认证的写接口没有任何好处——
+# 谁能往 registry 里写 schema,谁就能决定下游怎么解析数据。要人工查看
+# schema 用 `kubectl port-forward`。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: schema-registry
+---
+# Karapace 的存储就是这个 Kafka topic,没有额外的数据库。
+# **partitions 必须是 1、cleanup.policy 必须是 compact**——它是一个
+# 顺序重放的日志,多分区会让 schema 的先后顺序失去意义;不 compact 的话
+# 老版本 schema 会被保留期删掉,注册表就残缺了。这两个值不是可调项,
+# 所以没有做成 {{RES:...}}。
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: schemas
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: platform-kafka
+spec:
+  topicName: _schemas
+  partitions: 1
+  replicas: {{RES:kafka_replication_factor}}
+  config:
+    cleanup.policy: compact
+    min.insync.replicas: {{RES:kafka_min_insync_replicas}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: karapace
+  namespace: schema-registry
+  labels:
+    app: karapace
+spec:
+  replicas: {{RES:karapace_replicas}}
+  selector:
+    matchLabels:
+      app: karapace
+  template:
+    metadata:
+      labels:
+        app: karapace
+    spec:
+      # 上游改字段时,拦不住的后果是下游作业一起炸(ADR-068 的动机)。
+      # 但它本身不在查询链路上,不是 platform-critical。
+      priorityClassName: interactive
+      containers:
+        - name: karapace
+          image: ghcr.io/aiven-open/karapace:6.2.2
+          # entrypoint 是从上游 container/compose.yml(6.2.2 tag)抄的,
+          # 不是猜的——镜像默认 CMD 不会直接起 registry。
+          command: ["python3", "-m", "karapace"]
+          env:
+            - name: KARAPACE_KARAPACE_REGISTRY
+              value: "true"
+            - name: KARAPACE_BOOTSTRAP_URI
+              value: "platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+            - name: KARAPACE_HOST
+              value: "0.0.0.0"
+            - name: KARAPACE_PORT
+              value: "8081"
+            - name: KARAPACE_ADVERTISED_HOSTNAME
+              value: "karapace.schema-registry.svc.cluster.local"
+            - name: KARAPACE_ADVERTISED_PROTOCOL
+              value: "http"
+            - name: KARAPACE_CLIENT_ID
+              value: "karapace"
+            - name: KARAPACE_GROUP_ID
+              value: "karapace"
+            - name: KARAPACE_MASTER_ELIGIBILITY
+              value: "true"
+            - name: KARAPACE_TOPIC_NAME
+              value: "_schemas"
+            # **BACKWARD 而不是上游默认的 FULL,这是这个组件最重要的一个
+            # 参数,值得单独说。** 它决定"什么样的 schema 变更会被拒绝":
+            #   BACKWARD = 新版本的消费者能读老数据(加可选字段、删字段 OK)
+            #   FULL     = 双向都要兼容,连"加一个可选字段"都要两边都成立
+            # 数据平台的现实是消费端(Flink 作业、下游表)先升级、生产端
+            # 后升级,BACKWARD 正是为这个顺序设计的。一上来就 FULL 会把
+            # 大量正常演进挡在门外,结果是人绕过 registry 直接改——
+            # **一个太严格以至于被绕过的校验,等于没有校验。**
+            - name: KARAPACE_COMPATIBILITY
+              value: "BACKWARD"
+            - name: KARAPACE_LOG_LEVEL
+              value: "INFO"
+          ports:
+            - containerPort: 8081
+              name: http
+          resources:
+            requests:
+              cpu: "{{RES:karapace_cpu}}"
+              memory: "{{RES:karapace_memory_request}}"
+            limits:
+              memory: "{{RES:karapace_memory_limit}}"
+          readinessProbe:
+            httpGet:
+              path: /_health
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_health
+              port: 8081
+            initialDelaySeconds: 60
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: karapace
+  namespace: schema-registry
+spec:
+  selector:
+    app: karapace
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081

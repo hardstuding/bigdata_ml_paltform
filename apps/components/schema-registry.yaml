@@ -1,0 +1,25 @@
+# Kafka Schema Registry(Karapace),见
+# docs/decisions/068-schema-registry.md。源 manifest 在
+# templates/apps-schema-registry-manifests/(副本数/规格按环境分档)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: schema-registry
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/schema-registry/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: schema-registry
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
