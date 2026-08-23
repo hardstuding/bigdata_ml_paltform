@@ -42,7 +42,12 @@ zhenghe 2026-08-23:"有些设计可能是我没想到的,你可以给我建议�
 的数据模型),让分析师在查一张表之前就能看到"这张表昨天的质量检查过没过"
 ——只写进告警通道的话,只有运维看得到,用数据的人看不到,等于白做。
 
-## 2. 数据新鲜度 SLO:监控的对象错了
+## 2. 数据新鲜度 SLO —— 🟡 检测已做([ADR-070](decisions/070-data-freshness-slo.md)),告警出口未做
+
+做法上有个转向值得记:它**不是**一个新的监控子系统,是数据质量断言再加
+一条(理由见 ADR-070)。下面是原始判断,保留。
+
+### 原始判断:监控的对象错了
 
 **现状:**有 kube-prometheus-stack、有 Grafana、有 Alertmanager,但监控
 的全部是**组件**(Pod 活着吗、CPU 多少、JVM 堆多大)。
@@ -80,7 +85,9 @@ event listener,**查询本身没有留痕**。
 它还能回答"哪些表其实没人用"——`docs/BACKLOG.md` P5 那个"项目瘦身审计"
 需要的正是这类数据。
 
-## 4. 成本归属:和 ADR-064 是一体两面
+## 4. 成本归属 —— 🟡 配置完成未部署([ADR-069](decisions/069-cost-attribution.md))
+
+### 原始判断:和 ADR-064 是一体两面
 
 **现状:**没有任何成本可见性。
 
@@ -96,7 +103,9 @@ event listener,**查询本身没有留痕**。
 ——本会话已经因为空转烧掉过约 ¥25。真到多机器多团队,没有归属就是一笔
 糊涂账。
 
-## 5. Schema 变更 / 数据契约:上游改字段,下游炸
+## 5. Schema Registry —— 🟡 manifest 完成未部署([ADR-068](decisions/068-schema-registry.md),选的 Karapace)
+
+### 原始判断:上游改字段,下游炸
 
 **现状:**Kafka 部署了,但**没有 Schema Registry**;Flink 作业里 schema
 是**写死在 SQL 里**的。
@@ -109,7 +118,9 @@ event listener,**查询本身没有留痕**。
 **建议做法:**Kafka 侧上 Schema Registry 做兼容性校验(只允许向后兼容的
 变更),生产端和消费端都从 registry 拿 schema,不再各写一份。
 
-## 6. 门户从"链接目录"改成"工作台"(zhenghe 已经指出 UI 和功能都不好)
+## 6. 门户改工作台 —— 🟡 代码完成未上集群([ADR-067](decisions/067-portal-as-workbench.md))
+
+### 原始判断(zhenghe 已经指出 UI 和功能都不好)
 
 **现状:**`apps/platform-portal/src/app.py` 一共 230 行,HTML/CSS 内联在
 `render_template_string` 里,本质是**一个带 SSO 的链接目录**——它唯一

@@ -27,11 +27,19 @@ zhenghe 回复"这 6 个挺重要的,都要做"。
 | # | 缺口 | 状态 |
 |---|---|---|
 | 1 | 数据质量断言 | ✅ 实机验证([ADR-065](decisions/065-data-quality-on-openmetadata.md)) |
-| 2 | 数据新鲜度 SLO | ❌ 没开始 |
-| 3 | 查询审计 | 🟡 第一段跑通,事件在 Kafka;**还没落 Iceberg、没有断流告警**([ADR-066](decisions/066-trino-query-audit.md)) |
-| 4 | 成本归属(OpenCost) | ❌ 没开始 |
-| 5 | Schema Registry | ❌ 没开始 |
-| 6 | 门户改工作台 | ❌ 没开始(刻意排最后,它依赖 1/4 的数据) |
+| 2 | 数据新鲜度 SLO | 🟡 检测已落地(复用数据质量,[ADR-070](decisions/070-data-freshness-slo.md));**告警出口没做,卡在没有真实通知凭据** |
+| 3 | 查询审计 | 🟡 事件已在 Kafka 里流([ADR-066](decisions/066-trino-query-audit.md));**还没落 Iceberg、没有断流告警** |
+| 4 | 成本归属(OpenCost) | 🟡 配置完成([ADR-069](decisions/069-cost-attribution.md));**未部署;prod 单价要 zhenghe 提供** |
+| 5 | Schema Registry | 🟡 manifest 完成([ADR-068](decisions/068-schema-registry.md));**未部署;Flink 作业还没接** |
+| 6 | 门户改工作台 | 🟡 代码+52 个测试完成、镜像已构建([ADR-067](decisions/067-portal-as-workbench.md));**未上集群** |
+
+**下次开机要一次性验证的清单**(全部已经准备到"开机就能立刻跑"):
+
+1. 门户新版本(digest 已更新,同步即生效)—— 看"我的作业/计算配额"两块
+2. Karapace 起不起得来、`_schemas` topic 建没建出来
+3. OpenCost 能不能查到 Prometheus(**它不会 CrashLoop,成本全是 0 才是症状**)
+4. `scripts/34` 里新鲜度断言的参数名对不对得上(脚本自己会打印真实参数名)
+5. `scripts/23` 上次中断在 18/77,新加的 kueue/karapace/opencost 镜像要补拉
 
 同一轮里另外做完的:
 - **按组分配计算配额 + 空闲互借**(zhenghe 问的第 2 个问题)——Kueue,
