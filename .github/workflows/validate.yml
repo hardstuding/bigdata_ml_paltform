@@ -47,6 +47,22 @@ jobs:
       - name: 环境配置单一源码校验(cloud-full 部署文件不能和 templates/ + environments/cloud-full/config.yaml 渲染结果漂移)
         run: python3 scripts/render-environment-config.py cloud-full --check
 
+  opa-test:
+    # 2026-08-23 新增:apps/opa/policy/ 下的 Rego 策略(Trino 表级访问控制
+    # ADR-051 + 列级脱敏/行级过滤 ADR-063)有真实的单元测试,写了没人跑
+    # 等于没测试,和 test-flask-apps 那条是同一个道理接进 CI。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: 1.19.1
+
+      - name: opa test(apps/opa/policy 下的 Rego 策略 + 单元测试)
+        run: opa test apps/opa/policy -v
+
   test-flask-apps:
     # 2026-08-16 新增:3 个自建 Flask 工具(platform-portal/permission-
     # request-app/table-registration-app)之前完全没有自动化测试,补测试

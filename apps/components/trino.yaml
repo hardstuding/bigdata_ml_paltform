@@ -144,6 +144,22 @@ spec:
           properties: |
             access-control.name=opa
             opa.policy.uri=http://opa.opa.svc.cluster.local:8181/v1/data/trino/allow
+            #
+            # 2026-08-23:加列级脱敏 / 行级过滤两个 URI(ADR-063)。和当年
+            # 打开 access-control.name=opa 那次不一样,这次风险很低、没有走
+            # ADR-051 那套"上线前先盘一遍现在在用哪些表"的 audit 流程:这两
+            # 条规则只在两种情况下才会真的改变查询结果——(1) 列名匹配
+            # phone/mobile/email/id_card 这几个敏感模式、且查询者的 grant
+            # security_level 不够;(2) 查 demo.regional_sales(现在还没建过)。
+            # 现在实际在用的 iceberg.demo.orders 等表的列名和 security_level
+            # 都不会撞上。
+            #
+            # **但这只是本地 `opa test` 验证过的静态判断**(28/28 通过,见
+            # apps/opa/policy/trino_masking_test.rego)。Trino 真的会不会按
+            # 这套接口调这两个新端点、返回的 SQL 表达式会不会被正确应用,
+            # 还没在真实集群验证过——下次上云的验证清单要包含这一条。
+            opa.policy.column-masking-uri=http://opa.opa.svc.cluster.local:8181/v1/data/trino/columnMask
+            opa.policy.row-filters-uri=http://opa.opa.svc.cluster.local:8181/v1/data/trino/rowFilters
         # 证书文件故意不放在 /etc/trino/ 底下:那整个目录已经是 chart 自己的
         # ConfigMap(config-volume)挂载点,再往它下面嵌套挂一个 Secret 的
         # subPath 文件会导致 kubelet 创建目录失败(实测报 runc "mounting a

@@ -87,6 +87,7 @@
 | [046](046-catalog-browse-for-table-access.md) | 申请改成浏览目录勾选 | 已实现(**体验依赖 OpenMetadata**) |
 | [050](050-grant-expiry-reclamation.md) | 表访问授权到期回收 | 已实测 |
 | [051](051-trino-opa-access-control.md) | Trino 细粒度访问控制:OPA 策略引擎 | **2026-08-16 已正式生效** |
+| [063](063-trino-column-row-level-security.md) | 敏感字段行列级策略:Trino OPA 列级脱敏 + 行级过滤 | 策略/测试完成,`opa test` 28/28;未在真实集群验证 |
 | [048](048-ai-operator-role.md) | AI 运维角色:独立身份 + 阶段性收紧 + 危险操作审批 | **部分实现**(开发阶段 RBAC 已实测,收紧未做) |
 
 ## AI / ML
