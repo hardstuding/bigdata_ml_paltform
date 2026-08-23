@@ -1,0 +1,86 @@
+# Kueue 队列定义。**这是渲染产物的源文件**,改这里,不要改
+# apps/kueue/manifests/queues.yaml(下次渲染会被覆盖)。
+#
+# 设计依据:docs/decisions/064-role-based-resource-quota.md
+#
+# 组不是在这里新发明的,是 platform/iam/groups.yaml 里已有的那四个。资源
+# 配额再搞一套组织结构,只会出现"权限上他属于算法组、配额上他属于另一个
+# 组"这种没人维护得了的分裂。viewers 是只读角色,**不给计算配额,所以
+# 下面没有它的队列**——它本来就不该提交作业。
+---
+# 只有一种资源规格。等以后真有 GPU 节点或者异构机型,再按节点标签拆成
+# 多个 flavor;现在拆是凭空增加一层没有对应物的抽象。
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: default-flavor
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: platform-team
+spec:
+  namespaceSelector: {}
+  # 同一个 cohort 里的队列可以互相借用空闲配额——这就是"临时借用其他组的
+  # 资源"(CDH/YARN 里队列的 guaranteed vs max capacity)在 Kueue 里的对应物。
+  cohort: platform
+  preemption:
+    # 借出去的配额,在原主人自己要用的时候抢回来。**没有这一条,"借用"就
+    # 变成了"先到先得然后一直占着"**——别的组的作业只能干等到对方跑完。
+    reclaimWithinCohort: Any
+    withinClusterQueue: LowerPriority
+  resourceGroups:
+    - coveredResources: ["cpu", "memory"]
+      flavors:
+        - name: default-flavor
+          resources:
+            - name: "cpu"
+              nominalQuota: "2"
+              borrowingLimit: "2"
+            - name: "memory"
+              nominalQuota: "4Gi"
+              borrowingLimit: "4Gi"
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: data-analysts
+spec:
+  namespaceSelector: {}
+  cohort: platform
+  preemption:
+    reclaimWithinCohort: Any
+    withinClusterQueue: LowerPriority
+  resourceGroups:
+    - coveredResources: ["cpu", "memory"]
+      flavors:
+        - name: default-flavor
+          resources:
+            - name: "cpu"
+              nominalQuota: "2"
+              borrowingLimit: "2"
+            - name: "memory"
+              nominalQuota: "4Gi"
+              borrowingLimit: "4Gi"
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: algorithm-team
+spec:
+  namespaceSelector: {}
+  cohort: platform
+  preemption:
+    reclaimWithinCohort: Any
+    withinClusterQueue: LowerPriority
+  resourceGroups:
+    - coveredResources: ["cpu", "memory"]
+      flavors:
+        - name: default-flavor
+          resources:
+            - name: "cpu"
+              nominalQuota: "4"
+              borrowingLimit: "4"
+            - name: "memory"
+              nominalQuota: "8Gi"
+              borrowingLimit: "8Gi"

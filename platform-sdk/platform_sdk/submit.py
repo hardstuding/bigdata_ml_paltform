@@ -103,6 +103,7 @@ def _build_workflow(
     cpu: str,
     memory: str,
     service_account: str,
+    queue: str | None,
 ) -> dict[str, Any]:
     """拼出 Argo Workflow 对象。
 
@@ -120,6 +121,14 @@ def _build_workflow(
         "PLATFORM_TRINO_PORT": str(config.trino_port()),
     }
     base_env.update(env)
+
+    # Kueue 队列标签。**必须打在 Pod 上,不是打在 Workflow 上**——Argo 直接
+    # 建裸 Pod(不是 batch/Job),Kueue 用的是 pod 集成,它看的是 Pod 自己的
+    # 标签。打在 Workflow 的 metadata 上不会往下传,结果就是"标签写了但配额
+    # 完全没生效",而且从外面看不出来。
+    pod_labels = {"app.kubernetes.io/managed-by": "platform-sdk"}
+    if queue:
+        pod_labels["kueue.x-k8s.io/queue-name"] = queue
 
     return {
         "apiVersion": "argoproj.io/v1alpha1",
@@ -143,6 +152,7 @@ def _build_workflow(
             "templates": [
                 {
                     "name": "main",
+                    "metadata": {"labels": pod_labels},
                     "container": {
                         "image": image,
                         # 本地构建的镜像必须是 IfNotPresent,否则 kubelet 会去
@@ -178,6 +188,7 @@ def submit_job(
     memory: str = "512Mi",
     namespace: str | None = None,
     service_account: str = "argo-workflow",
+    queue: str | None = None,
 ) -> str:
     """把本地脚本提交成一个 Argo Workflow,返回生成的 workflow 名字。
 
@@ -193,6 +204,11 @@ def submit_job(
     - service_account: 默认 argo-workflow,它有创建 workflowtaskresults 的
       权限(见 apps/argo-workflows-training-image/manifests/
       workflow-serviceaccount.yaml)。
+    - queue: Kueue 队列(计算配额)。**默认不用传**——平台按提交者所在的组
+      自动推断(config.queue_name(),见那里的说明:队列归属由平台决定而
+      不是用户输入,否则谁都能填别的组的队列去占人家配额)。这个参数留
+      出来只为两种情况:平台自己的运维作业要显式指定队列,以及本机调试。
+      推断不出来时作业不打队列标签,行为和引入 Kueue 之前一样。
     """
     _validate_name(name)
     script_path = pathlib.Path(script).expanduser().resolve()
@@ -201,6 +217,7 @@ def submit_job(
 
     namespace = namespace or config.argo_namespace()
     image = image or config.default_job_image()
+    queue = queue or config.queue_name()
 
     core_api, custom_api = _k8s_clients()
     cm_name = _upload_script(core_api, name, script_path, namespace)
@@ -213,6 +230,7 @@ def submit_job(
         cpu=cpu,
         memory=memory,
         service_account=service_account,
+        queue=queue,
     )
 
     created = custom_api.create_namespaced_custom_object(

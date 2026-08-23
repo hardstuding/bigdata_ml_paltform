@@ -89,6 +89,8 @@ DIR_MAP = {
     "apps-flink-streaming-demo-manifests": REPO_ROOT / "apps" / "flink-streaming-demo" / "manifests",
     "apps-kafka-producer-manifests": REPO_ROOT / "apps" / "kafka-producer" / "manifests",
     "apps-postgres-backup-manifests": REPO_ROOT / "apps" / "postgres-backup" / "manifests",
+    # 2026-08-23(ADR-064):Kueue 的队列配额三个环境差别巨大
+    "apps-kueue-manifests": REPO_ROOT / "apps" / "kueue" / "manifests",
 }
 
 # 模板文件第一行可以写 `# render-if: <config键> == <值>`,表示"只有当前

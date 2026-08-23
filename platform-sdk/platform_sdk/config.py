@@ -151,3 +151,41 @@ def default_job_image() -> str:
     镜像,否则用户很容易在不知情的情况下跑在一个缺依赖的环境里。
     """
     return _get("PLATFORM_JOB_IMAGE", "local/platform-runtime:0.1.0")
+
+
+# ---------------------------------------------------- Kueue 队列
+
+# 有计算配额的队列,按"配额从紧到松"排。一个人同时属于多个组时(比如
+# platform-team 的人也在 data-analysts 里),取**排在前面的那个**——
+# 顺序是确定的,同一个人每次提交都落到同一个队列,不会今天走这个队列
+# 明天走那个。viewers 不在列:只读角色本来就不该提交作业。
+_QUEUE_GROUPS = ("algorithm-team", "data-analysts", "platform-team")
+
+
+def queue_name() -> str | None:
+    """当前用户的作业该进哪个 Kueue 队列,推断不出来就返回 None。
+
+    **为什么这个函数必须存在**(ADR-064 里点名了这是整套配额设计最容易
+    做成摆设的地方):Kueue 只管那些打了 `kueue.x-k8s.io/queue-name` 标签
+    的作业。如果让用户自己在提交时手写队列名,那么(a)大多数人不会写,
+    作业绕过配额;(b)少数会写的人可以随便填别的组的队列去占人家的额度。
+    队列归属必须由平台按提交者的组自动决定,不能是用户输入。
+
+    组从哪来:JupyterHub 用 Keycloak 的 groups claim 认证(`manage_groups`
+    已开),spawn notebook 时把用户的组注入成 `PLATFORM_GROUPS`
+    (见 apps/components/jupyterhub.yaml 的 `03-inject-groups`)。
+
+    返回 None 的场景是真实存在的、也是刻意不报错的:在本机 IDE 里直接
+    用 SDK 提交、或者 Airflow 这类系统身份跑的任务,没有"提交人的组"这个
+    概念。这时候作业不打队列标签,行为和引入 Kueue 之前完全一样——**宁可
+    不受配额管,也不能因为推断不出组就让作业提交失败**,那会把一个配额
+    功能变成一次全平台故障。
+    """
+    explicit = os.environ.get("PLATFORM_QUEUE", "").strip()
+    if explicit:
+        return explicit
+    groups = {g.strip() for g in os.environ.get("PLATFORM_GROUPS", "").split(",") if g.strip()}
+    for candidate in _QUEUE_GROUPS:
+        if candidate in groups:
+            return candidate
+    return None

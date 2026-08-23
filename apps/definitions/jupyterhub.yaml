@@ -112,6 +112,25 @@ spec:
             "01-oauth-secret": |
               import os
               c.GenericOAuthenticator.client_secret = os.environ["OAUTH_CLIENT_SECRET"]
+            # 把用户在 Keycloak 里的组注入 notebook pod 的环境变量。
+            #
+            # **这是 ADR-064 那套按组配额能不能真正生效的关键一环**:
+            # platform_sdk 提交作业时要按提交者的组决定进哪个 Kueue 队列
+            # (config.queue_name()),而 notebook 里的代码没有任何别的途径
+            # 知道"当前登录的人属于哪个组"——hub 知道(manage_groups 已开,
+            # 上面 allowed_groups 就是靠它生效的),但这个信息默认不会传给
+            # singleuser pod。不注入的话,队列只能靠用户手填,而"让用户手填
+            # 自己该用哪个组的配额"等于没有配额。
+            #
+            # spawner.user.groups 里是 JupyterHub 的 Group 对象,不是字符串,
+            # 要取 .name;而且 manage_groups 关掉时这个列表会是空的——那种
+            # 情况下注入一个空字符串,SDK 那边会推断不出队列、作业不打标签,
+            # 退化成引入 Kueue 之前的行为,不会报错。
+            "03-inject-groups": |
+              def _inject_groups(spawner):
+                  groups = [g.name for g in getattr(spawner.user, "groups", [])]
+                  spawner.environment["PLATFORM_GROUPS"] = ",".join(groups)
+              c.KubeSpawner.pre_spawn_hook = _inject_groups
           resources:
             requests:
               cpu: 100m

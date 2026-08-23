@@ -78,6 +78,8 @@ enabled_components:
   - postgres-backup.yaml
   - postgres.yaml
   - resource-quotas.yaml
+  - kueue.yaml
+  - kueue-queues.yaml
   - seatunnel.yaml
   - spark-history-server-oauth2-proxy.yaml
   - spark-history-server.yaml

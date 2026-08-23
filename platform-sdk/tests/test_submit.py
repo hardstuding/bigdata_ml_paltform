@@ -67,3 +67,65 @@ def test_run_workflow_template_generate_name_uses_template_name():
     body = custom_api.create_namespaced_custom_object.call_args.kwargs["body"]
     assert body["metadata"]["generateName"] == "train-demo-model-"
     assert body["metadata"]["labels"]["platform-sdk/workflow-template"] == "train-demo-model"
+
+
+# --------------------------------------------------- Kueue 队列标签
+#
+# 这几个用例盯的是 ADR-064 点名的那个失效模式:"标签写了但打错位置/没打",
+# 从外面完全看不出来,配额静默失效。所以断言的是**标签落在 Pod 上**,
+# 不是"函数被调用了"。
+
+
+def _build(monkeypatch, groups=None, explicit=None):
+    import platform_sdk.submit as submit_mod
+
+    monkeypatch.delenv("PLATFORM_QUEUE", raising=False)
+    monkeypatch.delenv("PLATFORM_GROUPS", raising=False)
+    if groups is not None:
+        monkeypatch.setenv("PLATFORM_GROUPS", groups)
+    if explicit is not None:
+        monkeypatch.setenv("PLATFORM_QUEUE", explicit)
+
+    from platform_sdk import config
+
+    return submit_mod._build_workflow(
+        name="j",
+        cm_name="j-script",
+        script_name="t.py",
+        image="img",
+        env={},
+        cpu="100m",
+        memory="128Mi",
+        service_account="argo-workflow",
+        queue=config.queue_name(),
+    )
+
+
+def _pod_labels(wf):
+    return wf["spec"]["templates"][0].get("metadata", {}).get("labels", {})
+
+
+def test_队列标签打在_pod_上而不是_workflow_上(monkeypatch):
+    wf = _build(monkeypatch, groups="algorithm-team")
+    assert _pod_labels(wf)["kueue.x-k8s.io/queue-name"] == "algorithm-team"
+    # 打在 Workflow 顶层不会往下传给 Pod,Kueue 看不到——所以这里必须没有
+    assert "kueue.x-k8s.io/queue-name" not in wf["metadata"]["labels"]
+
+
+def test_多个组时按固定优先级取_同一个人每次落同一个队列(monkeypatch):
+    a = _build(monkeypatch, groups="platform-team,data-analysts")
+    b = _build(monkeypatch, groups="data-analysts,platform-team")
+    assert _pod_labels(a) == _pod_labels(b) != {}
+    assert _pod_labels(a)["kueue.x-k8s.io/queue-name"] == "data-analysts"
+
+
+def test_推断不出组时不打标签也不报错(monkeypatch):
+    # 本机 IDE 直接提交、Airflow 系统身份跑的任务都是这种情况。宁可不受
+    # 配额管,也不能让作业提交失败——那是把配额功能变成全平台故障。
+    wf = _build(monkeypatch)
+    assert "kueue.x-k8s.io/queue-name" not in _pod_labels(wf)
+
+
+def test_viewers_组拿不到队列(monkeypatch):
+    wf = _build(monkeypatch, groups="viewers")
+    assert "kueue.x-k8s.io/queue-name" not in _pod_labels(wf)

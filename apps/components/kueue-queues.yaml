@@ -1,0 +1,36 @@
+# Kueue 的队列对象(ResourceFlavor / ClusterQueue / LocalQueue),源文件在
+# templates/apps-kueue-manifests/ ——配额数字按环境分档,渲染产物落在
+# apps/kueue/manifests/,这个 Application 的 path 不用跟着改。
+#
+# sync-wave 1:必须排在 kueue(wave 0)后面,因为这些对象用的 CRD 是那个
+# Application 装出来的。**第一次部署时这个 Application 会先失败一次再
+# 自愈**——ArgoCD 的 wave 只保证顺序,不等 CRD 在 API server 里注册完成。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kueue-queues
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/kueue/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kueue-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=true

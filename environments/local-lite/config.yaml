@@ -58,5 +58,7 @@ enabled_components:
   - postgres.yaml
   - cloudnative-pg-operator.yaml
   - resource-quotas.yaml
+  - kueue.yaml
+  - kueue-queues.yaml
   - table-registration-app-oauth2-proxy.yaml
   - table-registration-app.yaml

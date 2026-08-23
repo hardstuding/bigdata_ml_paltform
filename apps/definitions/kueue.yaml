@@ -1,0 +1,111 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/kueue.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/kueue.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
+# Kueue —— 按组分配计算配额 + 空闲时互相借用,见
+# docs/decisions/064-role-based-resource-quota.md。
+#
+# **它和 resource-quotas.yaml 不是一回事,两层各管各的**:
+#   - ResourceQuota(ADR-041):按 **命名空间** 限"单个组件失控时不要拖死
+#     整台机器",管的是所有 Pod 含常驻服务,是保护性上限。
+#   - Kueue(这里):按 **组织里的组** 分"哪个组能用多少计算资源、闲的时候
+#     能借多少",只管 **批作业**。Trino coordinator、Superset 这类常驻服务
+#     不进队列——让一个 BI 前端排队等配额是荒谬的。
+#
+# **integrations 这份清单是刻意裁剪过的,不是 chart 默认值**。chart 默认
+# 还开了 deployment / statefulset / rayjob / jobset 等一堆,那意味着 Kueue 的
+# mutating webhook 会拦截集群里几乎所有工作负载的创建——**这个 k3s 集群
+# 不是我们独占的**(见 CLAUDE.md),webhook 一旦出问题,炸的不只是我们
+# 自己的东西。所以这里只留真的会用到的三种,并且用
+# managedJobsNamespaceSelector 把作用范围再收窄到两个命名空间。
+#
+# 为什么是这三种:
+#   - batch/job —— 最基础的批作业
+#   - pod —— platform_sdk.submit_job() 提交的是 **Argo Workflow**,Argo 直接
+#     建裸 Pod 而不是 Job,不开 pod 集成的话平台最主要的作业提交路径根本
+#     不受队列管,这套配额就是个摆设
+#   - sparkoperator.k8s.io/sparkapplication —— Spark 作业
+# FlinkDeployment 故意不在列:流作业是常驻的,不是排队等配额的对象。
+#
+# manageJobsWithoutQueueName 保持默认的 false:**没打 queue-name 标签的
+# 工作负载完全不受管**。这是 Kueue 能装进共享集群的前提,别改成 true。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kueue
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # 队列对象(kueue-queues)依赖这里装出来的 CRD,必须先装 operator。
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: registry.k8s.io/kueue/charts
+    chart: kueue
+    targetRevision: 0.19.2
+    helm:
+      valuesObject:
+        # 平台已经有 kube-prometheus-stack,指标直接接进去——"借了多少、
+        # 被抢占了几次"如果看不见,用户只会感觉"我的任务有时快有时慢"
+        # (ADR-064 里专门点了这条)。
+        enablePrometheus: true
+        controllerManager:
+          replicas: 1
+          manager:
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "256Mi"
+              limits:
+                memory: "512Mi"
+        managerConfig:
+          controllerManagerConfigYaml: |-
+            apiVersion: config.kueue.x-k8s.io/v1beta2
+            kind: Configuration
+            health:
+              healthProbeBindAddress: :8081
+            metrics:
+              bindAddress: :8443
+            webhook:
+              port: 9443
+            leaderElection:
+              leaderElect: true
+              resourceName: c1f6bfd2.kueue.x-k8s.io
+            controller:
+              groupKindConcurrency:
+                Job.batch: 5
+                Pod: 5
+                Workload.kueue.x-k8s.io: 10
+                LocalQueue.kueue.x-k8s.io: 5
+                ClusterQueue.kueue.x-k8s.io: 5
+                ResourceFlavor.kueue.x-k8s.io: 1
+            clientConnection:
+              qps: 300
+              burst: 500
+            managedJobsNamespaceSelector:
+              matchExpressions:
+                - key: kubernetes.io/metadata.name
+                  operator: In
+                  values:
+                    - argo-workflows
+                    - spark-operator
+            integrations:
+              frameworks:
+                - "batch/job"
+                - "pod"
+                - "sparkoperator.k8s.io/sparkapplication"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kueue-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

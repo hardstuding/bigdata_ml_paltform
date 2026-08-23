@@ -1,0 +1,60 @@
+# LocalQueue —— 作业侧的入口。
+#
+# Kueue 的规则是**作业只能引用自己命名空间里的 LocalQueue**,所以每个会
+# 提交作业的命名空间都要有一份指向各个 ClusterQueue 的入口对象。作业上
+# 打的标签是 `kueue.x-k8s.io/queue-name: <LocalQueue 名>`。
+#
+# 这份文件不需要按环境分档(没有任何数字),但仍然放在 templates/ 下,
+# 免得同一个组件的源文件一半在 templates/ 一半在 apps/ 里,以后没人分得清
+# 该改哪份。
+
+# --- argo-workflows —— platform_sdk.submit_job() 提交的 Argo Workflow 落在这里 ---
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: platform-team
+  namespace: argo-workflows
+spec:
+  clusterQueue: platform-team
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: data-analysts
+  namespace: argo-workflows
+spec:
+  clusterQueue: data-analysts
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: algorithm-team
+  namespace: argo-workflows
+spec:
+  clusterQueue: algorithm-team
+# --- spark-operator —— SparkApplication 提交在这里(见 spark-operator.yaml 的 jobNamespaces) ---
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: platform-team
+  namespace: spark-operator
+spec:
+  clusterQueue: platform-team
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: data-analysts
+  namespace: spark-operator
+spec:
+  clusterQueue: data-analysts
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: algorithm-team
+  namespace: spark-operator
+spec:
+  clusterQueue: algorithm-team
