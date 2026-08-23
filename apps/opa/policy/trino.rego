@@ -1,5 +1,17 @@
 package trino
 
+# 改这个文件之后,**活的 OPA 会在约 1 分钟内自己重载,不需要重启 Pod**
+# ——前提是 apps/opa/manifests/deployment.yaml 里的 `--watch --ignore=..*
+# /policies` 三个参数都在。2026-08-23 之前不是这样:那时候没有 --watch,
+# 策略改了只有在 Pod 恰好重启过之后才生效,而 ArgoCD 一路显示
+# Synced/Healthy。要确认某次策略改动**真的生效了**,别看 ArgoCD,直接问
+# 活的 OPA:
+#
+#   kubectl -n opa port-forward svc/opa 18181:8181
+#   curl -s localhost:18181/v1/policies | python3 -m json.tool | grep -c <你改的那行>
+#
+# 或者直接拿一条真实 input POST 到 /v1/data/trino/allow 看结果。
+
 # Trino OPA 访问控制策略(ADR-051)。表级判断这一层(SelectFromColumns/
 # ShowCreateTable)按 platform/iam/table-access-grants.csv 里的授权记录判断。
 # 列级脱敏(columnMask)和行级过滤(rowFilters)见文件下半部分,ADR-063。
