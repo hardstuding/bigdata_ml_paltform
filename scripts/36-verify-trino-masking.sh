@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 端到端验证 Trino 的**列级脱敏**真的生效——不是"策略里写了"、也不是
-# "OPA 单元测试过了",是**一条真实 SQL 查出来的手机号确实是打码的**。
+# 端到端验证 Trino 的**列级脱敏 + 行级过滤**真的生效——不是"策略里写了"、
+# 也不是"OPA 单元测试过了",是**一条真实 SQL 查出来的手机号确实是打码的、
+# 查出来的行确实只有自己部门的**。
 #
 # **为什么单独写这个脚本**:docs/roles.md 里"敏感字段行列级策略"这一格
 # 从 ADR-063 落地起就一直是 🟡,原因写得很明白——"Trino 已加载 4 条
@@ -23,6 +24,10 @@
 #   - 在 access_test_l2 上是 2 级 → phone/email 明文,id_card 仍然打码
 # **如果只验"低权限看到打码",漏掉"高权限看到明文",那策略退化成"一律
 # 打码"也会通过——那不是分级,是一刀切。**
+#
+# 行级过滤同理:demo.regional_sales 里放三个部门的数据,analyst001 在
+# employees.csv 里是"数据分析组"。**光验"行数变少了"不够**——要确认少掉的
+# 正好是别的部门那些行,而且自己部门那些行一条不少。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs
@@ -56,7 +61,7 @@ print(json.dumps({'data': {'password.db': base64.b64encode(sys.argv[1].encode())
 }
 trap cleanup EXIT
 
-log "1/4 建两张带敏感字段的 demo 表(和 table-access-grants.csv 里已有的两条 grant 对应)"
+log "1/4 建 demo 表(两张带敏感字段的 + 一张带部门列的,都对应 grants CSV 里已有的 grant)"
 kubectl -n "$TRA_NS" exec -i "$TRA_POD" -- python3 - <<'PYEOF' 2>&1 | tee -a "$LOG_FILE"
 import os, trino
 c = trino.dbapi.connect(host=os.environ["TRINO_HOST"], port=int(os.environ["TRINO_PORT"]),
@@ -74,6 +79,20 @@ for t in ("access_test_l1", "access_test_l2"):
             ('C002','13998765432','bob@example.com','310101199505055678')""")
         cur.fetchall()
     print(f"  {t} 就绪")
+
+# 行级过滤的 demo 表:三个部门各两行。analyst001 在 employees.csv 里是
+# "数据分析组",所以它应该只看得到那两行。
+cur.execute("""CREATE TABLE IF NOT EXISTS iceberg.demo.regional_sales (
+    region varchar, department varchar, amount double)""")
+cur.fetchall()
+cur.execute("select count(*) from iceberg.demo.regional_sales")
+if cur.fetchall()[0][0] == 0:
+    cur.execute("""INSERT INTO iceberg.demo.regional_sales VALUES
+        ('华东','数据分析组',1000.0), ('华南','数据分析组',2000.0),
+        ('华北','算法组',3000.0),     ('西南','算法组',4000.0),
+        ('华中','平台组',5000.0),     ('东北','平台组',6000.0)""")
+    cur.fetchall()
+print("  regional_sales 就绪(3 个部门各 2 行)")
 PYEOF
 
 log "2/4 临时给 ${PROBE_USER} 加一个 Trino 密码(验证完会删)"
@@ -89,7 +108,7 @@ print(json.dumps({'data': {'password.db': base64.b64encode(sys.argv[1].encode())
 log "3/4 重启 coordinator 让密码文件生效(subPath 挂载不会自动同步)"
 restart_trino
 
-log "4/4 以 ${PROBE_USER} 的身份查这两张表,核对脱敏结果"
+log "4/4 以 ${PROBE_USER} 的身份查这三张表,核对脱敏 + 行级过滤结果"
 if kubectl -n "$TRA_NS" exec -i "$TRA_POD" -- python3 - "$PROBE_USER" "$PROBE_PW" <<'PYEOF' 2>&1 | tee -a "$LOG_FILE" | grep -q "MASKING_OK"; then
 import os, sys, trino
 user, pw = sys.argv[1], sys.argv[2]
@@ -103,8 +122,20 @@ for t in ("access_test_l1", "access_test_l2"):
     res[t] = cur.fetchall()[0]
     print(f"  {t}: phone={res[t][0]!r} email={res[t][1]!r} id_card={res[t][2]!r}")
 
+# 行级过滤:analyst001 是"数据分析组",应该只看到那 2 行
+cur.execute("select region, department from iceberg.demo.regional_sales order by region")
+rows = cur.fetchall()
+print(f"  regional_sales 看到 {len(rows)} 行: {rows}")
+
 l1, l2 = res["access_test_l1"], res["access_test_l2"]
 problems = []
+depts = {r[1] for r in rows}
+if len(rows) != 2:
+    problems.append(f"行级过滤:应该只看到本部门的 2 行,实际 {len(rows)} 行")
+if depts != {"数据分析组"}:
+    problems.append(f"行级过滤:看到了别的部门的行 {depts}")
+if {r[0] for r in rows} != {"华东", "华南"}:
+    problems.append(f"行级过滤:本部门的行不全或者串了 {[r[0] for r in rows]}")
 # l1(1 级):三个字段都够不到门槛,应该全打码
 if l1[0] == "13812345678": problems.append("l1 的 phone 是明文,没脱敏")
 if l1[1] == "alice@example.com": problems.append("l1 的 email 是明文,没脱敏")
