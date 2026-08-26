@@ -206,7 +206,7 @@ accuracy 只可能是 0 或 1,拿它当阈值是自欺欺人;改成校验"模型
 | 组织架构同步 | ✅ | iam-sync 从 HR 表同步组织/角色进 Keycloak(ADR-028/031),职级数据目前是虚拟占位 |
 | 数据资产盘点 | ✅ | **2026-08-23 真实端到端验证通过**:`scripts/29` 配好 Trino DatabaseService + 每 6 小时的采集任务,`scripts/30` 输出 `OPENMETADATA_TRINO_INGESTION_OK`。判据是**直接查 OpenMetadata API 确认 `trino.iceberg.demo.orders` 在目录里、六个字段和 Trino 真实表结构一致**——这张表从没人手动登记过,是采集自动发现的。实测目录里已有 100+ 张表(system/tpcds/tpch/iceberg 各 catalog)。过程中修了 4 个只有真跑才暴露的前置,清单见 ADR |
 | 敏感字段列级脱敏 | ✅ | ADR-063,2026-08-23 **在真集群上用真实 SQL 验过**(`scripts/36-verify-trino-masking.sh`,可重复跑):1 级 grant 查到的是 `138****5678` / `al***@example.com` / `***MASKED***`;**2 级 grant 上 phone/email 恢复明文而 id_card 仍然打码**——验的是分级真的在起作用,不是「一律打码」也能过的那种测法。Trino 侧实测每条查询会调 18 次 `columnMask` + 2 次 `rowFilters` |
-| 敏感字段行级过滤 | 🟡 | 同一套策略里实现了(按 `employees.csv` 的部门过滤,未知部门 fail-closed),`opa test` 覆盖到,**Trino 确实在调这个端点**(上面那 2 次),但**还没有构造过跨部门数据来看实际过滤效果**——列级那半已经验完,行级这半还差一个 demo 场景 |
+| 敏感字段行级过滤 | ✅ | ADR-063,2026-08-26 **在真集群上用真实 SQL 验过**(和列级同一个脚本):`demo.regional_sales` 里 3 个部门各 2 行,analyst001(employees.csv 里是「数据分析组」)只查到 2 行、且正好是华东/华南那两行。判定不只看「行数变少」——还要求看到的部门集合正好等于 {数据分析组},否则「谁都看不到」(部门查不到时的 `1 = 0` 分支误触发)也会蒙混过关 |
 | **管理驾驶舱** | ❌ | **从未开始**(E 线) |
 | 成本视图 | ❌ | 未开始 |
 
