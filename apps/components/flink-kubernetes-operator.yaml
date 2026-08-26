@@ -82,3 +82,26 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+  # 这四个 CRD 常年 OutOfSync,`docs/BACKLOG.md` 里原来猜的是"CRD 太大,
+  # ArgoCD 塞不进 last-applied 注解"——**猜错了**。2026-08-26 把 chart 渲染
+  # 出来的 CRD 和活对象逐字段比了一遍,差异只有 4 个字段,全部是 **API
+  # server 的默认值归一化**:
+  #   chart 里有、活对象没有:additionalPrinterColumns[].priority: 0
+  #                            (0 是默认值,API server 直接丢掉)
+  #   活对象有、chart 里没有:spec.conversion.strategy: None
+  #                            spec.names.listKind: FlinkDeploymentList
+  # 值不同的字段:0 个。
+  #
+  # 也就是说这个 OutOfSync **从来不代表任何真实漂移**。留着它的代价不是
+  # "看着难受"——是**训练所有人忽略 OutOfSync**,下次真出漂移时没人当回事。
+  # 和"被习惯性忽略的告警比没有告警更糟"是同一个道理。
+  #
+  # 只忽略这三条具体路径,不做整个 CRD 的 blanket ignore:后者会把真实的
+  # schema 变更(比如上游改了字段校验)一起吞掉。
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - '.spec.versions[].additionalPrinterColumns[]?.priority'
+        - '.spec.conversion'
+        - '.spec.names.listKind'

@@ -26,45 +26,22 @@
 
 ---
 
-### flink-kubernetes-operator 的 4 个 CRD 一直 OutOfSync(2026-08-23 记录)
+### ~~flink-kubernetes-operator 的 4 个 CRD 一直 OutOfSync~~ —— 已解决(2026-08-26)
 
-`kubectl -n argocd get app flink-kubernetes-operator` 常年 OutOfSync/Healthy,
-OutOfSync 的正是它那四个 CRD(flinkdeployments 等)。**这不是新问题**,
-2026-08-23 之前就是这个状态,Flink 作业本身跑得好好的,所以一直没人管。
+原来这里猜的是"CRD 太大,ArgoCD 塞不进 last-applied 注解"(这个仓库踩过
+四次的那一类)。**猜错了。** 把 chart 渲染出来的 CRD 和活对象逐字段比过
+之后,差异只有 4 个字段,全部是 API server 的默认值归一化(`priority: 0`
+被丢掉、`spec.conversion.strategy: None` 和 `spec.names.listKind` 被补上),
+**值不同的字段是 0 个**——这个 OutOfSync 从来不代表任何真实漂移。
+而且 `ServerSideApply=true` 本来就已经开着,那个"注解塞不下"的假设从一开始
+就不成立。
 
-大概率是这个仓库已经踩过四次的同一类:CRD 太大,ArgoCD 塞不进
-last-applied 注解。现在有现成的解法了——`scripts/28-vendor-helm-chart.sh`
-的 `--exclude-crds`(见 [ADR-064](decisions/064-role-based-resource-quota.md)
-的踩坑记录)。做法是把 flink-kubernetes-operator 的 chart vendor 进来、
-CRD 摘出去单独装。
+解法是三条精确的 `ignoreDifferences` 路径,不是整个 CRD 的 blanket ignore
+(后者会把真实的 schema 变更一起吞掉)。详见
+`apps/components/flink-kubernetes-operator.yaml` 里的注释。
 
-**为什么不现在顺手做**:它要 vendor 一个新 chart + 改部署路径,属于
-CLAUDE.md 说的"跨组件、超过一小段时间"那类,应该单独立项,不该塞进别的
-任务里顺便做。
-
----
-
-## P0(会阻断当前主线的,才有资格排这里)
-
-当前没有。如果出现真实的数据风险/持续计费异常/安全问题,加在这里,
-并在 `docs/CURRENT_WORK.md` 里注明"CURRENT 被 P0 阻断,原因是……"。
-
----
-
-## P1:解锁角色能力(投入产出比最高,先做这一批)
-
-依据 [`docs/roles.md`](roles.md)。**1.2/1.3/1.4 已于 2026-08-19 完成**
-(OpenMetadata / JupyterHub+MLflow / Spark Operator+SeaTunnel+Spark
-History Server 全部部署并逐个真实登录验证过,不是只看 Pod Running)。
-过程中发现并修复了 8 个真实 bug——这些组件长期 park、从没真的走过一次
-登录,配置错误一直没暴露:SSO 端口/scope/upstream Service 名字写错
-(mlflow-oauth2-proxy 配的 Service 名根本不存在)、Argo Workflows
-issuer 不匹配导致 CrashLoopBackOff 两天多没人发现、Keycloak realm 从
-建立起就没配过 groups claim mapper(意味着 Grafana/JupyterHub 的按组
-授权可能从来没真的生效过,这次一并修了)、OpenMetadata 镜像走自定义
-域名代理导致 ImagePullBackOff、MLflow 内存限制太小 36 秒内 OOMKill、
-Spark History Server 缺 S3A 连接器 jar。详见 `docs/journal/2026-08.md`
-和对应 commit。
+留着它的代价不是"看着难受",是**训练所有人忽略 OutOfSync**,下次真出漂移
+时没人当回事。
 
 ### 1.1 环境抽象补上"组件选择"层 —— 已完成(2026-08-20)
 
