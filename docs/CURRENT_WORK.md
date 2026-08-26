@@ -52,10 +52,11 @@ zhenghe 回复"这 6 个挺重要的,都要做"。
 
 1. **告警出口**——质量、新鲜度、审计断流三个来源接**同一个**出口。真实
    阻塞是没有通知渠道凭据(zhenghe:"等后面上生产来测试")。
-2. **给 k3s 配 registry mirror**(BACKLOG 第一条)——要重启 k3s,得挑一个
-   手上没有半截活的时间点。
-3. **本机 colima 切 x86_64**(见 [`cpu-architecture.md`](operations/cpu-architecture.md)),
-   CI 已经只建 amd64。
+2. ~~给 k3s 配 registry mirror~~ —— **查证后作废**:这个集群的 k3s 走
+   cri-dockerd,`registries.yaml` 根本不会被读。三个可选方案和代价列在
+   BACKLOG 里,当前结论是先不动运行时配置,用 `scripts/38` 顶着。
+3. ~~本机 colima 切 x86_64~~ —— **不做了**(zhenghe 2026-08-26:"本机的
+   不用做了呀,我们都已经上云了")。local-lite 目前不使用。
 4. **prod 不要跟 OpenMetadata 2.0.0**,等 2.0.x 出到两三个补丁版本再说
    (ADR-072 的建议)。
 
