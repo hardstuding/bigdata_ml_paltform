@@ -11,11 +11,5 @@ metadata:
   name: trino-groups
   namespace: trino
 data:
-  group-provider.properties: |
-    group-provider.name=file
-    file.group-file=/etc/trino/group.txt
-    # 30 秒重读一次。改完 CSV + 同步 ConfigMap 之后不用重启 Trino,
-    # 但要等 kubelet 把 ConfigMap 更新同步进容器(约 1 分钟)。
-    file.refresh-period=30s
   group.txt: |
     platform-team:admin,zhenghe

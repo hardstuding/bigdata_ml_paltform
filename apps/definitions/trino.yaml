@@ -187,18 +187,20 @@ spec:
         # 的是真实的人,不知道他属于哪个组的话,platform-team 的人也会被当成
         # 普通用户拦下,正好和"admin 应该有全权限"相反。
         #
-        # 用 configMounts 而不是 additionalConfigProperties:group-provider 的
-        # 配置必须是**独立的 group-provider.properties 文件**,不是 config.properties
-        # 里的几行。subPath 挂载,不会盖掉 chart 自己在 /etc/trino 下生成的东西。
+        # **分两处配是被实测逼出来的,不是设计得复杂。** 第一版把两个文件都
+        # 用 configMounts 挂进 /etc/trino,coordinator 直接起不来:
+        #   error mounting ... to rootfs at "/etc/trino/group.txt":
+        #   not a directory: Are you trying to mount a directory onto a file
+        # 原因是 **/etc/trino 本身就是 chart 挂的一个 ConfigMap 卷**,不能再往
+        # 里 subPath 塞文件。所以:
+        #   - group-provider.properties(静态三行)走 chart 原生的
+        #     additionalConfigFiles,由 chart 塞进它自己那个配置 ConfigMap;
+        #   - group.txt(内容由 memberships.csv 生成)挂到 /etc/trino-groups/
+        #     这个**独立目录**,整个 ConfigMap 当目录挂,不用 subPath。
         configMounts:
-          - name: trino-groups-properties
+          - name: trino-groups
             configMap: trino-groups
-            path: /etc/trino/group-provider.properties
-            subPath: group-provider.properties
-          - name: trino-groups-file
-            configMap: trino-groups
-            path: /etc/trino/group.txt
-            subPath: group.txt
+            path: /etc/trino-groups
         accessControl:
           type: properties
           properties: |
@@ -240,6 +242,18 @@ spec:
             path: /secrets/trino-service-account/password.db
             subPath: password.db
         coordinator:
+          # group-provider 的配置必须是 /etc/trino 下的独立文件,而
+          # /etc/trino 本身是 chart 挂的 ConfigMap 卷、不能再往里 subPath
+          # 塞文件(2026-08-26 实测 coordinator 因此起不来)。用 chart 原生的
+          # additionalConfigFiles 让它自己把文件塞进那个 ConfigMap。
+          # 组成员数据在 /etc/trino-groups/group.txt(见上面 configMounts)。
+          additionalConfigFiles:
+            group-provider.properties: |
+              group-provider.name=file
+              file.group-file=/etc/trino-groups/group.txt
+              # 30 秒重读一次。改完 memberships.csv 并同步之后不用重启 Trino,
+              # 但要等 kubelet 把 ConfigMap 更新同步进容器(约 1 分钟)。
+              file.refresh-period=30s
           # chart 默认的 livenessProbe 硬编码打 http 端口(8080)的 /v1/info
           # (deployment-coordinator.yaml 模板里直接写死 httpGet,不是靠
           # values 生成的,试过 coordinator.livenessProbe.exec 覆盖,helm

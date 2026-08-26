@@ -32,6 +32,22 @@ OUT = REPO / "apps" / "trino-groups" / "manifests" / "configmap.yaml"
 
 # Trino 的 file group provider 格式:每行 `组名:用户1,用户2`
 # (https://trino.io/docs/current/security/group-file.html)
+# Trino 的 file group provider 格式:每行 `组名:用户1,用户2`
+# (https://trino.io/docs/current/security/group-file.html)
+#
+# **这个 ConfigMap 只放 group.txt,不放 group-provider.properties。**
+# 2026-08-26 实测踩到:后者必须待在 Trino 的配置目录 /etc/trino 里,而
+# /etc/trino **本身就是 chart 挂上去的一个 ConfigMap 卷**——往一个 ConfigMap
+# 卷里再 subPath 挂一个文件,kubelet 直接失败:
+#   error mounting ... to rootfs at "/etc/trino/group.txt":
+#   not a directory: Are you trying to mount a directory onto a file
+# coordinator 起不来(好在滚动更新时老 Pod 还在跑,Trino 没断)。
+#
+# 改成两边分开:
+#   group-provider.properties -> chart 的 coordinator.additionalConfigFiles
+#                                (chart 会把它塞进它自己那个配置 ConfigMap)
+#   group.txt(这份)          -> 单独挂到 /etc/trino-groups/ 这个独立目录
+
 HEADER = """# **这个文件是生成的**,源头是 platform/iam/memberships.csv。
 # 改组成员改那份 CSV,然后跑
 #   python3 scripts/sync-trino-groups-configmap.py
@@ -45,15 +61,8 @@ metadata:
   name: trino-groups
   namespace: trino
 data:
-  group-provider.properties: |
-    group-provider.name=file
-    file.group-file=/etc/trino/group.txt
-    # 30 秒重读一次。改完 CSV + 同步 ConfigMap 之后不用重启 Trino,
-    # 但要等 kubelet 把 ConfigMap 更新同步进容器(约 1 分钟)。
-    file.refresh-period=30s
   group.txt: |
 """
-
 
 def build() -> str:
     groups = defaultdict(list)
