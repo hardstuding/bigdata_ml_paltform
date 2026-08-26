@@ -76,6 +76,47 @@ spec:
               多半是作业要的资源超过了这个组的配额上限(标称 + 可借)。
               查:kubectl get clusterqueue {{ $labels.cluster_queue }} -o yaml
 
+    - name: platform.backup
+      rules:
+        # 2026-08-26 实机发现的:一次 postgres 备份因为"云主机刚开机、
+        # Postgres 还没起来"失败了(pg_dumpall: Connection refused,重试 5 次
+        # 放弃),**而没有任何东西会告诉人**。是我在做别的事时顺手 kubectl
+        # 看到的。
+        #
+        # 备份失败比这份文件里其它几条都更要紧:它是**最后一道防线**,
+        # 而且失败之后一切照常——不影响任何人当天的工作,只在真的需要恢复
+        # 的那一刻才发现没有可用备份。ADR-072 升级 OpenMetadata 前那次备份
+        # 就是唯一的回退路径。
+        - alert: BackupJobFailed
+          expr: |
+            sum by (namespace, job_name) (kube_job_status_failed{namespace="data", job_name=~"postgres-backup-.*"}) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres 备份任务失败:{{ $labels.job_name }}"
+            description: >-
+              备份是最后一道防线,失败之后一切照常、只在真要恢复时才发现没有。
+              常见原因是云主机刚开机时 Postgres 还没起来。
+              查:kubectl -n data logs job/{{ $labels.job_name }}
+
+        # 上面那条盯的是"跑了但失败"。这条盯更隐蔽的:**根本没跑过**
+        # ——CronJob 被误删、schedule 写错、集群长时间停机。表现是一切正常,
+        # 只是备份越来越旧。
+        - alert: BackupTooOld
+          expr: |
+            (time() - max(kube_cronjob_status_last_schedule_time{namespace="data", cronjob="postgres-backup"})) > 172800
+            or absent(kube_cronjob_status_last_schedule_time{namespace="data", cronjob="postgres-backup"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres 备份超过 48 小时没有触发过"
+            description: >-
+              备份 CronJob 每天 02:00 跑一次,48 小时没触发说明连着漏了两轮
+              (或者 CronJob 根本不在了)。**这条在云主机长期停机时也会响,
+              那是预期行为**——停机期间确实没有新备份,值得知道。
+
     - name: platform.newcomponents
       rules:
         # 下面这几个组件都是 2026-08-23 新加的,共同点是**没人会天天看**:
