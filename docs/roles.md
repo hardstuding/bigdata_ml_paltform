@@ -59,7 +59,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 指标 | ✅ | kube-prometheus-stack,Grafana 接 Keycloak SSO(本次会话端到端验证过登录) |
 | 日志 | ✅ | Loki + Alloy 采集全部 pod stdout,和指标同一个 Grafana 界面(ADR-020) |
 | 告警产生 | ✅ | Alertmanager 已开,chart 自带规则生效,抓到过真实问题(ADR-034) |
-| 告警送达 | 🟡 | 2026-08-23 补上了**规则**(ADR-071,5 条,选题标准是「坏了不会有任何人发现」)+ Flink 作业级指标。在此之前不只是缺凭据,**是一条平台自定义规则都没有**——就算把企微 webhook 配上也不会有任何告警发出来。现在仍然**没有外部通知渠道**,告警只会停在 Alertmanager 界面里;配置模板留在 `platform/alertmanager-notification/`,需要真实凭据才能激活。质量/新鲜度断言的失败还没接进来(结果在 OpenMetadata 里,不是 Prometheus 指标)|
+| 告警送达 | 🟡 | **7 条规则,质量/新鲜度那条实机验证过端到端**(ADR-071/073):造了一条故意失败的断言 → CronJob 检出 → 推进 Alertmanager,`DataQualityCheckFailed` 和 `DataQualityCheckStale` 两条路径都验过,告警文案里带 OpenMetadata 给的真实原因。**`BackupJobFailed` 上线当场就抓到一个真实失败的备份任务**。仍然**没有外部通知渠道**,告警停在 Alertmanager 界面里(卡真实凭据) |
 | 数据质量断言 | ✅ | OpenMetadata 自带 Data Quality(ADR-065/070),三条断言 + 一条新鲜度断言实机跑通;用一条故意失败的探针验证过「绿灯能变红」。新鲜度实测 `insertedRows=1640`。局限:覆盖两张表,断言失败时还没有告警通道 |
 | 备份 / 恢复 | ✅ | Postgres 每日备份,恢复演练验证过(ADR-033) |
 | 资源治理(组件级上限) | ✅ | ResourceQuota / LimitRange / PriorityClass(ADR-041)——防「单个组件失控拖死机器」 |
@@ -98,7 +98,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 建表 | ✅ | table-registration-app,建表 + 回写负责人/安全等级(ADR-043) |
 | SQL 数据转换 | 🟡 | dbt 最小骨架能在 Trino/Iceberg 上跑(ADR-053),**已经接进 Airflow**(`dbt_demo` DAG,`dbt build` + 把 `manifest.json`/`catalog.json` 上传到 `s3://lakehouse/dbt-artifacts/`)。*2026-08-21 修正:这一行之前写的"没接 Airflow 编排"不准确。* **没用 Cosmos 是刻意的设计取舍不是缺口**(Cosmos 要在 DAG 解析阶段跑 dbt,得改 scheduler/dag-processor 的 Python 运行时,理由见 DAG 文件顶部注释)。**真正还缺的两件**:①`schedule=None`,只能手动触发,不是常驻定时任务;②OpenMetadata 的 dbt 摄入任务没配——artifacts 已经上传到连接器期望的位置了,但没有任何东西去消费它们 |
 | 看板 / BI | ✅ | Superset 接 Keycloak SSO(本次会话修好 `api_base_url` 并端到端验证),连 Trino 用服务账号(ADR-021) |
-| 中文界面 | 🟡 | Superset 已配 `BABEL_DEFAULT_LOCALE=zh` + 语言菜单保留中英双语(2026-08-26,**确实就是一个配置**,Superset 自带简体中文翻译)。**没部署验证过**。其它组件(Airflow/Grafana/OpenMetadata)还是英文 |
+| 中文界面 | 🟡 | Superset 配置已加,但**实测发现只加配置不够**(ADR-077):镜像里 22 个 `.po`、**0 个 `.mo`**,gettext 只认编译后的,静默回落英文。Dockerfile 已加 `pybabel compile`,**未构建验证**;而且 React 主界面走的是另一套前端翻译文件,大概率仍是英文 |
 
 **结论:**OpenMetadata 部署验证完成后,这个角色的核心链路已经打通。
 剩余缺口是打磨性质的(采集任务配置、目录联动验证、dbt 编排),不再是
@@ -205,6 +205,7 @@ accuracy 只可能是 0 或 1,拿它当阈值是自欺欺人;改成校验"模型
 | 审计留痕 | 🟡 | Keycloak 事件进 Loki(ADR-024);审批系统自带审计页。但**没有汇总视图** |
 | 组织架构同步 | ✅ | iam-sync 从 HR 表同步组织/角色进 Keycloak(ADR-028/031),职级数据目前是虚拟占位 |
 | 数据资产盘点 | ✅ | **2026-08-23 真实端到端验证通过**:`scripts/29` 配好 Trino DatabaseService + 每 6 小时的采集任务,`scripts/30` 输出 `OPENMETADATA_TRINO_INGESTION_OK`。判据是**直接查 OpenMetadata API 确认 `trino.iceberg.demo.orders` 在目录里、六个字段和 Trino 真实表结构一致**——这张表从没人手动登记过,是采集自动发现的。实测目录里已有 100+ 张表(system/tpcds/tpch/iceberg 各 catalog)。过程中修了 4 个只有真跑才暴露的前置,清单见 ADR |
+| 平台管理组全权限 | ✅ | **2026-08-26 之前一直是摆设**(ADR-078):Trino 没配 group provider,传给 OPA 的 groups 永远是空的,`is_platform_admin` 从来没触发过——而 `opa test` 全过,因为测试的 input 是手写的、带着 groups。配上 file group provider(数据来自 `memberships.csv`)后实机验证:platform-team 的人能查只有该组能读的审计表,查带行级过滤的表拿到**全部 6 行**(普通用户只有 2 行) |
 | 敏感字段列级脱敏 | ✅ | ADR-063,2026-08-23 **在真集群上用真实 SQL 验过**(`scripts/36-verify-trino-masking.sh`,可重复跑):1 级 grant 查到的是 `138****5678` / `al***@example.com` / `***MASKED***`;**2 级 grant 上 phone/email 恢复明文而 id_card 仍然打码**——验的是分级真的在起作用,不是「一律打码」也能过的那种测法。Trino 侧实测每条查询会调 18 次 `columnMask` + 2 次 `rowFilters` |
 | 敏感字段行级过滤 | ✅ | ADR-063,2026-08-26 **在真集群上用真实 SQL 验过**(和列级同一个脚本):`demo.regional_sales` 里 3 个部门各 2 行,analyst001(employees.csv 里是「数据分析组」)只查到 2 行、且正好是华东/华南那两行。判定不只看「行数变少」——还要求看到的部门集合正好等于 {数据分析组},否则「谁都看不到」(部门查不到时的 `1 = 0` 分支误触发)也会蒙混过关 |
 | **管理驾驶舱** | ❌ | **从未开始**(E 线) |
