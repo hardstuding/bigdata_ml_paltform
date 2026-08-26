@@ -635,16 +635,10 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
   定位成"流式计算引擎"(实时聚合/join/特征计算),不做"数据搬运"。
   引入顺序上 Kafka 现在零真实消费者、Kafka Connect + Iceberg Sink
   这条轻量路径也没搭过,这两步应先于 Flink。**只是设计,没部署任何东西。**
-- **Spark 4.x 评估**:仓库固定 Spark 3.5.9,官方已到 4.x。核实结论
-  "方向对,但 Codex 支撑这个方向的一条关键理由是错的"(Spark 4.0 的
-  SPARK-45265 是 Spark 内置 Hive 客户端支持 Hive 4.0 metastore,和我们
-  独立部署的 Hive Metastore 版本锁定不是一回事,升 Spark 4 并不能解除
-  那个锁定)。3.5.9 不是废弃版本,但确实是旧的大版本线。升级要一起动
-  Scala 2.13 / Java 17 / `iceberg-spark-runtime-4.x_2.13`。
-- ~~**KServe runtime 矩阵设计**~~ —— **已完成(2026-08-26)**,见
-  [ADR-075](decisions/075-kserve-runtime-matrix.md):默认只装 4 个(sklearn /
-  mlserver / xgboost / lightgbm),其余 8 个挪进 `apps/kserve-runtimes/optional/`,
-  一条 kubectl 就能加回来。镜像清单 77 → 69。
+- ~~**Spark 4.x 评估**~~ —— **已评估(2026-08-26)**,见
+  [ADR-076](decisions/076-spark-4-evaluation.md):结论是暂不升,但查出一个
+  之前没意识到的联系——**Spark 4 要求 Java 17,而 Iceberg 卡在 1.10.0 的
+  原因正是当前 Spark 镜像只有 Java 11**。触发条件和联动清单都写进 ADR 了。
 - **Stackable(Spark/Trino/Hive 统一 Operator 平台)**:2026-08-15 Codex
   新提出,**目前完全没评估过**。值得单独做 PoC(非生产、对比部署/升级/
   故障恢复成本、保留绕开它直接用官方 Operator 的能力),**不迁移任何
