@@ -24,6 +24,26 @@
 # 生成结果(下次渲染会被覆盖)。见 environments/cloud-full/config.yaml
 # 顶部说明背景。
 #
+# 2026-08-23 从 1.13.3 升到 2.0.0(大版本,见 ADR-072)。
+#
+# **升级前逐条核对过 2.0 的 breaking changes,结论是我们几乎都不受影响**,
+# 唯一要动的就是下面两处版本号 + 一次数据库迁移:
+#   - 语义搜索/embedding 配置搬家 —— 我们没开,不受影响
+#   - Profiler 默认改成动态采样、不再收集基数分布 —— 我们的采集只配了
+#     DatabaseMetadata,没开 profiler;数据质量断言用的是行数/非空/唯一,
+#     不依赖基数
+#   - Great Expectations 0.x 支持移除 —— 我们没用 GE(ADR-065 选的是
+#     OpenMetadata 自带的数据质量),不受影响
+#   - Databricks / Chrome 插件 / Knowledge Center 链接 —— 都没用
+#   - 自建 ingestion 镜像要重建成 Python 3.12 —— 我们用官方 ingestion-base,
+#     只要改 tag
+#
+# **一条值得高兴的**:2.1 会废弃"Airflow 作为内部编排器",官方推荐迁到
+# 1.12 引入的 Kubernetes 原生编排。这个平台从 ADR-015 起就一直用 k8s 模式,
+# 不用做任何迁移——当初那个取舍现在省下了一次迁移。
+#
+# **chart 的 values 结构 1.13.3 → 2.0.0 逐字节相同**(两个版本的
+# `helm show values` diff 为 0 行),所以下面这份 valuesObject 一行都不用改。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -36,7 +56,7 @@ spec:
   source:
     repoURL: https://helm.open-metadata.org/
     chart: openmetadata
-    targetRevision: 1.13.3
+    targetRevision: 2.0.0
     helm:
       valuesObject:
         image:
@@ -101,7 +121,7 @@ spec:
                 #    顶部注释;Maven 拉 jar 卡死,见 ADR-061)。写在这里
                 #    让它进得了缓存清单,是这类问题的预防手段而不是事后
                 #    补救。
-                ingestionImage: "docker.getcollate.io/openmetadata/ingestion-base:1.13.3"
+                ingestionImage: "docker.getcollate.io/openmetadata/ingestion-base:2.0.0"
                 # chart 默认给采集 Job 的是 limits 2 core / 4Gi。2026-08-23
                 # 真实撞到:openmetadata 这个命名空间的 ResourceQuota
                 # (compute-quota,limits.memory 上限 6Gi)已经被组件本体占了
