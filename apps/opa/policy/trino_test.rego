@@ -177,3 +177,43 @@ test_other_service_accounts_still_denied_on_audit_schema if {
 		"context": {"identity": {"user": "platform_sdk_demo_service", "groups": []}},
 	}
 }
+
+# ---------------------------------------------------------- 身份代理
+# 2026-08-26 之前 Superset 用共享服务账号连 Trino,导致"任何能在 Superset
+# 建查询的人都能读任何表、而且不脱敏"。打开 impersonation 之后 Trino 看到
+# 的是真实的人。下面几条锁住这个开关的边界。
+
+test_superset_service_can_impersonate if {
+	trino.allow with input as {
+		"action": {"operation": "ImpersonateUser", "resource": {"user": {"user": "analyst001"}}},
+		"context": {"identity": {"user": "superset_service", "groups": []}},
+	}
+}
+
+test_other_service_accounts_cannot_impersonate if {
+	# 代理别人是很强的权限,只给真正需要的那一个账号。
+	not trino.allow with input as {
+		"action": {"operation": "ImpersonateUser", "resource": {"user": {"user": "analyst001"}}},
+		"context": {"identity": {"user": "dbt_demo_service", "groups": []}},
+	}
+}
+
+test_regular_user_cannot_impersonate if {
+	not trino.allow with input as {
+		"action": {"operation": "ImpersonateUser", "resource": {"user": {"user": "zhenghe"}}},
+		"context": {"identity": {"user": "analyst001", "groups": ["data-analysts"]}},
+	}
+}
+
+test_impersonated_user_still_gets_masked if {
+	# 代理生效之后,Trino 看到的是真实用户,列级脱敏就该对他生效了——
+	# 这正是打开 impersonation 的意义。
+	mask := trino.columnMask with input as {
+		"action": {
+			"operation": "GetColumnMask",
+			"resource": {"column": {"catalogName": "iceberg", "schemaName": "demo", "tableName": "access_test_l1", "columnName": "phone", "columnType": "varchar"}},
+		},
+		"context": {"identity": {"user": "analyst001", "groups": ["data-analysts"]}},
+	}
+	mask.expression != ""
+}

@@ -12,6 +12,16 @@
 # 还是用了明文 HTTP 去连 Trino 的 HTTPS-only 端口,报
 # "BadStatusLine(...TLS alert 的字节序列...)"——服务端返回的是 TLS
 # 握手/告警数据,客户端却当成 HTTP 响应解析,顾名思义就是协议对不上)。
+# **2026-08-26 打开 impersonate_user(ADR-074)。** 在这之前 Superset 用
+# 一个共享的 superset_service 账号连 Trino,Trino 永远只看到这个服务账号
+# ——后果是任何能在 Superset 里建查询的人都能读到 Trino 上的任何表,而且
+# 列级脱敏/行级过滤(ADR-063)在这条路上完全不生效。打开之后 Trino 看到的
+# 是登录用户本人,所有按人判断的规则自然生效。
+#
+# **这是一次行为收紧,和 ADR-051 那次同一个性质**:之前能在 Superset 里查的
+# 表,现在没有对应 grant 就查不到了。上线前要照 ADR-051 的做法先盘一遍
+# 实际在用的表。
+#
 # 必须通过 Superset Database 模型的 `extra` 字段(JSON)下的
 # `engine_params.connect_args` 传,这是 Superset "高级" - "引擎参数"那个
 # UI 输入框背后对应的字段,CLI/脚本这条路只能走同一个机制,不是抄近路。
@@ -59,10 +69,12 @@ with app.app_context():
     if d:
         d.sqlalchemy_uri = uri
         d.extra = json.dumps(extra)
+        d.impersonate_user = True
         db.session.commit()
         print(f"已更新: Trino 数据源(id={d.id})")
     else:
-        d = Database(database_name="Trino", sqlalchemy_uri=uri, extra=json.dumps(extra))
+        d = Database(database_name="Trino", sqlalchemy_uri=uri, extra=json.dumps(extra),
+                     impersonate_user=True)
         db.session.add(d)
         db.session.commit()
         print(f"已创建: Trino 数据源(id={d.id})")

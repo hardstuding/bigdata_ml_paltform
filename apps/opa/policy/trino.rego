@@ -61,9 +61,49 @@ is_service_account if {
 	input.context.identity.user in service_accounts
 }
 
+# ---- 身份代理(impersonation):Superset 代表真实用户去查 ----
+#
+# **2026-08-26 之前这里是个真实的权限漏洞。** Superset 用**一个共享的**
+# `superset_service` 账号连 Trino,于是 Trino 看到的永远是这个服务账号,
+# 而服务账号在下面那条规则里是无条件放行的。后果:
+#
+#   - 任何能在 Superset 里建一个查询的人,**能读到 Trino 上的任何表**,
+#     不管他有没有 table-access-grants.csv 里的授权;
+#   - 列级脱敏和行级过滤(ADR-063)在 Superset 这条路上**完全不生效**
+#     ——因为 `is_exempt_from_masking` 对服务账号豁免。
+#
+# 也就是说,这个平台在权限上最大的一笔投入,恰恰在**用得最多的那条 BI
+# 路径上是空的**。当初 ADR-051 选共享账号是有理由的(不想给每个 Superset
+# 数据源手动补 grant),但那个理由换来的代价当时没算清楚。
+#
+# 现在改成:Superset 打开 impersonation,把登录用户的身份透传给 Trino,
+# Trino 看到的是真实的人,后面所有按人判断的规则(grant / 脱敏 / 行过滤 /
+# platform-team 全权)就都自然生效了。zhenghe 2026-08-26 提的
+# "admin 应该有全权限" 也随之成立——platform-team 的人在 Superset 里就是
+# 以自己的身份查,`is_platform_admin` 那条规则照常放行。
+#
+# 被代理的用户名来自 Superset 的会话(Keycloak SSO 认证过的),不是终端
+# 用户能随便填的输入。
+#
+# resource 的字段路径是从 Trino 源码核实的,不是猜的:
+# plugin/trino-opa/.../OpaAccessControl.java 的 checkCanImpersonateUser
+# 构造的是 `OpaQueryInputResource.builder().user(new TrinoUser(userName))`,
+# 而 TrinoUser 是 `record TrinoUser(String user, ...)` —— 所以是
+# input.action.resource.user.user。
+impersonation_allowed_accounts := {"superset_service"}
+
+allow if {
+	input.action.operation == "ImpersonateUser"
+	input.context.identity.user in impersonation_allowed_accounts
+}
+
 allow if {
 	is_service_account
 	not is_audit_data(input)
+	# 代理请求走上面那条专门的规则,不吃"服务账号无条件放行"这一条——
+	# 否则以后往 impersonation_allowed_accounts 之外加服务账号时,会以为
+	# 自己没开代理权限,实际上早就开了。
+	input.action.operation != "ImpersonateUser"
 }
 
 # openmetadata_service 是唯一被放行到审计表的服务账号,理由是**它采的是

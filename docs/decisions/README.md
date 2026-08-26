@@ -121,6 +121,7 @@
 | [071](071-platform-alert-rules.md) | 平台自定义告警规则 + Flink 作业级指标 | 未部署验证 |
 | [072](072-openmetadata-2-upgrade.md) | OpenMetadata 升到 2.0.0 大版本 | 已升级并验证 |
 | [073](073-quality-alerts-to-alertmanager.md) | 质量/新鲜度断言结果推给 Alertmanager | 未部署验证 |
+| [074](074-superset-impersonation.md) | Superset 透传登录用户身份给 Trino | 未部署验证,**行为收紧** |
 | [022](022-ci-chart-validation.md) | CI:push/PR 前跑 `helm template` | 已采纳 |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 机制已实现并在 cloud-full 验证;ACME 和告警外推两档未在真实环境验证 |
