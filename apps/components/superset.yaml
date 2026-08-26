@@ -126,6 +126,24 @@ spec:
                 f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASS']}@"
                 f"{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/superset_examples"
             )
+          chinese_ui: |
+            # 界面汉化(zhenghe 2026-08-16 提出,08-26 确认"不是一个配置的
+            # 事吗"——**是的,确实就是一个配置**,Superset 自带简体中文翻译,
+            # 不需要自己翻译或者打补丁)。
+            #
+            # 两个键都要设,只设 BABEL_DEFAULT_LOCALE 是不够的:
+            #   - BABEL_DEFAULT_LOCALE 决定**默认**语言
+            #   - LANGUAGES 决定右上角语言切换菜单里**列出哪些**
+            # 只设前者的话默认变中文了,但用户想切回英文找不到入口;只设
+            # 后者的话菜单里有中文、默认还是英文,每个人都得自己切一次。
+            #
+            # 保留英文不是可有可无:这个平台的报错信息、官方文档、社区搜到的
+            # 答案全是英文的,排障时切回英文对得上号。
+            BABEL_DEFAULT_LOCALE = "zh"
+            LANGUAGES = {
+                "zh": {"flag": "cn", "name": "简体中文"},
+                "en": {"flag": "us", "name": "English"},
+            }
         ingress:
           enabled: true
           ingressClassName: nginx
