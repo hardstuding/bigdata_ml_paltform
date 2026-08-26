@@ -1,0 +1,27 @@
+# 容量与队列看板(ADR-064 的配套)。和 grafana-cost-dashboard 同一个模式:
+# 一份带 grafana_dashboard 标签的 ConfigMap,Grafana sidecar 自动发现。
+#
+# 成本看板回答"花了多少",这个回答"还能再塞多少、谁快到上限了"——
+# docs/roles.md 里「容量 / 成本看板」那一格要的是这两半。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana-capacity-dashboard
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/grafana-capacity-dashboard/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

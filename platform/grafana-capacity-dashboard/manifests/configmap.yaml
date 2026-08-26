@@ -1,0 +1,197 @@
+# 容量与队列看板(ADR-064 的配套)。和另外两个看板一样走 Grafana sidecar
+# 自动发现,panel 不写 datasource(用默认的 Prometheus),理由见
+# platform/grafana-cost-dashboard/manifests/configmap.yaml 顶部。
+#
+# **指标名是从 Kueue v0.19.2 源码 pkg/metrics/metrics.go 核实的**,不是猜的:
+#   kueue_cluster_queue_resource_usage / _nominal_quota / _borrowing_limit
+#       labels: cohort / cluster_queue / flavor / resource / replica_role
+#   kueue_pending_workloads       labels: cluster_queue / status / replica_role
+#   kueue_admitted_active_workloads
+#
+# 所有查询都带 `replica_role="leader"`:Kueue 做 HA 时每个副本都会导出一份
+# 同名指标,不过滤的话同一个队列会被计成两倍。现在只有单副本,加上是为了
+# 以后开 HA 时**不用回来改看板**——而且那种错算出来的数看着完全正常,
+# 是最难发现的一类。
+#
+# 这个看板回答的是 docs/roles.md 里「容量 / 成本看板」那格缺的另一半:
+# 成本回答"花了多少",容量回答"还能再塞多少、谁快到上限了"。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-capacity-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  platform-capacity.json: |
+    {
+      "title": "容量与队列",
+      "uid": "platform-capacity",
+      "schemaVersion": 39,
+      "timezone": "browser",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "panels": [
+        {
+          "id": 1,
+          "title": "各组配额用了多少(CPU)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "sum by (cluster_queue) (kueue_cluster_queue_resource_usage{resource=\"cpu\",replica_role=\"leader\"})",
+              "legendFormat": "{{cluster_queue}} 已用",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (cluster_queue) (kueue_cluster_queue_nominal_quota{resource=\"cpu\",replica_role=\"leader\"})",
+              "legendFormat": "{{cluster_queue}} 标称配额",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "description": "实线是实际占用,和它同色的另一条是这个组的标称配额。**已用超过标称说明它在借别人的**——这正是 CDH 队列那种弹性,不是异常。持续贴着标称+可借的上限跑,才是该加配额的信号。"
+        },
+        {
+          "id": 2,
+          "title": "排队中的作业(按队列)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "targets": [
+            {
+              "expr": "sum by (cluster_queue) (kueue_pending_workloads{status=\"active\",replica_role=\"leader\"})",
+              "legendFormat": "{{cluster_queue}} 等资源",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (cluster_queue) (kueue_pending_workloads{status=\"inadmissible\",replica_role=\"leader\"})",
+              "legendFormat": "{{cluster_queue}} 永远排不上",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "description": "**这两条线的含义完全不同。** active = 正常排队等资源,过一会就好;inadmissible = 按当前配额**永远**放行不了(作业要的比整个组的上限还多),它不会自己好,而且提交的人只会看到「还在排队」。后者有告警(ADR-071)。"
+        },
+        {
+          "id": 3,
+          "title": "正在跑的作业(按队列)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "targets": [
+            {
+              "expr": "sum by (cluster_queue) (kueue_admitted_active_workloads{replica_role=\"leader\"})",
+              "legendFormat": "{{cluster_queue}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "title": "配额使用率(CPU)",
+          "type": "bargauge",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 16
+          },
+          "targets": [
+            {
+              "expr": "sum by (cluster_queue) (kueue_cluster_queue_resource_usage{resource=\"cpu\",replica_role=\"leader\"}) / sum by (cluster_queue) (kueue_cluster_queue_nominal_quota{resource=\"cpu\",replica_role=\"leader\"})",
+              "legendFormat": "{{cluster_queue}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "description": "超过 100% 就是在借别人的配额。"
+        },
+        {
+          "id": 5,
+          "title": "配额使用率(内存)",
+          "type": "bargauge",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 16
+          },
+          "targets": [
+            {
+              "expr": "sum by (cluster_queue) (kueue_cluster_queue_resource_usage{resource=\"memory\",replica_role=\"leader\"}) / sum by (cluster_queue) (kueue_cluster_queue_nominal_quota{resource=\"memory\",replica_role=\"leader\"})",
+              "legendFormat": "{{cluster_queue}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "title": "节点还剩多少可分配",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 16
+          },
+          "targets": [
+            {
+              "expr": "sum(kube_node_status_allocatable{resource=\"cpu\"}) - sum(kube_pod_container_resource_requests{resource=\"cpu\"})",
+              "legendFormat": "CPU 核",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "description": "**这条和上面的配额是两回事,一起看才有意义。** Kueue 只按配额放行,它不知道机器上还剩多少;配额没用满但这条到 0,作业照样会卡在 Pending —— 那时候要加的是机器,不是配额。"
+        }
+      ]
+    }
