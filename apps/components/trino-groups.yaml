@@ -1,0 +1,34 @@
+# Trino 的组成员关系(file group provider 的数据)。
+#
+# 内容由 scripts/sync-trino-groups-configmap.py 从
+# platform/iam/memberships.csv 生成,CI 用 --check 拦漂移。
+#
+# **为什么单独一个 Application**:trino 那个 Application 是 helm chart 源,
+# 一个 Application 只能有一个 source;而且组成员变更和 Trino 本身的版本/
+# 配置变更应该能分别回滚。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trino-groups
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # 排在 trino 前面:Trino 启动时就要能读到这两个文件,
+    # 否则 group-provider 加载失败会让 coordinator 起不来。
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/trino-groups/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trino
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

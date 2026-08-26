@@ -170,6 +170,28 @@ spec:
         # 补齐 apps/opa/policy/trino.rego 里的服务账号白名单
         # (superset_service/dbt_demo_service/table_registration_service),
         # 回滚方式是 revert 这一条改动,ArgoCD 会自动同步回去。
+        # Trino 的 file group provider(2026-08-26,见
+        # scripts/sync-trino-groups-configmap.py 的说明)。
+        #
+        # **不配这个,Trino 传给 OPA 的 identity.groups 永远是空的**,
+        # `apps/opa/policy/trino.rego` 里的 `is_platform_admin` 就形同虚设
+        # ——"平台管理组不受表级授权约束、方便排障"这个口子从来没真正生效过。
+        # 打开 Superset impersonation(ADR-074)之后这条更是硬伤:Trino 看到
+        # 的是真实的人,不知道他属于哪个组的话,platform-team 的人也会被当成
+        # 普通用户拦下,正好和"admin 应该有全权限"相反。
+        #
+        # 用 configMounts 而不是 additionalConfigProperties:group-provider 的
+        # 配置必须是**独立的 group-provider.properties 文件**,不是 config.properties
+        # 里的几行。subPath 挂载,不会盖掉 chart 自己在 /etc/trino 下生成的东西。
+        configMounts:
+          - name: trino-groups-properties
+            configMap: trino-groups
+            path: /etc/trino/group-provider.properties
+            subPath: group-provider.properties
+          - name: trino-groups-file
+            configMap: trino-groups
+            path: /etc/trino/group.txt
+            subPath: group.txt
         accessControl:
           type: properties
           properties: |

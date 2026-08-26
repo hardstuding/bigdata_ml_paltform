@@ -44,3 +44,21 @@ RUN uv pip install \
     psycopg2-binary \
     authlib \
     trino
+
+# 界面汉化的**后半截**(ADR-077)。
+#
+# 只在 superset_config.py 里配 BABEL_DEFAULT_LOCALE=zh 是不够的——
+# 2026-08-26 实测:配置确实生效了(exec 进 pod `import superset_config`
+# 能读到 zh),但界面还是全英文。查下来原因很直白:
+#
+#   这个镜像的 superset/translations/ 下有 **22 个 .po,0 个 .mo**。
+#
+# `.po` 是翻译源文件,Babel 运行时只认编译后的 `.mo`。没有 .mo,
+# gettext 找不到任何目录,静默回落到英文——**不报错,配置也确实"生效"了,
+# 就是没翻译**。这是"配了没报错但没效果"的又一个实例。
+#
+# `pybabel compile` 只是把已有的 .po 编译一遍,不改任何翻译内容,
+# 也不联网。
+RUN pybabel compile -d /app/superset/translations 2>&1 | tail -3 && \
+    echo "编译出的 .mo 个数: $(find /app/superset/translations -name '*.mo' | wc -l)" && \
+    test "$(find /app/superset/translations -name '*.mo' | wc -l)" -gt 0

@@ -20,8 +20,11 @@ mkdir -p logs
 LOG_FILE="logs/audit-superset-tables.log"
 log() { echo "[$(date -u +%FT%TZ)] $*" | tee -a "$LOG_FILE"; }
 
-SS_POD="$(kubectl -n superset get pod -l app.kubernetes.io/component=node -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-[ -n "$SS_POD" ] || SS_POD="$(kubectl -n superset get pod -l app=superset -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+# 标签是 2026-08-26 实测确认的(第一版写的 component=node 和 app=superset
+# 都选不中,脚本直接报"找不到 Pod")。chart 给 web 这一档打的是
+# component=web,worker 那档才是别的值——这里只要 web。
+SS_POD="$(kubectl -n superset get pod -l app.kubernetes.io/name=superset,app.kubernetes.io/component=web \
+  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
 [ -n "$SS_POD" ] || { log "找不到 Superset 的 Pod。"; exit 1; }
 log "用 ${SS_POD} 直接查 Superset 自己的元数据库"
 

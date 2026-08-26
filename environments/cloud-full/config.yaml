@@ -94,4 +94,5 @@ enabled_components:
   - table-registration-app.yaml
   - trino-liveness-fix.yaml
   - trino-tls.yaml
+  - trino-groups.yaml
   - trino.yaml

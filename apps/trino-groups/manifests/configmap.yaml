@@ -1,0 +1,21 @@
+# **这个文件是生成的**,源头是 platform/iam/memberships.csv。
+# 改组成员改那份 CSV,然后跑
+#   python3 scripts/sync-trino-groups-configmap.py
+# CI 会用 --check 拦住漂移(和 sync-airflow-dags-configmap.py 同一个模式)。
+#
+# 它解决的问题见那个脚本的文档字符串:没有 group provider 的话,Trino 传给
+# OPA 的 groups 永远是空的,`is_platform_admin` 那条规则形同虚设。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-groups
+  namespace: trino
+data:
+  group-provider.properties: |
+    group-provider.name=file
+    file.group-file=/etc/trino/group.txt
+    # 30 秒重读一次。改完 CSV + 同步 ConfigMap 之后不用重启 Trino,
+    # 但要等 kubelet 把 ConfigMap 更新同步进容器(约 1 分钟)。
+    file.refresh-period=30s
+  group.txt: |
+    platform-team:admin,zhenghe

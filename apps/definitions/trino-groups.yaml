@@ -1,0 +1,41 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/trino-groups.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/trino-groups.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
+# Trino 的组成员关系(file group provider 的数据)。
+#
+# 内容由 scripts/sync-trino-groups-configmap.py 从
+# platform/iam/memberships.csv 生成,CI 用 --check 拦漂移。
+#
+# **为什么单独一个 Application**:trino 那个 Application 是 helm chart 源,
+# 一个 Application 只能有一个 source;而且组成员变更和 Trino 本身的版本/
+# 配置变更应该能分别回滚。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trino-groups
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # 排在 trino 前面:Trino 启动时就要能读到这两个文件,
+    # 否则 group-provider 加载失败会让 coordinator 起不来。
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/trino-groups/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trino
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
