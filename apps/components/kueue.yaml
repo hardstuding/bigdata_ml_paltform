@@ -78,6 +78,19 @@ spec:
               healthProbeBindAddress: :8081
             metrics:
               bindAddress: :8443
+              # **不开这个,`kueue_cluster_queue_resource_usage` /
+              # `_nominal_quota` / `_borrowing_limit` 一条序列都不会有**
+              # ——也就是"各组配额用了多少 / 还剩多少"整块看板是空的。
+              # 2026-08-26 实测:容量看板 6 个 panel 里有 4 个查不到数据,
+              # 排查发现不是"没作业所以空",是指标压根没导出。
+              #
+              # **chart 默认 values 里那行提示的缩进是错的**:它写成
+              # `# enableClusterQueueResources: true` 顶格在 `metrics:`
+              # 外面,而源码里(apis/config/v1beta2/configuration_types.go)
+              # 这个字段和 `BindAddress` 在同一个 struct 里,必须放在
+              # `metrics:` **下面**。照 chart 那个缩进取消注释,会静默无效
+              # ——配了、没报错、指标还是没有,最难查的那种。
+              enableClusterQueueResources: true
             webhook:
               port: 9443
             leaderElection:
