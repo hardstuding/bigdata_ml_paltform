@@ -22,54 +22,48 @@ zhenghe 2026-08-23 提了三个问题(门户/自建工具能不能优化、按�
 [`docs/production-readiness-gaps.md`](production-readiness-gaps.md)。
 zhenghe 回复"这 6 个挺重要的,都要做"。
 
-### 进度(2026-08-23 晚,第三轮实机验证之后)
+### 进度(2026-08-26)
 
-| # | 缺口 | 状态 |
-|---|---|---|
-| 1 | 数据质量断言 | ✅ 实机验证([ADR-065](decisions/065-data-quality-on-openmetadata.md)) |
-| 2 | 数据新鲜度 SLO | ✅ 检测实机跑通([ADR-070](decisions/070-data-freshness-slo.md));告警出口卡在没凭据 |
-| 3 | 查询审计 | ✅ 全链路 + 审计表 OPA 保护([ADR-066](decisions/066-trino-query-audit.md));断流告警**已加规则**(ADR-071) |
-| 4 | 成本归属 | ✅ OpenCost 出数 + Grafana 看板,**按组的成本实测 ¥0.168/核·小时对得上**([ADR-069](decisions/069-cost-attribution.md)) |
-| 5 | Schema Registry | ✅ 端到端:producer 发 Avro、Flink 消费、**不兼容改动被 409 拦在发送侧**([ADR-068](decisions/068-schema-registry.md)) |
-| 6 | 门户改工作台 | ✅ 实机验证([ADR-067](decisions/067-portal-as-workbench.md)) |
+**六条生产可用性缺口全部落地并实机验证**(明细见下面 08-23 那轮的记录)。
+08-26 这一轮做完的:
 
-**六条全部落地并实机验证。** 另外这一轮顺带关掉的老账:
+| 事项 | 结果 |
+|---|---|
+| OpenMetadata 1.13.3 → **2.0.0** 大版本升级 | ✅ 已验证([ADR-072](decisions/072-openmetadata-2-upgrade.md)) |
+| 敏感字段**行级过滤**实机验证 | ✅ roles.md 最后一个 🟡 转 ✅ |
+| flink CRD 常年 OutOfSync | ✅ 修掉了,66 个应用**全绿** |
+| 镜像搬运的新路径 `scripts/38` | ✅ crane + rsync,不需要本机 docker |
 
-- **列级脱敏**从 🟡 转 ✅([`scripts/36-verify-trino-masking.sh`](../scripts/36-verify-trino-masking.sh)):
-  1 级看到 `138****5678`,2 级 phone 恢复明文而 id_card 仍打码——**验的是
-  分级,不是"有没有打码"**。
-- **平台自定义告警规则**从 0 条到 5 条(ADR-071),之前那套通知设施从来
-  没有东西可以送。
+### 08-26 这轮的三个教训
 
-### 这一轮抓到的三个"建出来了但没接上"
-
-这类失败的共同点是**每一层都显示成功**,只有直接问最终消费方才看得见:
-
-1. **OPA 从来没有热加载过策略**——`opa run` 默认只在启动时读一次,仓库
-   一直没配 `--watch`。修的过程还连踩两层(盯文件收不到 ConfigMap 的
-   符号链接替换;盯目录会把同一份策略加载三遍)。
-2. **opencost / kueue 的 ServiceMonitor 没被 Prometheus 选中**——
-   `serviceMonitorSelector` 要 `release: kube-prometheus-stack` 标签,两个
-   chart 生成的都不带。成本看板会永远空白、Kueue 告警永远不触发,而没有
-   任何一层报错。
-3. **`kube_pod_labels` 有两个来源**(kube-state-metrics 和 OpenCost 各导
-   一份同名指标),join 时 422。
+1. **OpenMetadata 2.0 本身很顺,卡住的是拉不到镜像。** 云主机同时失去了到
+   Docker Hub 的所有通路(直连超时、daocloud 卡在 blob、另试 5 个镜像站
+   全超时)。这把"给 k3s 配 registry mirror"从锦上添花变成**真实成本项**
+   ——见 BACKLOG 第一条。
+2. **flink CRD 那个 OutOfSync 的根因,BACKLOG 里原来猜错了。** 不是"CRD
+   太大塞不进注解"(ServerSideApply 本来就开着),是 API server 的默认值
+   归一化,值不同的字段是 0 个。**猜的根因写进 BACKLOG 之后会被当成事实**,
+   这次是逐字段比对才发现的。
+3. **我自己用字符串位置做批量编辑,又误删了 108 行 BACKLOG。** 和几天前
+   `\1` 被当八进制转义是同一类:断言只验了"发生了替换",没验"替换掉的
+   是不是该替换的东西"。
 
 ### 下一步
 
 1. **告警出口**——质量、新鲜度、审计断流三个来源接**同一个**出口。真实
    阻塞是没有通知渠道凭据(zhenghe:"等后面上生产来测试")。
-2. **行级过滤的实际效果**——端点在被调用、`opa test` 覆盖了,但还没构造
-   跨部门数据看过滤结果。列级那半已经验完。
+2. **给 k3s 配 registry mirror**(BACKLOG 第一条)——要重启 k3s,得挑一个
+   手上没有半截活的时间点。
 3. **本机 colima 切 x86_64**(见 [`cpu-architecture.md`](operations/cpu-architecture.md)),
    CI 已经只建 amd64。
-4. flink-operator 那 4 个 CRD 常年 OutOfSync(见 BACKLOG,老问题,现在有
-   `--exclude-crds` 这条现成解法)。
+4. **prod 不要跟 OpenMetadata 2.0.0**,等 2.0.x 出到两三个补丁版本再说
+   (ADR-072 的建议)。
 
 ### 云主机状态
 
-已停机。2026-08-23 共开了三次机:06:20–07:20、08:15–09:00、09:20–09:50,
-每次都是"先把要做的事准备到开机就能立刻跑"再开(按量付费,见全局协作规则)。
+已停机。2026-08-26 开了两次:一次因为镜像拉不动主动停机止损、把镜像在
+本地准备好再开第二次(按量付费的既定做法:先把要做的事准备到开机就能
+立刻跑,再开机)。
 
 ---
 
