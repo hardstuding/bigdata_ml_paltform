@@ -82,8 +82,16 @@ zhenghe 回复"这 6 个挺重要的,都要做"。
 包括 `/data/k3s.pre-teardown-20260822` 那份备份)。
 
 重新开机用 `scripts/32-start-cloud-vm.sh`——它会自动取新的公网 IP、重建 SSH
-隧道、核对 kubeconfig。**公网 IP 不是固定 EIP,每次开机都会变**(已经变过
-好几次),所以不要手抄 IP。
+隧道、核对 kubeconfig、**并检查 `/etc/hosts` 里的 `*.local-lite.test` 是不是
+还指着旧 IP**。**公网 IP 不是固定 EIP,每次开机都会变**(已经变过好几次),
+所以不要手抄 IP。
+
+**2026-08-27 真实踩到**:zhenghe 打开 `http://portal.local-lite.test:32460/`
+报 500,以为是自己 VPN 的问题。实际是 `/etc/hosts` 里还写着上上次的 IP
+(`8.130.69.252`),而那个 IP 早被回收、多半已经分给别人的实例了——**浏览器
+会把 `*.local-lite.test` 的 cookie 一起发给那台陌生机器**。所以这不只是
+"打不开",是每次开机后都存在的一个小信息泄露面。开机脚本现在会检测并给出
+可直接粘贴的修复命令(想自动改就 `UPDATE_HOSTS=1 ./scripts/32-start-cloud-vm.sh`)。
 
 **local-lite 目前不使用**(zhenghe 2026-08-26:"本机的不用做了呀,我们都
 已经上云了"),本机 colima 是停的。

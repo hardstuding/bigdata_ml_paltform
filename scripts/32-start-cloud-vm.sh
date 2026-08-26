@@ -75,6 +75,39 @@ IP="$(ip_of)"
 [ -n "$IP" ] || { log "!! 拿不到公网 IP"; exit 1; }
 log "--> Running,公网 IP:${IP}"
 
+# ---- /etc/hosts 里的域名指向对不对 ----
+#
+# **2026-08-27 真实踩到,而且不只是"打不开"这么简单。** zhenghe 打开
+# http://portal.local-lite.test:32460/ 报 500,第一反应是自己 VPN 的问题。
+# 实际是 /etc/hosts 里还写着上上次开机的 IP(8.130.69.252),而这台是抢占式
+# 实例、每次开机 IP 都变——那个 IP 早就被回收、多半已经分给别人的实例了。
+#
+# 危害不止是打不开:**浏览器会把 *.local-lite.test 的 cookie 一起发给那个
+# 陌生 IP**。所以这不是"体验问题",是每次开机后都存在的一个小信息泄露面。
+#
+# 这里只检测 + 给出可直接粘贴的命令,不默认动 /etc/hosts:改它要 sudo,
+# 会弹密码,脚本在无人值守时跑不下去。要自动改就带 UPDATE_HOSTS=1。
+HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
+PLATFORM_HOST_LINE="$(grep -nE "^[0-9.]+ .*local-lite\.test" "$HOSTS_FILE" 2>/dev/null | head -1 || true)"
+if [ -n "$PLATFORM_HOST_LINE" ]; then
+  OLD_IP="$(echo "$PLATFORM_HOST_LINE" | sed -E 's/^[0-9]+:([0-9.]+) .*/\1/')"
+  if [ "$OLD_IP" != "$IP" ]; then
+    log "!! ${HOSTS_FILE} 里 *.local-lite.test 还指着 ${OLD_IP},而这次的 IP 是 ${IP}"
+    log "   不更新的话浏览器打开任何 *.local-lite.test 都会连到**别人的机器**"
+    log "   (那个 IP 已经被回收重分配),而且会把 cookie 一起发过去。"
+    if [ "${UPDATE_HOSTS:-0}" = "1" ]; then
+      log "   UPDATE_HOSTS=1,正在更新(需要 sudo)..."
+      sudo sed -i '' -E "s/^${OLD_IP}( .*local-lite\.test)/${IP}\1/" "$HOSTS_FILE" \
+        && log "   已更新为 ${IP}"
+    else
+      log "   要更新,跑这一条(或者给这个脚本加 UPDATE_HOSTS=1):"
+      log "     sudo sed -i '' -E 's/^${OLD_IP}( .*local-lite\\.test)/${IP}\\1/' ${HOSTS_FILE}"
+    fi
+  else
+    log "--> ${HOSTS_FILE} 里的 *.local-lite.test 已经指向 ${IP},不用改"
+  fi
+fi
+
 log "--> 等 SSH 起来(最多 5 分钟)"
 ssh_ok=0
 for _ in $(seq 1 30); do
