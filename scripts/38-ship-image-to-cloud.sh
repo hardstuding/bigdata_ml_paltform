@@ -55,8 +55,11 @@ fi
 log "    大小 $(du -h "$TAR" | cut -f1)"
 
 log "2/3 rsync 到云主机(断点续传,断了重跑这个脚本即可)"
-rsync -a --partial --info=progress2 -e "ssh -i ${CLOUD_VM_KEY} -o StrictHostKeyChecking=accept-new" \
-  "$TAR" "${CLOUD_VM_USER}@${CLOUD_VM_IP}:/data/${SAFE}.tar" 2>&1 | tail -2 | tee -a "$LOG_FILE"
+# 用 `-P`(= --partial --progress)而不是 `--info=progress2`:**macOS 自带
+# 的是 rsync 2.6.9**(2006 年那版),不认识 --info,直接报
+# "unknown option" 退出。2026-08-26 实测踩到。
+rsync -a -P -e "ssh -i ${CLOUD_VM_KEY} -o StrictHostKeyChecking=accept-new" \
+  "$TAR" "${CLOUD_VM_USER}@${CLOUD_VM_IP}:/data/${SAFE}.tar" 2>&1 | tail -3 | tee -a "$LOG_FILE"
 
 log "3/3 在云主机上 docker load + 打成目标名字"
 ssh -i "$CLOUD_VM_KEY" -o StrictHostKeyChecking=accept-new "${CLOUD_VM_USER}@${CLOUD_VM_IP}" \

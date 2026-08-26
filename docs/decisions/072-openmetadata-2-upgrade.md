@@ -1,7 +1,7 @@
 # ADR-072:OpenMetadata 升到 2.0.0(大版本)
 
 日期:2026-08-26
-状态:配置改完,**升级过程和验证见下面"实机"一节**
+状态:**已升级并验证通过**(cloud-full)
 
 ## 先把风险说清楚
 
@@ -62,9 +62,46 @@ values 结构变了导致一堆配置静默失效**。这次没有。
 4. 验证的是**业务结果不是 Pod 状态**:目录里的表还在不在、Trino 采集
    pipeline 还在不在、数据质量断言还在不在、能不能登录。
 
-## 实机
+## 实机(cloud-full,2026-08-26)
 
-见本文件末尾"升级记录"一节(升完补)。
+**升级成功,验证通过。**
+
+| 项 | 升级前 | 升级后 |
+|---|---|---|
+| 版本 | 1.13.3 | **2.0.0** |
+| 目录里的表 | 388 | **388**(一张没少) |
+| 采集/质检 pipeline | 3 个 | **3 个,名字全对** |
+| 数据质量断言 | 4 条,都有结果 | **4 条,都有结果** |
+
+**不是只看"对象还在"**:升级后重新触发了一轮采集和质检,三个 k8s Job
+(`om-job-trino-metadata` / `om-job-orders-data-quality` /
+`om-job-device-events-stream-data-quality`)全部用
+`ingestion-base:2.0.0` 跑成功,四条断言拿到的是**当时新产生的结果**
+(13:49 / 13:51 UTC),不是迁移前的旧记录。Trino 元数据采集回来的字段
+和 Trino 里真实表结构逐个对得上。
+
+数据库迁移日志里能看到 67 个搜索索引模板全部重建成功(`Success: 67,
+Failed: 0`),以及 "Successfully retrieved 3 ingestion pipelines for
+secrets migration" —— 我们自己 PUT 进去的那三个 pipeline 被迁移逻辑正确
+识别并搬过去了。
+
+顺带确认了一个 2.0 的新东西:`/mcp` 端点返回 405(Method Not Allowed),
+说明 MCP server 确实**默认开着**,和发布说明一致。这个平台暂时没有 MCP
+客户端,先记着。
+
+### 真正卡住这次升级的不是 OpenMetadata,是拉不到镜像
+
+云主机在升级过程中**同时失去了到 Docker Hub 的所有通路**:直连超时、
+daocloud 卡在 blob 不动(层全部 `Download complete` 却永远不 extract,
+25 分钟磁盘零增长、CPU 95% 空闲)、另外试的 5 个镜像站全部超时。
+
+解法是新写的 `scripts/38-ship-image-to-cloud.sh`:用 `crane` 在本机直接
+和 registry 说话(**不需要本机 docker 守护进程**)拉成 tar,rsync 上去
+`docker load`。实测 server 镜像 457MB / 本地下载 1 分 19 秒 / 上传约
+90 秒,整个搬运比等镜像站快一个数量级。
+
+这件事也把"给 k3s 配 registry mirror"从"锦上添花"变成了**真实的成本项**
+——见 `docs/BACKLOG.md`。
 
 ## 建议
 
