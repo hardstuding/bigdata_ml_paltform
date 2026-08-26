@@ -129,6 +129,150 @@ get_model_version()` 查询确认 `status: READY`。
 
 ---
 
+### 给 k3s 配 registry mirror(每次拉镜像都在真金白银地等)
+
+**这是一条一直在花钱的债。** 现在拉境外镜像的流程是:人工判断该走哪个
+镜像站 → `ssh` 上去 `docker pull` 镜像站的地址 → `docker tag` 回原地址。
+三个问题:
+
+1. **digest 固定的镜像 `docker tag` 根本做不了**(`refusing to create a
+   tag with a digest reference`),只能让 kubelet 自己去原地址拉,慢。
+2. 每次都要人在场判断和操作,`scripts/23` 那套只覆盖了一部分。
+3. **等待是按小时计费的**。2026-08-26 升级 OpenMetadata 时,光等
+   `server:2.0.0` 一个镜像就等了 20 分钟以上,期间云主机全程计费。
+
+结构性的解法是 `/etc/rancher/k3s/registries.yaml`,让容器运行时自己把
+仓库地址重定向到镜像站——**tag 和 digest 引用都生效**,不用人工介入,
+`docker tag` 那一步整个消失:
+
+```yaml
+mirrors:
+  ghcr.io:
+    endpoint: ["https://ghcr.nju.edu.cn"]
+  docker.io:
+    endpoint: ["https://docker.m.daocloud.io"]
+  registry.k8s.io:
+    endpoint: ["https://k8s.m.daocloud.io"]
+```
+
+**为什么还没做**:改这个文件要重启 k3s,而 `CLAUDE.md` 把"任何会让 k3s
+停掉的操作"列为必须先问用户。zhenghe 2026-08-26 说过 Codex 那边"暂时先不管",
+但重启 k3s 仍然要挑一个手上没有半截活的时间点,不能在一次升级做到一半的
+时候顺手做了。
+
+做的时候要连带把 `scripts/23-pull-images-remote-via-mirror.sh` 里那套
+"人工判断镜像站 + docker tag"的逻辑删掉——两套机制并存只会让人搞不清
+当前到底走的哪条路。
+
+---
+
+## P0(会阻断当前主线的,才有资格排这里)
+
+当前没有。如果出现真实的数据风险/持续计费异常/安全问题,加在这里,
+并在 `docs/CURRENT_WORK.md` 里注明"CURRENT 被 P0 阻断,原因是……"。
+
+---
+
+## P1:解锁角色能力(投入产出比最高,先做这一批)
+
+依据 [`docs/roles.md`](roles.md)。**1.2/1.3/1.4 已于 2026-08-19 完成**
+(OpenMetadata / JupyterHub+MLflow / Spark Operator+SeaTunnel+Spark
+History Server 全部部署并逐个真实登录验证过,不是只看 Pod Running)。
+过程中发现并修复了 8 个真实 bug——这些组件长期 park、从没真的走过一次
+登录,配置错误一直没暴露:SSO 端口/scope/upstream Service 名字写错
+(mlflow-oauth2-proxy 配的 Service 名根本不存在)、Argo Workflows
+issuer 不匹配导致 CrashLoopBackOff 两天多没人发现、Keycloak realm 从
+建立起就没配过 groups claim mapper(意味着 Grafana/JupyterHub 的按组
+授权可能从来没真的生效过,这次一并修了)、OpenMetadata 镜像走自定义
+域名代理导致 ImagePullBackOff、MLflow 内存限制太小 36 秒内 OOMKill、
+Spark History Server 缺 S3A 连接器 jar。详见 `docs/journal/2026-08.md`
+和对应 commit。
+
+### 1.1 环境抽象补上"组件选择"层 —— 已完成(2026-08-20)
+
+这次拉起 P1.2/1.3/1.4 全靠人工 `git mv` + 逐个手动排查 Keycloak
+client/Secret/scope 缺口完成,过程中暴露的好几个 bug(client 已存在但
+Secret 缺失、groups scope 从来没配过)本可以在"改配置就重新拉起"这套
+机制的约束下被更早、更结构性地测试捕获,现在只能靠"当天有没有人手动
+测登录"这种运气发现。cloud-full 是 16 vCPU / 64 GiB,不是资源不够,是
+"哪些组件在哪个环境启用"当时(2026-08-19)靠人工在 `apps/definitions/`
+和 `environments/cloud-full/pending-definitions/` 之间 `git mv`——这个
+机制是 2026-08-08 为 6GB 的 colima 本机设计的,搬到云上没有重新评估过。
+
+**已完成(2026-08-20,ADR-057 第三批)**:"启用哪些组件"已经变成
+`environments/<env>/config.yaml` 里的 `enabled_components` 声明式列表,
+和已有的 `scripts/render-environment-config.py` 机制衔接(没有再造一个
+新脚本),`pending-definitions/` 这个靠目录位置表达启用状态的机制已退役、
+目录已删除。
+
+同一层还缺"规格分档"(副本数/resources/持久化按环境取值),可以一起做,
+优先级低于组件选择。
+
+### 1.5 Argo Workflows RBAC —— 已完成(2026-08-19)
+
+SSO 登录 CrashLoopBackOff(issuer/issuerAlias 配置问题)和登录后调用
+workflows API 403(`server.sso.rbac` 需要的 ServiceAccount + 长期
+token Secret + Role/RoleBinding)都已修好,四个资源加进了
+`templates/apps-definitions/argo-workflows.yaml` 的 `extraObjects`。
+真实 curl+cookie-jar 验证过:登录→查询 workflows API 200→建一个真实
+Workflow→能查到→删除清理。详见 `docs/CURRENT_WORK.md` 归档记录。
+
+### 1.6 Kafka 部署 —— 已完成(2026-08-19)
+
+部署 + 真实建 topic/生产/消费一条消息验证通过,大数据开发角色最后一块
+拼图补上。**还没接进真实数据管道**(没有真实 Producer/Consumer 应用,
+目前零真实消费者,这条不算数据管道本身完成,只是组件可用性)。
+
+### 1.7 算法链路端到端重新验证 —— 全部完成(2026-08-20)
+
+JupyterHub/MLflow/Spark Operator/Feast/Argo Workflows 都已部署验证。
+"Argo Workflows 编排训练"(2026-08-19)、"notebook 里触发训练"的 SDK
+机制 `run_workflow_template()`(2026-08-20,云端 debug pod 验证过,见
+BACKLOG 2.6)都已经完成并验证。
+
+**最后一段空白"notebook → Feast 特征 → Argo Workflows 训练 → MLflow
+记录"这条完整链路也已经真实跑通**:新增 `train-from-feast-features`
+这个独立 WorkflowTemplate(不是给 `train-demo-model` 加第二个
+entrypoint,`run_workflow_template()` 按名字触发不支持覆盖
+entrypoint),用 `FeatureStore.get_historical_features()` 从
+`customer_order_features` 取 point-in-time 正确的历史特征(不是像
+`train-demo-model` 那样用合成数据),训练一个玩具分类器,注册进 MLflow
+Model Registry。
+
+**云端真实触发,过程中挖出并修好 4 个真实 bug**(如实记录,不是一次
+就顺利跑通):
+1. `feast[spark]==0.65.0` 的 extras 语法要求 `pyspark>=4.0.0`,和这个
+   项目整条 Spark/Iceberg 链路锁定的 3.5 系列冲突——改成不用 extras
+   语法,分别装 `feast`(不带 `[spark]`)+ `pyspark==3.5.9`。
+2. `FeatureStore()` 初始化会 eagerly import `online_store` 配置对应的
+   模块(即使这个脚本压根不碰在线存储),报 `FeastModuleImportError:
+   No module named 'redis'`——补上 `redis` 包。
+3. **最花时间的一个**:`spark.jars.packages` 触发的 Ivy 依赖解析直连
+   `repo1.maven.org`,cloud-full 云主机上会真的卡死不动(几百 MB 的
+   `aws-java-sdk-bundle` 下载进度停在 0 字节超过 8 分钟),加
+   `spark.jars.repositories` 指向阿里云镜像也没用(Ivy 默认解析器
+   优先级不会因为多了候选源就绕开卡住的那个)——改成在镜像构建期
+   (GitHub Actions,境外 runner)把三个 jar 下载好打进镜像,训练脚本
+   自己建 SparkSession 指向本地 jar 路径(利用 `SparkSession.builder.
+   getOrCreate()` "已有活跃 session 就复用、忽略新 config" 这条特性,
+   让 feast 内部拿到的是这个已经配好本地 jar 的 session),运行时完全
+   不联网。
+4. Hive Metastore 的 NetworkPolicy(`allow-consumers-to-hive-
+   metastore`)只列了 trino/spark-operator/airflow/feast 四个命名
+   空间,没人想到 `argo-workflows` 读特征时也要连它拿 Iceberg 表元
+   数据——和这个项目反复踩过的"新命名空间消费共享服务,NetworkPolicy
+   忘记加白名单"是同一类坑,第 N 次复现,补上。
+5. `mlflow.sklearn.log_model()` 报 `ModuleNotFoundError: No module
+   named 'skops'`——和 `train_demo_model.py` 早就踩过、也修过的同一个
+   坑(MLflow 3.x 默认序列化格式这个精简镜像没装),补
+   `serialization_format="pickle"`。
+
+**最终验证**:`train-from-feast-verify-7q7pv` 这个 Workflow
+**Succeeded**,日志显示"从 Feast 取了 10 行历史特征,训练完成…已注册
+进 MLflow Model Registry(demo-region-classifier)",`MlflowClient.
+get_model_version()` 查询确认 `status: READY`。
+
+---
 ## P2:交付方式的可靠性(角色能开工之后,立刻做这一批)
 
 ADR-057 认定的结构性债务。不做的话,上面 P1 拉起来的东西会以同样脆弱的
