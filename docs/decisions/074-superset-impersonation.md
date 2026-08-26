@@ -76,5 +76,9 @@ Superset 用**一个共享的** `superset_service` 账号连 Trino
 
 1. **没部署验证。** 要验三件事:Superset 里以普通用户查会不会被脱敏、
    platform-team 查审计表能不能通、没有 grant 的表是不是真的被拒。
-2. **没盘表。** 见上面"后果"。
+2. **没盘表。** 见上面"后果"。盘表的脚本已经写好了:
+   [`scripts/40-audit-superset-tables.sh`](../../scripts/40-audit-superset-tables.sh)
+   ——直接查 Superset 自己的元数据库,列出数据集实际引用的表 + 登录过的
+   用户,差集就是切换前要补的 grant。**这一步没做完就跑 `scripts/06`,
+   会让一批看板同时挂掉。**
 3. 审计表的 Superset 看板本身还没建——这条改动只是让它**成为可能**。
