@@ -641,9 +641,10 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
   独立部署的 Hive Metastore 版本锁定不是一回事,升 Spark 4 并不能解除
   那个锁定)。3.5.9 不是废弃版本,但确实是旧的大版本线。升级要一起动
   Scala 2.13 / Java 17 / `iceberg-spark-runtime-4.x_2.13`。
-- **KServe runtime 矩阵设计**:TF Serving(2.6.2)/ TorchServe(0.9.0)
-  要不要精简或换掉,是故意没做的更大设计判断,不是遗漏(7 个浮动
-  `latest` 的固定版本 + digest 已经在 2026-08-15 做完)。
+- ~~**KServe runtime 矩阵设计**~~ —— **已完成(2026-08-26)**,见
+  [ADR-075](decisions/075-kserve-runtime-matrix.md):默认只装 4 个(sklearn /
+  mlserver / xgboost / lightgbm),其余 8 个挪进 `apps/kserve-runtimes/optional/`,
+  一条 kubectl 就能加回来。镜像清单 77 → 69。
 - **Stackable(Spark/Trino/Hive 统一 Operator 平台)**:2026-08-15 Codex
   新提出,**目前完全没评估过**。值得单独做 PoC(非生产、对比部署/升级/
   故障恢复成本、保留绕开它直接用官方 Operator 的能力),**不迁移任何

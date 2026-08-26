@@ -1,0 +1,67 @@
+# **默认不装的 KServe runtime。** 见 docs/decisions/075-kserve-runtime-matrix.md。
+#
+# 这些不是被删掉的,是被**挪出默认安装集**——文件原样保留、版本和 digest
+# 原样保留,要用的时候:
+#
+#     kubectl apply -k apps/kserve-runtimes/optional/
+#
+# 也可以只装其中一个,把下面 resources 里不要的注释掉即可。
+#
+# 每个为什么不默认装,见 resources 里逐条的注释。**共同点是:这个平台上
+# 没有任何东西在用它们,而其中几个的镜像非常大**——kserve/huggingfaceserver
+# 的 GPU 版实测 22.9GB,2026-08-26 升级 OpenMetadata 时把云主机的镜像拉取
+# 通道占满、拖慢了整整一轮的正是它。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+# --- 深度学习框架:平台上没有 GPU 节点,也没有任何 PyTorch/TF 模型 ---
+- kserve-tensorflow-serving.yaml       # 版本还停在 2.6.2(2021 年),真要用先升级再说
+- kserve-torchserve.yaml               # 0.9.0,同样没人用
+- kserve-tritonserver.yaml             # GPU 推理为主,没有 GPU 节点
+- kserve-huggingfaceserver.yaml        # 大模型推理,同上
+- kserve-huggingfaceserver-multinode.yaml  # 多节点大模型,更加用不上
+# --- 小众/遗留模型格式 ---
+- kserve-paddleserver.yaml             # PaddlePaddle,这个平台没有
+- kserve-pmmlserver.yaml               # PMML,传统 BI 时代的模型交换格式
+# --- 被更专用的 runtime 覆盖 ---
+- kserve-predictiveserver.yaml         # autoSelect=false,而 sklearn/xgboost/lightgbm 三个专用 runtime 已经把它的格式全覆盖了
+
+images:
+- name: tensorflow-serving
+  newName: tensorflow/serving
+  newTag: 2.6.2
+
+- name: kserve-tritonserver
+  newName: nvcr.io/nvidia/tritonserver
+  newTag: 26.07-py3
+  digest: sha256:551599c0812bb706121410a71abda07f9920d25e6c66edf1ec07a375e49f5f90
+
+- name: kserve-pmmlserver
+  newName: kserve/pmmlserver
+  newTag: v0.19.0
+  digest: sha256:17eec575dc668414f69e655bcd5618afaf8bf5116fd265503faca537d610ec85
+
+- name: kserve-paddleserver
+  newName: kserve/paddleserver
+  newTag: v0.19.0
+  digest: sha256:827d7920a19532e351164b9acadd02d974cb1ad01f907ee68b9a0ec151cb63c8
+
+- name: kserve-predictiveserver
+  newName: kserve/predictiveserver
+  newTag: v0.19.0
+  digest: sha256:251e4bcec989f2b1f0e399009b8bc6f23bdefa233107896b4fa50fca3322577f
+
+- name: kserve-torchserve
+  newName: pytorch/torchserve-kfs
+  newTag: 0.9.0
+
+- name: huggingfaceserver
+  newName: kserve/huggingfaceserver
+  newTag: v0.19.0
+  digest: sha256:8004f7b754572414fff29356e68b1da397b805cf23b7bfbda86ced455c69a428
+
+- name: huggingfaceserver-gpu
+  newName: kserve/huggingfaceserver
+  newTag: v0.19.0-gpu
+  digest: sha256:e8d2f6eba0052751b1d7a367fb55b568fda00e2bb7640de372f39aaac3a7f209
