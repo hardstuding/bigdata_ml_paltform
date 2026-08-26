@@ -66,13 +66,13 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 资源治理(按组分配 + 空闲互借) | ✅ | Kueue,按 `platform/iam/` 已有的组建队列,同一 cohort 内可借(ADR-064)。**实测有数字**:platform-team 标称 2 CPU,提一个要 3 CPU 的作业被 admit、队列状态里 `borrowed: 1`;提要 6 CPU 的被挡住 `insufficient quota`。队列标签由 SDK 按提交者的组自动打,不是用户手填 |
 | 查询审计留痕 | ✅ | Trino → Kafka → Flink → Iceberg 全链路实机跑通(ADR-066)。`audit.query_events` 一次查询一行、`audit.query_table_access` 一次表访问一行,实测 3 条查询 → 5 行事件 / 4 行表访问(`select 1` 正确地不出现在表访问里)。审计表有 OPA 保护:服务账号读不到,只有 platform-team 和采元数据的 openmetadata_service 例外。**还差**「审计流断了」的告警 |
 | Schema 契约 | ✅ | Karapace(ADR-068)实机验证:加带默认值的可选字段放行、`double`→`string` 被 409 拦住(`compatibility_mode=BACKWARD`)。**Flink 作业还没接**,现在 schema 仍写死在 SQL 里 |
-| 成本可见性 | 🟡 | OpenCost(ADR-069)实机出数:29 个命名空间合计 ¥0.808/小时,flink 最贵。**没有 Grafana 面板**,现在只能调 API 看 |
+| 成本可见性 | ✅ | OpenCost(ADR-069)+ Grafana 看板 7 个 panel(`platform/grafana-cost-dashboard/`)。实机出数:29 个命名空间合计 ¥0.808/小时,整机标价 ¥4.04——**被工作负载占用的只有五分之一**,这个差额本身就是信号。「按组的成本」那个 panel 的 PromQL 在真集群上验过:给一个 request 1 CPU、打 `algorithm-team` 队列标签的作业算出 ¥0.168,正好是 1 核 × 单价,数字对得上 |
 | 网络隔离 | ✅ | NetworkPolicy 覆盖核心命名空间(ADR-035) |
 | 破坏性操作防护 | ✅ | `scripts/confirm-destructive-kubectl.sh`(历史上真误删过 namespace,见 `docs/operations/incidents.md`) |
 | 计费资源门禁 | ✅ | `cloud-full-preflight.sh` + 空闲自动关机看门狗(经济模式) |
 | 排障知识 | ✅ | 2026-08-22 改造成 Runbook:顶部 59 条**症状索引**(按人实际观察到的现象组织),下面按层次分 9 节,每条统一成"症状 → 定位 → 处置"。条目 40 → 66(新增 26 条是从 journal/ADR 搬进来的真实故障),行数 864 → 1632。内容保全做过机械核对:旧版 292 个技术片段(报错原文/命令/版本号/路径)逐个查过,没有丢 |
 | 统一服务目录 / 黄金链路告警 | ❌ | D 线产品主线,未开始 |
-| 容量 / 成本看板 | ❌ | 未开始 |
+| 容量 / 成本看板 | 🟡 | **成本**那半做完了(见上面「成本可见性」):按组、按命名空间、按 Pod 三个维度都有。**容量**那半没做——「还能再塞多少作业」「哪个组快到配额上限了」这类问题还没有面板,Kueue 的 `kueue_cluster_queue_resource_usage` 指标已经在 Prometheus 里,缺的是把它画出来 |
 | Argo Workflows 授权 | ✅ | **2026-08-19 已修复并验证**:之前 CrashLoopBackOff 2 天多没人发现(issuer/issuerAlias),修好登录后又发现登录成功但调 API 403——`server.sso.rbac.enabled` 不会自动建授权资源,读官方源码(`gatekeeper.go`)确认要手动建 ServiceAccount(挂 rbac-rule 注解)+ 长期 token Secret + Role/RoleBinding,四个都补上了。真实 curl+cookie-jar 验证:登录→列 workflow→建一个真实 workflow→能查到→删除清理 |
 | idle-shutdown-watchdog 开机自愈 | ✅ | **2026-08-19 修复**:停机几天后重新开机,看门狗第一次检查会用几天前的旧时间戳误判"已空闲超过阈值"立刻自动关机——机器刚开机 2-3 分钟就被自己关掉,来不及做任何事。已加开机时重置状态的机制(这个脚本本身按既定政策不进 git,细节记在 `docs/journal/2026-08.md`） |
 
@@ -120,7 +120,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 调度 | ✅ | Airflow 已部署,DAG 单一源码 + CI 防漂移 |
 | 作业可观测 | ✅ | **2026-08-21 真实跑通**:History Server 的 `/api/v1/applications` 列出了刚跑完的作业(`name=spark-iceberg-demo, completed=True`),不再是空数组。修好之前**从部署那天起就是空的**——作业压根没开 `eventLog`,`s3a://spark-logs/` 一直没有任何内容;补上后又发现不能指 bucket 根路径(S3Guard 报 `path must be absolute`),改用 `events/` 子目录,并把这个前缀的创建做成声明式(MinIO chart 的 `customCommands`,验证过 hook 真的会重建它) |
 | 血缘 | ✅ | **2026-08-22 真实端到端验证通过**:此前一直卡在"bot token 要人工去 OpenMetadata UI 建"这一步,`scripts/27-configure-openmetadata-bot.sh` 解除了这个卡点——OpenMetadata 安装时已经自动生成一个 unlimited 有效期的 ingestion-bot JWT(存在 Postgres `user_entity` 表,Fernet 加密),脚本直接从数据库读出解密,不用登录 UI、不用等人工建 bot,幂等地建成 `table-registration-app-openmetadata` / `permission-request-app-openmetadata` 两个 Secret。验证链路:配好 token 后触发 `seatunnel_device_events` DAG,`push_lineage` 任务 success,直接查 `GET /api/v1/lineage/pipeline/name/airflow-platform.seatunnel_device_events` 确认真实存在 `pipeline -> trino.iceberg.demo.device_events` 这条血缘边(不是只看任务状态)。Spark 血缘(ADR-014)仍仅设计,未验证 |
-| 数据质量 / 契约 | ❌ | 未开始(B 线) |
+| 数据质量 / 契约 | ✅ | **两半都做完并实机验过**:质量用 OpenMetadata 自带的 Data Quality(ADR-065/070,4 条断言 + 新鲜度,都有真实结果);契约用 Karapace Schema Registry(ADR-068),真实 producer 改字段类型被 409 拦在发送侧。**还差**:断言失败没有告警出口(见平台运维那节的「告警送达」) |
 | 作业模板 / CI-CD | ❌ | 未开始(A 线) |
 
 **结论(2026-08-21,已全部修通):****"接数据→批处理→查看作业历史"这条
@@ -208,7 +208,7 @@ accuracy 只可能是 0 或 1,拿它当阈值是自欺欺人;改成校验"模型
 | 敏感字段列级脱敏 | ✅ | ADR-063,2026-08-23 **在真集群上用真实 SQL 验过**(`scripts/36-verify-trino-masking.sh`,可重复跑):1 级 grant 查到的是 `138****5678` / `al***@example.com` / `***MASKED***`;**2 级 grant 上 phone/email 恢复明文而 id_card 仍然打码**——验的是分级真的在起作用,不是「一律打码」也能过的那种测法。Trino 侧实测每条查询会调 18 次 `columnMask` + 2 次 `rowFilters` |
 | 敏感字段行级过滤 | ✅ | ADR-063,2026-08-26 **在真集群上用真实 SQL 验过**(和列级同一个脚本):`demo.regional_sales` 里 3 个部门各 2 行,analyst001(employees.csv 里是「数据分析组」)只查到 2 行、且正好是华东/华南那两行。判定不只看「行数变少」——还要求看到的部门集合正好等于 {数据分析组},否则「谁都看不到」(部门查不到时的 `1 = 0` 分支误触发)也会蒙混过关 |
 | **管理驾驶舱** | ❌ | **从未开始**(E 线) |
-| 成本视图 | ❌ | 未开始 |
+| 成本视图 | 🟡 | 数据和 Grafana 面板都有了(ADR-069),但那是**给平台运维看的**。管理视角要的是「这个月各部门花了多少、趋势如何、值不值」——需要按月聚合 + 和预算对比,现在没有 |
 
 **结论:**治理的"流程"部分意外地完整(审批/回收/交接这套 OA 能力是真实
 做出来的),但治理的"视图"部分完全空白——管理者今天没有任何一个页面可以
