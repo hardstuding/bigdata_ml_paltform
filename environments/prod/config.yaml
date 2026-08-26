@@ -104,6 +104,7 @@ enabled_components:
   - opa.yaml
   - openmetadata-db-init.yaml
   - openmetadata.yaml
+  - openmetadata-quality-alerts.yaml
   - opensearch.yaml
   - permission-request-app-oauth2-proxy.yaml
   - permission-request-app.yaml

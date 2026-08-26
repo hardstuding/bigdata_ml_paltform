@@ -1,0 +1,166 @@
+# 把 OpenMetadata 的数据质量/新鲜度断言结果送进 Alertmanager(ADR-073)。
+#
+# **为什么需要这一层**:质量断言的结果只存在 OpenMetadata 里,不是
+# Prometheus 指标,所以 ADR-071 那批告警规则够不着它。结果就是——断言
+# 红了,只有人主动打开 OpenMetadata 页面才看得到。而"没人会天天打开它"
+# 恰恰是这个平台反复出现的失败前提。
+#
+# **为什么不引入新组件**:这个仓库已经有三个自建 Flask 工具了,再加一个
+# "OpenMetadata → Alertmanager 转换服务"是实打实的维护成本。这里用的是
+# 仓库里已经反复用过的那个模式——**一个 CronJob + python:3.12-slim +
+# 只用标准库的内联脚本**(见 apps/opa/manifests/grants-sync-cronjob.yaml
+# 和 departments-sync-cronjob.yaml)。没有新镜像、没有新服务、没有新端口。
+#
+# **为什么送 Alertmanager 而不是自己发通知**:ADR-071 里定过一条——
+# 质量、新鲜度、审计断流三个来源必须接**同一个**出口,各接各的最后一定
+# 有一套没人维护。Alertmanager 已经是那个出口(外部通知渠道的配置模板在
+# platform/alertmanager-notification/,等真实凭据)。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openmetadata-quality-alerts
+  namespace: monitoring
+spec:
+  # 断言本身是每 6 小时跑一次(scripts/34 配的),这里 15 分钟一次是为了
+  # **续期**:下面发的告警带 endsAt = now + 40 分钟,只要断言还红着,每轮
+  # 都会把它往后续;一旦断言恢复,这里不再发,Alertmanager 到点自动 resolve。
+  # 这比显式发 resolved 事件可靠——进程挂了也只会让告警自然消失,不会卡在
+  # firing 上永远不走。
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        metadata:
+          labels:
+            app: openmetadata-quality-alerts
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: python:3.12-slim
+              env:
+                - name: OPENMETADATA_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: openmetadata-quality-alerts-token
+                      key: token
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+              command:
+                - python3
+                - -c
+                - |
+                  import json, os, sys, time, urllib.request, urllib.error
+
+                  OM = "http://openmetadata.openmetadata.svc.cluster.local:8585"
+                  AM = "http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093"
+                  TOKEN = os.environ["OPENMETADATA_TOKEN"]
+                  # 告警的有效期。比 CronJob 间隔(15 分钟)长一截,留出一轮
+                  # 失败的余量;但也别太长,否则断言恢复之后告警要挂很久才消。
+                  TTL_MIN = 40
+                  # 断言多久没跑过就算"不跑了"。断言本身 6 小时一轮,24 小时
+                  # 没结果说明连着漏了三轮,不是偶发。
+                  STALE_HOURS = 24
+
+                  def om(path):
+                      req = urllib.request.Request(
+                          OM + path, headers={"Authorization": "Bearer " + TOKEN})
+                      with urllib.request.urlopen(req, timeout=60) as r:
+                          return json.load(r)
+
+                  def iso(ts):
+                      return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(ts))
+
+                  cases = om("/api/v1/dataQuality/testCases"
+                             "?fields=testCaseResult&limit=200")["data"]
+                  now = time.time()
+                  alerts = []
+
+                  for c in cases:
+                      name = c["name"]
+                      # entityLink 有两种形态,**表级断言那种结尾没有 ::columns::**:
+                      #   列级 <#E::table::trino.iceberg.demo.orders::columns::amount>
+                      #   表级 <#E::table::trino.iceberg.demo.orders>
+                      # 直接 split("::")[2] 的话,表级那种会带上结尾的 `>`,
+                      # 变成 "trino.iceberg.demo.orders>" —— 告警标签里多一个尖
+                      # 括号,按表名过滤/聚合就全对不上了。本地用假数据测出来的。
+                      link = c.get("entityLink", "")
+                      table = link.split("::")[2].rstrip(">") if "::" in link else "?"
+                      res = c.get("testCaseResult") or {}
+                      status = res.get("testCaseStatus")
+                      base = {
+                          "labels": {
+                              "testcase": name,
+                              "table": table,
+                              "job": "openmetadata-quality",
+                          },
+                          "startsAt": iso(now),
+                          "endsAt": iso(now + TTL_MIN * 60),
+                      }
+
+                      if status == "Failed":
+                          a = json.loads(json.dumps(base))
+                          a["labels"]["alertname"] = "DataQualityCheckFailed"
+                          a["labels"]["severity"] = "warning"
+                          a["annotations"] = {
+                              "summary": f"数据质量断言失败:{name}",
+                              "description": (
+                                  f"表 {table} 的断言 `{name}` 没通过。"
+                                  f"OpenMetadata 给的原因:{res.get('result', '(没有细节)')}。"
+                                  "数据错了不会自己报错,它会一路流进报表和训练集,"
+                                  "越晚发现能回溯的范围越小。"),
+                          }
+                          alerts.append(a)
+                          continue
+
+                      # 没有结果、或者结果太旧 —— 断言"不跑了"。这类比断言失败
+                      # 更隐蔽:页面上还是绿的(显示的是上一次的成功结果),
+                      # 实际上已经很久没有检查过了。
+                      ts = res.get("timestamp")
+                      stale = (ts is None) or (now - ts / 1000 > STALE_HOURS * 3600)
+                      if stale:
+                          a = json.loads(json.dumps(base))
+                          a["labels"]["alertname"] = "DataQualityCheckStale"
+                          a["labels"]["severity"] = "info"
+                          last = ("从来没跑过" if ts is None
+                                  else time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ts / 1000)))
+                          a["annotations"] = {
+                              "summary": f"数据质量断言 {STALE_HOURS} 小时没有新结果:{name}",
+                              "description": (
+                                  f"表 {table} 的断言 `{name}` 最后一次结果是 {last}。"
+                                  "**页面上它可能还是绿的**——显示的是上一次的成功结果,"
+                                  "实际已经很久没检查过了。先看 openmetadata 命名空间里"
+                                  "对应的 TestSuite CronJob 有没有在跑。"),
+                          }
+                          alerts.append(a)
+
+                  print(f"检查了 {len(cases)} 条断言,要发 {len(alerts)} 条告警")
+                  for a in alerts:
+                      print("  ", a["labels"]["alertname"], a["labels"]["testcase"])
+
+                  if not alerts:
+                      # 一条都不发也是正常结果。**不要因为"没东西发"就退非零**
+                      # ——那会让 CronJob 常年 Failed,变成一个所有人都忽略的
+                      # 红点,反过来掩盖真正的失败。
+                      print("没有需要告警的断言。")
+                      sys.exit(0)
+
+                  body = json.dumps(alerts).encode()
+                  req = urllib.request.Request(
+                      AM + "/api/v2/alerts", data=body, method="POST",
+                      headers={"Content-Type": "application/json"})
+                  try:
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          print(f"已推送到 Alertmanager,HTTP {r.status}")
+                  except urllib.error.HTTPError as e:
+                      print(f"推送失败 HTTP {e.code}: {e.read().decode()[:300]}", file=sys.stderr)
+                      sys.exit(1)

@@ -1,0 +1,38 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/openmetadata-quality-alerts.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/openmetadata-quality-alerts.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
+# 把 OpenMetadata 的数据质量/新鲜度断言结果送进 Alertmanager(ADR-073)。
+# 一个 CronJob,没有新镜像也没有新服务——模式和 apps/opa 那两个 sync
+# CronJob 完全一样。
+#
+# 依赖 `monitoring/openmetadata-quality-alerts-token` 这个 Secret,由
+# scripts/27-configure-openmetadata-bot.sh 创建(和另外两个消费方共用同一个
+# ingestion-bot token,不另发一个)。Secret 不存在时 CronJob 会因为
+# secretKeyRef 解析不了而起不来——**这是有意的**:宁可明显失败,也不要
+# 静默地不发告警。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openmetadata-quality-alerts
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/openmetadata-quality-alerts/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

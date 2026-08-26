@@ -44,6 +44,10 @@ PG_DB="openmetadata_db"
 TARGETS=(
   "table-registration-app:table-registration-app-openmetadata"
   "permission-request-app:permission-request-app-openmetadata"
+  # 2026-08-26(ADR-073):数据质量告警的 CronJob 也要读 OpenMetadata API。
+  # 复用同一个 ingestion-bot token,不另发一个——多一个 bot 就多一份要
+  # 轮换、要收敛权限的凭据,而这三个消费方需要的读权限完全一样。
+  "monitoring:openmetadata-quality-alerts-token"
 )
 
 # 幂等短路:两个目标都已存在就直接退出,不用连数据库。

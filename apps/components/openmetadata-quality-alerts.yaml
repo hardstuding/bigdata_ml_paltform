@@ -1,0 +1,31 @@
+# 把 OpenMetadata 的数据质量/新鲜度断言结果送进 Alertmanager(ADR-073)。
+# 一个 CronJob,没有新镜像也没有新服务——模式和 apps/opa 那两个 sync
+# CronJob 完全一样。
+#
+# 依赖 `monitoring/openmetadata-quality-alerts-token` 这个 Secret,由
+# scripts/27-configure-openmetadata-bot.sh 创建(和另外两个消费方共用同一个
+# ingestion-bot token,不另发一个)。Secret 不存在时 CronJob 会因为
+# secretKeyRef 解析不了而起不来——**这是有意的**:宁可明显失败,也不要
+# 静默地不发告警。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openmetadata-quality-alerts
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/openmetadata-quality-alerts/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
