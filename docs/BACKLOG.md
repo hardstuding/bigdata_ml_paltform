@@ -129,40 +129,39 @@ get_model_version()` 查询确认 `status: READY`。
 
 ---
 
-### 给 k3s 配 registry mirror(每次拉镜像都在真金白银地等)
+### 镜像拉取:registries.yaml **对这个集群不适用**(2026-08-26 更正)
 
-**这是一条一直在花钱的债。** 现在拉境外镜像的流程是:人工判断该走哪个
-镜像站 → `ssh` 上去 `docker pull` 镜像站的地址 → `docker tag` 回原地址。
-三个问题:
+这条原来写的是"配 `/etc/rancher/k3s/registries.yaml` 让 tag 和 digest 都
+自动走镜像站"。**查证之后发现这个方案对这台机器行不通**,记在这里免得
+以后有人照着做、白白重启一次 k3s:
 
-1. **digest 固定的镜像 `docker tag` 根本做不了**(`refusing to create a
-   tag with a digest reference`),只能让 kubelet 自己去原地址拉,慢。
-2. 每次都要人在场判断和操作,`scripts/23` 那套只覆盖了一部分。
-3. **等待是按小时计费的**。2026-08-26 升级 OpenMetadata 时,光等
-   `server:2.0.0` 一个镜像就等了 20 分钟以上,期间云主机全程计费。
+`registries.yaml` 是 **k3s 内置 containerd** 的功能。而这个集群的 k3s 是用
+`--docker` 起的(cri-dockerd,见 `scripts/21-bootstrap-cloud-vm.sh` 开头的
+说明,当初是为了和本机 colima 保持同一套、也方便直接 `docker load`)。
+走 cri-dockerd 的话,那个文件**根本不会被读**。
 
-结构性的解法是 `/etc/rancher/k3s/registries.yaml`,让容器运行时自己把
-仓库地址重定向到镜像站——**tag 和 digest 引用都生效**,不用人工介入,
-`docker tag` 那一步整个消失:
+cri-dockerd 下实际可用的只有 Docker daemon 的 `registry-mirrors`
+(`/etc/docker/daemon.json`),而它**只能镜像 Docker Hub**,ghcr.io 和
+registry.k8s.io 都不支持按仓库配镜像。
 
-```yaml
-mirrors:
-  ghcr.io:
-    endpoint: ["https://ghcr.nju.edu.cn"]
-  docker.io:
-    endpoint: ["https://docker.m.daocloud.io"]
-  registry.k8s.io:
-    endpoint: ["https://k8s.m.daocloud.io"]
-```
+所以现在的选项是这三个,都不是免费的:
 
-**为什么还没做**:改这个文件要重启 k3s,而 `CLAUDE.md` 把"任何会让 k3s
-停掉的操作"列为必须先问用户。zhenghe 2026-08-26 说过 Codex 那边"暂时先不管",
-但重启 k3s 仍然要挑一个手上没有半截活的时间点,不能在一次升级做到一半的
-时候顺手做了。
+| 方案 | 覆盖范围 | 代价 |
+|---|---|---|
+| `daemon.json` 的 `registry-mirrors` | **只有 docker.io** | 要重启 dockerd = 节点上所有容器重启 |
+| k3s 换回内置 containerd | 全部仓库 | 镜像存储换一套,现有 56GB 全要重新准备;改动面大 |
+| 维持现状 + `scripts/38-ship-image-to-cloud.sh` | 全部仓库 | 要人操作,但**不需要重启任何东西** |
 
-做的时候要连带把 `scripts/23-pull-images-remote-via-mirror.sh` 里那套
-"人工判断镜像站 + docker tag"的逻辑删掉——两套机制并存只会让人搞不清
-当前到底走的哪条路。
+**还有一个坑**:今天卡住的镜像引用是 `docker.getcollate.io/openmetadata/server`
+——那是 Collate 自己的代理域名,**不是 `docker.io`**,所以哪怕配了
+`registry-mirrors` 也不会命中。要让它生效,还得把 chart 里的
+`image.repository` 从 `docker.getcollate.io/openmetadata/server` 改成
+`openmetadata/server`。
+
+**当前结论**:先不动运行时配置。scripts/38 已经把这件事变成一条可重复
+执行的命令(实测 457MB 本地下载 1 分 19 秒 + 上传 90 秒,比等镜像站快一个
+数量级),够用。等哪天真的频繁到受不了,再按上表第二行做一次彻底的
+——那是个独立项目,不是顺手改配置。
 
 ---
 
