@@ -2,6 +2,12 @@
 
 - 状态: 已采纳(2026-08-09,已验证)
 
+> **2026-08-26 后续**:OpenMetadata 已经从 1.13.3 升到 **2.0.0**
+> ([ADR-072](072-openmetadata-2-upgrade.md))。这份 ADR 定的
+> `pipelineServiceClientConfig.type: k8s`(不额外维护一个 Airflow 只为跑采集)
+> 这个取舍**在 2.0 里得到了回报**:上游宣布 2.1 将废弃"Airflow 作为内部
+> 编排器",官方推荐迁到 k8s 原生编排——我们不用做任何迁移。
+
 ## 决策
 
 - **数据库用 Postgres,不用 chart 默认的 MySQL**——官方支持,复用我们已有的

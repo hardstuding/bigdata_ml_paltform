@@ -5,6 +5,13 @@
   充分验证"和"上线前必须先做的事"两节是切换前的记录,保留作为过程存档
   一节。
 
+> **2026-08-26 后续修订**:这份 ADR 里"`superset_service` 一个共享账号连
+> Trino、看板可见性交给 Superset 自己的 RBAC 管"这个取舍,**已经被
+> [ADR-074](074-superset-impersonation.md) 推翻**。当时没算清的代价是:
+> 能在 Superset 里建 chart 的人可以绕开任何看板直接写 SQL,于是列级脱敏和
+> 行级过滤([ADR-063](063-column-masking-row-filtering.md))在 BI 这条路上
+> 完全不生效。现在改成透传登录用户身份。**照这份 ADR 的原文去配会配出那个洞。**
+
 ## 背景
 
 ADR-028"后续"一节早就写下要用 Trino 原生的 OPA 授权插件做细粒度权限,

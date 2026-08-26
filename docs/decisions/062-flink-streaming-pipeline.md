@@ -7,6 +7,14 @@
   "要不要引入 Flink、Flink 该做什么、什么时候引入",明确说"真正动手装
   Flink 是后续独立的工作"。这份 ADR 就是那次实现。
 
+> **2026-08-26 后续修订**:这份 ADR 里 Kafka 消息用 **JSON**,里面记的
+> `json.timestamp-format.standard` / `ignore-parse-errors` 那几个坑,是那个
+> 时期的实情。链路现在已经改成 **Avro + Schema Registry**
+> ([ADR-068](068-schema-registry.md)),topic 也从 `device-events` 改名成
+> `device-events-avro`。时间字段变成 `timestamp-millis`,**那一整类"格式对
+> 不上就静默变 null"的坑从设计上不存在了**——那几段记录留着是为了说明为什么
+> 要换,不是当前配置。
+
 ## 背景
 
 `docs/roles.md` 里"大数据开发"这个角色还剩两条缺口没解锁:"流处理引擎"

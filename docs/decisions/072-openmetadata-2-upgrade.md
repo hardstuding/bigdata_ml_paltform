@@ -73,6 +73,9 @@ values 结构变了导致一堆配置静默失效**。这次没有。
 | 采集/质检 pipeline | 3 个 | **3 个,名字全对** |
 | 数据质量断言 | 4 条,都有结果 | **4 条,都有结果** |
 
+验收脚本是 [`scripts/37-verify-openmetadata-upgrade.sh`](../../scripts/37-verify-openmetadata-upgrade.sh)
+(支持和升级前的基线做 diff,可重复跑)。
+
 **不是只看"对象还在"**:升级后重新触发了一轮采集和质检,三个 k8s Job
 (`om-job-trino-metadata` / `om-job-orders-data-quality` /
 `om-job-device-events-stream-data-quality`)全部用
