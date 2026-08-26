@@ -57,6 +57,28 @@ kubectl apply -k apps/kserve-runtimes/optional/
 `kubectl kustomize apps/kserve-runtimes/manifests` 拿镜像的,resources 里没有
 的自然就不出现了。
 
+## 实机(cloud-full,2026-08-26)
+
+`scripts/10` 重跑之后,**集群里那 8 个 ClusterServingRuntime 仍然在**
+——`kubectl apply -k` 不会删除"不再出现在 kustomization 里"的对象(没有
+prune 这回事)。这是预料之中的,但值得写下来,免得有人以为改完 git 就完事了。
+
+`kubectl get inferenceservice -A` 确认**整个集群一个 InferenceService 都
+没有**,所以那 8 个是纯粹的模板残留,不影响任何东西(它们只是声明,不跑
+Pod)。
+
+**没有顺手删掉它们**:ClusterServingRuntime 是集群级资源,而 `CLAUDE.md`
+把集群级资源的增删改列为要先问用户的动作(这台机器和 Codex 那个项目共用
+同一个 k3s)。虽然这里能证明零引用、风险极低,但"能证明安全"和"可以绕过
+写下来的规则"是两回事。清理命令留在这里,由用户决定什么时候执行:
+
+```bash
+kubectl delete -k apps/kserve-runtimes/optional/
+```
+
+不删的实际代价接近于零:它们不占资源,而 ADR 的主要收益(镜像清单 77 → 69,
+少拉几十 GB)在**下一次部署/镜像准备**时就已经拿到了。
+
 ## 后果与注意
 
 - **提交 `modelFormat` 是这八种之一的 InferenceService 会失败**(找不到
