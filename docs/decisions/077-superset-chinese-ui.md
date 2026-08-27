@@ -74,6 +74,34 @@ superset/translations/ 下:22 个 .po,0 个 .mo,0 个 .json
 两个构建步骤都带 `test ... -gt 0` 断言:哪天上游改了目录结构,构建会失败,
 而不是静默产出一个没有翻译的镜像(这个项目最忌讳的"看起来成功了")。
 
+## 2026-08-27 晚补记:半个纠正 + 源码确认
+
+zhenghe 反馈"superset 现在已经基本汉化了,少数汉化不全的先不管了"。而当时
+跑的镜像是 `21c233e`——**只编译了 `.mo`,没有 `messages.json`**。
+
+第一反应是"那我关于 React 需要 messages.json 的判断错了"。去 Superset 源码
+(`superset/translations/utils.py`)核实,结论是**没错**:
+
+```python
+def get_language_pack_filename(locale):
+    if not locale or locale == "en":
+        return DIR + "/empty_language_pack.json"
+    return DIR + f"/{locale}/LC_MESSAGES/messages.json"   # ← React 读的就是这个
+```
+
+`get_language_pack()` 读不到就返回 None,前端回落英文。所以更合理的解释是:
+**zhenghe 看到的"基本汉化"来自 `.mo` 覆盖的那部分(服务端渲染的页面),而
+他说的"少数汉化不全"很可能正是 React 主界面那一块。**
+
+不改成"我判断错了",也不硬说"我是对的"——把证据摆出来:源码明确写着前端读
+`messages.json`,而当时的镜像里没有这个文件。带 language pack 的镜像
+(`ee61412`)CI 已经构建好,这次把 tag 指过去,下次开机看"不全"的部分是不是
+补齐了。**如果补齐了,说明这个分析成立;如果没变,说明我漏了别的东西**
+——两种结果都有信息量。
+
+**这里想记的方法教训是**:用户说"好了"的时候,不要顺着把自己之前的分析推翻,
+也不要坚持。去找能分辨两种解释的证据(这次是上游源码),再决定改哪边。
+
 ## 还没做的
 
 1. **加了 language pack 的镜像还没构建验证过。** 要实际登录看 React 界面

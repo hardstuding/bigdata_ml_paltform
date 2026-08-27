@@ -78,9 +78,10 @@ spec:
         # 引用的不可变性是一回事,只是表达方式不同。
         image:
           repository: ghcr.io/hardstuding/bigdata_ml_paltform/superset
-          # 21c233e = 加了 pybabel compile 那版(ADR-077)。用 commit SHA 做 tag,
+          # ee61412 = 除了 pybabel compile,还生成了 React 前端的 language pack 那版
+          # (ADR-077)。用 commit SHA 做 tag,
           # 因为 chart 的 image 是 repository:tag 字符串拼接,塞不进 digest。
-          tag: 21c233e7628738b509fad45f2892f1ba18de3e01
+          tag: ee61412c2ee6572deea7ee205bdf8a080f41c626
           pullPolicy: IfNotPresent
         postgresql:
           enabled: false
