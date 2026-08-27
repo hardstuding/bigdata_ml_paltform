@@ -1,0 +1,154 @@
+# 黄金链路探针的 CronJob(ADR-079)。**这是渲染产物的源文件**,改这里。
+#
+# **三条链路三个 CronJob,不是一个 CronJob 跑三条。** 这样
+# kube-state-metrics 天然给出每条链路的
+# `kube_cronjob_status_last_successful_time`,看板和告警都不用再引
+# Pushgateway 这类新组件——是刻意的设计,不是拆得太碎。
+#
+# 探针账号 goldenpath_probe **不在 OPA 的服务账号豁免名单里**,走的是和
+# 真实用户一样的授权路径(grant 在 platform/iam/table-access-grants.csv)。
+# 用豁免账号探测的话,OPA 的 grants 同步挂了探针也照样绿。
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: goldenpath-query
+  namespace: monitoring
+  labels:
+    platform/golden-path: "query"
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  # 探针本身卡住也算失败:不设这个的话,一个卡死的探针会让
+  # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 180
+      template:
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              command: ["python3", "/probe/probe.py", "query"]
+              env:
+                - name: TRINO_USER
+                  value: goldenpath_probe
+                - name: TRINO_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trino-service-account
+                      key: password-goldenpath_probe
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - name: probe
+                  mountPath: /probe
+          volumes:
+            - name: probe
+              configMap:
+                name: golden-path-probes
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: goldenpath-streaming
+  namespace: monitoring
+  labels:
+    platform/golden-path: "streaming"
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  # 探针本身卡住也算失败:不设这个的话,一个卡死的探针会让
+  # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 180
+      template:
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              command: ["python3", "/probe/probe.py", "streaming"]
+              env:
+                - name: TRINO_USER
+                  value: goldenpath_probe
+                - name: TRINO_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trino-service-account
+                      key: password-goldenpath_probe
+                - name: MAX_AGE_MIN
+                  # producer 每 5 分钟发一批、Flink 每分钟 checkpoint,
+                  # 正常情况下数据不会超过几分钟旧。给 60
+                  # 分钟是为了容忍一次 producer 失败 + 一次 checkpoint 延迟,
+                  # 不是因为链路真的那么慢。
+                  value: "60"
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - name: probe
+                  mountPath: /probe
+          volumes:
+            - name: probe
+              configMap:
+                name: golden-path-probes
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: goldenpath-catalog
+  namespace: monitoring
+  labels:
+    platform/golden-path: "catalog"
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  # 探针本身卡住也算失败:不设这个的话,一个卡死的探针会让
+  # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 180
+      template:
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              command: ["python3", "/probe/probe.py", "catalog"]
+              env:
+                - name: TRINO_USER
+                  value: goldenpath_probe
+                - name: TRINO_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trino-service-account
+                      key: password-goldenpath_probe
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - name: probe
+                  mountPath: /probe
+          volumes:
+            - name: probe
+              configMap:
+                name: golden-path-probes

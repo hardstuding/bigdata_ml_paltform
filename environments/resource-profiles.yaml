@@ -166,6 +166,11 @@ local-lite:
   opencost_memory_request: "128Mi"
   opencost_memory_limit: "256Mi"
 
+  # 黄金链路探针(ADR-079):流式数据多久没更新算"链路断了"。
+  # local-lite 给得最松——这一档 Flink/Kafka 常常是 park 状态,
+  # 给短了只会一直红,而"一直红的告警"比没有告警更糟。
+  goldenpath_streaming_max_age_min: "120"
+
 
 
 
@@ -308,6 +313,11 @@ cloud-full:
   opencost_cpu: "100m"
   opencost_memory_request: "256Mi"
   opencost_memory_limit: "512Mi"
+
+  # 黄金链路探针(ADR-079)。producer 每 5 分钟发一批、Flink 每分钟
+  # checkpoint,正常情况下数据不会超过几分钟旧。给 60 分钟是为了容忍
+  # 一次 producer 失败 + 一次 checkpoint 延迟,不是因为链路真的那么慢。
+  goldenpath_streaming_max_age_min: "60"
 
 
 
@@ -484,6 +494,10 @@ prod:
   opencost_cpu: "500m"
   opencost_memory_request: "1Gi"
   opencost_memory_limit: "2Gi"
+
+  # 黄金链路探针(ADR-079)。生产给得最严:流式数据半小时没更新就该
+  # 有人知道了。
+  goldenpath_streaming_max_age_min: "30"
 
 
 

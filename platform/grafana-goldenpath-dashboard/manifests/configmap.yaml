@@ -1,0 +1,150 @@
+# 黄金链路看板(ADR-079)。走 kube-prometheus-stack 的 Grafana sidecar
+# 自动发现(带 grafana_dashboard 标签的 ConfigMap)。
+#
+# **数据来源全部是 kube-state-metrics 的 CronJob/Job 指标**,没有引入
+# Pushgateway 之类的新组件——这是"每条链路一个 CronJob"那个设计换来的
+# 直接好处(见 ADR-079)。
+#
+# 所有 panel 都不写 datasource,用 Grafana 默认数据源(和成本/容量看板
+# 一致,理由见 platform/grafana-cost-dashboard/)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-goldenpath-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  platform-goldenpath.json: |
+    {
+      "title": "黄金链路",
+      "uid": "platform-goldenpath",
+      "schemaVersion": 39,
+      "timezone": "browser",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "panels": [
+        {
+          "id": 1,
+          "title": "每条链路上次做成事是多久以前",
+          "type": "stat",
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "time() - max by (cronjob) (kube_cronjob_status_last_successful_time{namespace=\"monitoring\", cronjob=~\"goldenpath-.*\"})",
+              "legendFormat": "{{cronjob}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1800
+                  },
+                  {
+                    "color": "red",
+                    "value": 3600
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "background",
+            "textMode": "auto"
+          },
+          "description": "绿=正常,橙=超过 30 分钟,红=超过 1 小时(和 GoldenPathBroken 告警同一个阈值)。**这一行读的是「事情做成了没有」,不是「进程活着没有」。**"
+        },
+        {
+          "id": 2,
+          "title": "链路成功间隔(越平越好)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 6
+          },
+          "targets": [
+            {
+              "expr": "time() - max by (cronjob) (kube_cronjob_status_last_successful_time{namespace=\"monitoring\", cronjob=~\"goldenpath-.*\"})",
+              "legendFormat": "{{cronjob}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "description": "锯齿是正常的:每次探针成功就归零。**锯齿变高或者不再归零,就是链路开始不稳或者断了。**"
+        },
+        {
+          "id": 3,
+          "title": "探针失败次数(按链路)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 15
+          },
+          "targets": [
+            {
+              "expr": "sum by (job_name) (kube_job_status_failed{namespace=\"monitoring\", job_name=~\"goldenpath-.*\"})",
+              "legendFormat": "{{job_name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "description": "失败的 Job 会保留 3 个(failedJobsHistoryLimit),所以这里能看到最近几次失败。"
+        },
+        {
+          "id": 4,
+          "title": "各链路覆盖到什么",
+          "type": "text",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 15
+          },
+          "targets": [],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "### 这三条链路各自覆盖什么\n\n| 链路 | 一路要经过 | 断了意味着 |\n|---|---|---|\n| **query** | Trino → Iceberg → MinIO / Hive Metastore → OPA | 没人能查数据。OPA 挂了也会红——Trino 是 fail-closed |\n| **streaming** | Kafka → Flink → Iceberg | 实时数据停了。**看的是数据新鲜度,不是 Flink 进程活着**(ADR-062 实测过 Pod Running 而作业已 FAILED)|\n| **catalog** | Trino 元数据 → OpenMetadata 采集 → 目录可查 | 新建的表不会出现在数据目录里 |\n\n探针账号 `goldenpath_probe` **不在 OPA 的豁免名单里**,走和真实用户一样的授权路径——所以 grants 同步挂了它也会红。\n\n详见 [ADR-079](https://github.com/hardstuding/bigdata_ml_paltform/blob/main/docs/decisions/079-golden-path-probes.md)。"
+          }
+        }
+      ]
+    }

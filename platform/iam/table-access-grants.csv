@@ -2,3 +2,5 @@ username,table_fqn,security_level,granted_at,expires_at
 analyst001,demo.access_test_l1,1,2026-08-14T16:06:43.714899+00:00,
 analyst001,demo.access_test_l2,2,2026-08-14T16:07:47.622061+00:00,
 analyst001,demo.regional_sales,1,2026-08-26T13:00:00+00:00,
+goldenpath_probe,demo.orders,1,2026-08-27T00:00:00+00:00,
+goldenpath_probe,demo.device_events_stream,1,2026-08-27T00:00:00+00:00,

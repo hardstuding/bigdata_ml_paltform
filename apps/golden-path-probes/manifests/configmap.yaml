@@ -1,0 +1,133 @@
+# 黄金链路探针的脚本(ADR-079)。**这是渲染产物的源文件**,改这里。
+#
+# 只用 Python 标准库,不 pip install——和 openmetadata-quality-alerts 那个
+# CronJob 同一个模式(`python:3.12-slim` + 内联 stdlib),不引新镜像。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: golden-path-probes
+  namespace: monitoring
+data:
+  probe.py: |
+    """按"链路"而不是"组件"探测平台是否可用。
+
+    这个平台反复吃过同一个亏:**每个组件都绿,而链路是断的**——
+    ArgoCD Synced 不等于生效、Pod Running 不等于健康、Job Complete 不等于
+    业务逻辑跑对。所以这里探的不是"某个进程活着",是"**一件真实的事情能不
+    能从头做到尾**"。
+
+    每条链路一个 CronJob(而不是一个 CronJob 跑所有链路),为的是让
+    kube-state-metrics 天然给出每条链路的
+    `kube_cronjob_status_last_successful_time` ——看板和告警都不用再引
+    Pushgateway 之类的新组件。失败就非零退出,让 Job 变成 Failed。
+    """
+    import json
+    import os
+    import ssl
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+    from base64 import b64encode
+
+    TRINO = os.environ.get("TRINO_URL", "https://trino.trino.svc.cluster.local:8443")
+    USER = os.environ.get("TRINO_USER", "goldenpath_probe")
+    PASSWORD = os.environ.get("TRINO_PASSWORD", "")
+    OM = os.environ.get("OPENMETADATA_URL",
+                        "http://openmetadata.openmetadata.svc.cluster.local:8585")
+
+    # Trino 的 https 是 cert-manager 自签的(ADR-016),集群内这一跳不需要
+    # 被信任 —— 和 table-registration-app / Superset 连 Trino 的做法一致。
+    _CTX = ssl.create_default_context()
+    _CTX.check_hostname = False
+    _CTX.verify_mode = ssl.CERT_NONE
+
+
+    def _req(url, data=None, headers=None):
+        r = urllib.request.Request(url, data=data, headers=headers or {},
+                                   method="POST" if data else "GET")
+        return json.load(urllib.request.urlopen(r, timeout=60, context=_CTX))
+
+
+    def trino_query(sql):
+        """跑一条 SQL,返回第一行第一列。
+
+        用 Trino 的 REST 协议(POST /v1/statement 之后跟着 nextUri 翻页),
+        不装 trino 客户端 —— 这个 CronJob 刻意只用标准库。
+        """
+        auth = b64encode(f"{USER}:{PASSWORD}".encode()).decode()
+        headers = {"X-Trino-User": USER, "Authorization": f"Basic {auth}",
+                   "Content-Type": "text/plain"}
+        resp = _req(f"{TRINO}/v1/statement", data=sql.encode(), headers=headers)
+        rows = resp.get("data") or []
+        # Trino 是流式返回的:第一个响应通常还没有数据,要一直跟着 nextUri
+        # 拿到 state=FINISHED 为止。**不跟到底就判断"没有数据"是错的**,
+        # 这是用裸 REST 调 Trino 最容易踩的坑。
+        while "nextUri" in resp:
+            resp = _req(resp["nextUri"], headers={"Authorization": f"Basic {auth}"})
+            rows += resp.get("data") or []
+            if resp.get("error"):
+                raise RuntimeError(f"Trino 报错: {resp['error'].get('message')}")
+        return rows[0][0] if rows else None
+
+
+    def probe_query():
+        """链路一:查询。Trino -> Iceberg -> MinIO/Hive Metastore -> OPA。
+
+        任何一环挂了这条都会失败:OPA 挂了 Trino 是 fail-closed 会拒绝、
+        HMS 挂了找不到表、MinIO 挂了读不到文件。
+        """
+        n = trino_query("select count(*) from iceberg.demo.orders")
+        if n is None or int(n) < 1:
+            raise RuntimeError(f"iceberg.demo.orders 查到 {n} 行,期望至少 1 行")
+        return f"iceberg.demo.orders 有 {n} 行"
+
+
+    def probe_streaming():
+        """链路二:流式接入。Kafka -> Flink -> Iceberg。
+
+        看的是**数据的新鲜度**,不是"Flink 进程活着"——ADR-062 实测过
+        JM/TM 都 Running 而作业已经 FAILED 的情况。
+        """
+        max_age_min = int(os.environ.get("MAX_AGE_MIN", "60"))
+        age = trino_query(
+            "select coalesce(date_diff('minute', max(event_time), current_timestamp), 99999) "
+            "from iceberg.demo.device_events_stream")
+        if age is None or int(age) > max_age_min:
+            raise RuntimeError(
+                f"device_events_stream 最新一条数据是 {age} 分钟前,超过阈值 {max_age_min} 分钟"
+                "(producer 每 5 分钟发一批,Flink 每分钟 checkpoint 一次)")
+        return f"最新数据 {age} 分钟前"
+
+
+    def probe_catalog():
+        """链路三:数据目录。Trino 元数据 -> OpenMetadata 采集 -> 目录可查。
+
+        用**匿名**接口探(表实体是公开可读的),不需要 bot token ——
+        少一个凭据就少一个会过期、会漏配的东西。
+        """
+        try:
+            t = _req(f"{OM}/api/v1/tables/name/trino.iceberg.demo.orders?fields=columns")
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"OpenMetadata 查不到 trino.iceberg.demo.orders(HTTP {e.code})")
+        cols = t.get("columns") or []
+        if not cols:
+            raise RuntimeError("目录里有这张表,但一个字段都没有——采集只跑了一半")
+        return f"目录里有这张表,{len(cols)} 个字段"
+
+
+    PROBES = {"query": probe_query, "streaming": probe_streaming, "catalog": probe_catalog}
+
+    if __name__ == "__main__":
+        name = sys.argv[1]
+        fn = PROBES.get(name)
+        if not fn:
+            print(f"未知链路 {name},可选:{sorted(PROBES)}", file=sys.stderr)
+            sys.exit(2)
+        t0 = time.time()
+        try:
+            detail = fn()
+        except Exception as exc:  # noqa: BLE001 - 探针要把任何失败都变成非零退出
+            print(f"链路 [{name}] 不通({time.time() - t0:.1f}s):{exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"链路 [{name}] 通({time.time() - t0:.1f}s):{detail}")

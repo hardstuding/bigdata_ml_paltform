@@ -126,6 +126,7 @@
 | [076](076-spark-4-evaluation.md) | Spark 4.x 评估 | 结论:暂不升,触发条件已定 |
 | [077](077-superset-chinese-ui.md) | Superset 汉化 | 配置已加,翻译编译未构建验证 |
 | [078](078-trino-group-provider.md) | Trino file group provider | **已实机验证** |
+| [079](079-golden-path-probes.md) | 按链路探测(D 线第一步)+ 黄金链路看板 | 未部署验证 |
 | [022](022-ci-chart-validation.md) | CI:push/PR 前跑 `helm template` | 已采纳 |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 机制已实现并在 cloud-full 验证;ACME 和告警外推两档未在真实环境验证 |

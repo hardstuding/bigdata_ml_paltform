@@ -76,6 +76,31 @@ spec:
               多半是作业要的资源超过了这个组的配额上限(标称 + 可借)。
               查:kubectl get clusterqueue {{ $labels.cluster_queue }} -o yaml
 
+    - name: platform.goldenpath
+      rules:
+        # 黄金链路(ADR-079)。**这一组和这份文件里其它组的性质不一样**:
+        # 其它组盯的是"某个组件坏了",这一组盯的是"**一件真实的事做不成了**"。
+        #
+        # 判据用 `last_successful_time` 而不是"最近有没有失败的 Job":
+        # 探针**卡住不结束**的时候不会产生 Failed Job,但也不会有新的成功
+        # ——这两种情况都该告警,而只有前者能被"有失败 Job"抓到。
+        - alert: GoldenPathBroken
+          expr: |
+            (time() - max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="monitoring", cronjob=~"goldenpath-.*"})) > 3600
+            or absent(kube_cronjob_status_last_successful_time{namespace="monitoring", cronjob=~"goldenpath-query"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "黄金链路 {{ $labels.cronjob }} 超过 1 小时没有成功过"
+            description: >-
+              这不是"某个组件不健康",是**一条真实链路做不成事了**。
+              goldenpath-query 覆盖 Trino/Iceberg/MinIO/Hive Metastore/OPA,
+              goldenpath-streaming 覆盖 Kafka/Flink/Iceberg 的数据新鲜度,
+              goldenpath-catalog 覆盖 OpenMetadata 采集。
+              查:kubectl -n monitoring logs job/$(kubectl -n monitoring get job
+              -l job-name --sort-by=.metadata.creationTimestamp -o name | tail -1)
+
     - name: platform.backup
       rules:
         # 2026-08-26 实机发现的:一次 postgres 备份因为"云主机刚开机、

@@ -68,6 +68,7 @@ enabled_components:
   - mlflow.yaml
   - network-policies.yaml
   - opa.yaml
+  - golden-path-probes.yaml
   - openmetadata-db-init.yaml
   - openmetadata.yaml
   - openmetadata-quality-alerts.yaml

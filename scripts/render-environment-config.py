@@ -93,6 +93,7 @@ DIR_MAP = {
     "apps-kueue-manifests": REPO_ROOT / "apps" / "kueue" / "manifests",
     "apps-schema-registry-manifests": REPO_ROOT / "apps" / "schema-registry" / "manifests",
     "apps-flink-audit-sink-manifests": REPO_ROOT / "apps" / "flink-audit-sink" / "manifests",
+    "apps-golden-path-probes-manifests": REPO_ROOT / "apps" / "golden-path-probes" / "manifests",
 }
 
 # 模板文件第一行可以写 `# render-if: <config键> == <值>`,表示"只有当前

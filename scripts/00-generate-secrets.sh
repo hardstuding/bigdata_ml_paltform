@@ -433,6 +433,14 @@ echo "==> 复制 Trino 服务账号凭据给 platform_sdk_demo"
 ensure_trino_service_account platform_sdk_demo_service
 ensure_ns platform-sdk-demo
 copy_secret trino platform-sdk-demo trino-service-account
+
+# 黄金链路探针(ADR-079)用的 Trino 账号。**刻意不加进 OPA 的
+# service_accounts 豁免名单**:让探针走和真实用户一模一样的授权路径
+# (table-access-grants.csv 里给它发了两张 demo 表的 grant),这样它顺带
+# 还验证了"授权链路本身是通的"——用豁免账号探测的话,OPA 的 grants 同步
+# 挂了它也照样绿。
+ensure_trino_service_account goldenpath_probe
+copy_secret trino monitoring trino-service-account
 copy_secret minio platform-sdk-demo minio-root
 
 echo
