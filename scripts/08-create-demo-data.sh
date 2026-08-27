@@ -79,6 +79,41 @@ with app.app_context():
                 (10,'Judy',    'West',  'Gizmo',  110.25, DATE '2026-07-25')
             """)
 
+            # ---- 权限演示用的三张表(2026-08-27 从 scripts/36 挪过来)----
+            #
+            # **为什么挪**:这三张表被两处引用——
+            #   - platform/iam/table-access-grants.csv 里 analyst001 的 grant
+            #     指向它们(在这之前那几条 grant 指向的表根本不存在);
+            #   - 黄金链路的 authz 探针(ADR-079)拿 access_test_l1 验证
+            #     「没有 grant 的表确实被拒」。
+            # 原来它们是 scripts/36(一个**验证脚本**)顺手建的,于是全新集群
+            # 上不跑那个验证脚本就没有这几张表,**探针会从第一天起就红**
+            # ——而一直红的告警比没有告警更糟。demo 数据该由 demo 数据脚本建。
+            for t in ("access_test_l1", "access_test_l2"):
+                run(f"""
+                    CREATE TABLE IF NOT EXISTS iceberg.demo.{t} (
+                        customer_id VARCHAR, phone VARCHAR,
+                        email VARCHAR, id_card VARCHAR)
+                """)
+                run(f"DELETE FROM iceberg.demo.{t}")
+                run(f"""
+                    INSERT INTO iceberg.demo.{t} VALUES
+                    ('C001','13812345678','alice@example.com','110101199001011234'),
+                    ('C002','13998765432','bob@example.com','310101199505055678')
+                """)
+            # 行级过滤演示:三个部门各两行(ADR-063 的验证脚本会查它)
+            run("""
+                CREATE TABLE IF NOT EXISTS iceberg.demo.regional_sales (
+                    region VARCHAR, department VARCHAR, amount DOUBLE)
+            """)
+            run("DELETE FROM iceberg.demo.regional_sales")
+            run("""
+                INSERT INTO iceberg.demo.regional_sales VALUES
+                ('华东','数据分析组',1000.0), ('华南','数据分析组',2000.0),
+                ('华北','算法组',3000.0),     ('西南','算法组',4000.0),
+                ('华中','平台组',5000.0),     ('东北','平台组',6000.0)
+            """)
+
     dataset = db.session.query(SqlaTable).filter_by(table_name="orders", schema="demo").first()
     if not dataset:
         dataset = SqlaTable(table_name="orders", schema="demo", database=database)

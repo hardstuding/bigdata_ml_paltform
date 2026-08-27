@@ -315,6 +315,32 @@ else
   log "--> airflow 还没起来,跳过"
 fi
 
+step "建 demo 数据(黄金链路探针依赖它,不是可选的装饰)"
+# **2026-08-27 加进一键部署路径**,原因不是"顺手造点数据好看",是:
+#
+#   - 黄金链路探针(ADR-079)里 query / authz 两条直接查 iceberg.demo.orders
+#     和 demo.access_test_l1,这两张表不存在的话**探针会从第一天起就红**;
+#   - platform/iam/table-access-grants.csv 里 analyst001 的 grant 指向
+#     access_test_l1/l2 和 regional_sales,不建的话那几条授权指向空气。
+#
+# **一直红的告警比没有告警更糟**——新集群装完就一片红,人第一反应是"这套
+# 监控不准",然后就不看了。
+if kubectl -n trino get deploy trino-coordinator >/dev/null 2>&1; then
+  run_optional "scripts/08-create-demo-data.sh" ./scripts/08-create-demo-data.sh
+else
+  log "--> trino 还没起来,跳过(起来之后手动补跑 scripts/08)"
+fi
+
+step "训练 demo 模型(黄金链路的 model 探针依赖 MLflow 里有个 READY 模型)"
+# 同一个理由。而且 2026-08-27 实测过这条**真的会被漏掉**:08-22 推倒重建
+# 之后没人跑过 scripts/09,MLflow 注册表一直是空的,而 roles.md 里"模型注册"
+# 那格还写着 ✅——直到 model 探针第一次跑才发现(ADR-079)。
+if kubectl -n mlflow get deploy mlflow-mlflow >/dev/null 2>&1; then
+  run_optional "scripts/09-train-demo-model.sh" ./scripts/09-train-demo-model.sh
+else
+  log "--> mlflow 还没起来,跳过(起来之后手动补跑 scripts/09)"
+fi
+
 log ""
 log "===== 全部完成 ====="
 log "用 kubectl get applications -n argocd 确认所有组件是不是 Synced/Healthy。"

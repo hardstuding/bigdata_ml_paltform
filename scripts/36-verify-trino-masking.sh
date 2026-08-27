@@ -61,7 +61,11 @@ print(json.dumps({'data': {'password.db': base64.b64encode(sys.argv[1].encode())
 }
 trap cleanup EXIT
 
-log "1/4 建 demo 表(两张带敏感字段的 + 一张带部门列的,都对应 grants CSV 里已有的 grant)"
+log "1/4 确认 demo 表存在(正常情况下 scripts/08 已经建好了,这里只兜底)"
+# 2026-08-27:这三张表的定义挪进了 scripts/08-create-demo-data.sh —— 它们
+# 被 grants CSV 和黄金链路探针依赖,不该由一个**验证脚本**顺手建出来
+# (那样全新集群上不跑验证就没有这几张表,探针从第一天起就红)。
+# 这里保留 CREATE IF NOT EXISTS 作为兜底,单独跑这个脚本时仍然能用。
 kubectl -n "$TRA_NS" exec -i "$TRA_POD" -- python3 - <<'PYEOF' 2>&1 | tee -a "$LOG_FILE"
 import os, trino
 c = trino.dbapi.connect(host=os.environ["TRINO_HOST"], port=int(os.environ["TRINO_PORT"]),
