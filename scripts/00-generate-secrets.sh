@@ -10,6 +10,19 @@
 #
 # 用法:
 #   ./scripts/00-generate-secrets.sh [输出凭据的文件路径,默认 secrets/generated-credentials.txt]
+# **这个脚本写的 secrets/generated-credentials.txt 是「生成当时的快照」,
+# 不是权威来源。** 它是追加的:每跑一次追加一段,同一个键会攒多份,而只有
+# 最后一份(有时一份都没有)还对得上集群。2026-08-27 实测:42 条可识别的
+# 条目里 **26 条已经失效**。
+#
+# 要看**当前真正有效**的凭据,用:
+#     ./scripts/show-credentials.sh            # 看有哪些、指纹
+#     ./scripts/show-credentials.sh --show     # 看明文
+#     ./scripts/show-credentials.sh --audit-file  # 查那个文件里哪些行已经死了
+#
+# 拿过期文件里的密码去登录,会以为是账号配错了——这类「看着有答案、其实是
+# 过期答案」的坑比没有答案更费时间。
+#
 set -euo pipefail
 
 OUT_FILE="${1:-secrets/generated-credentials.txt}"
