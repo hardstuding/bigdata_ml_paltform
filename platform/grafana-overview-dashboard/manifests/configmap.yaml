@@ -1,0 +1,268 @@
+# 平台总览(E 线「管理驾驶舱」的第一版)。
+#
+# **和另外三个看板的分工**:cost/capacity/goldenpath 是给平台运维看细节的,
+# 这一张是**一页看完平台整体状况**——五条链路通不通、钱花在哪、哪个组快到
+# 上限了。
+#
+# **刻意在看板里写清楚它「不回答」什么**(最后一个文本面板):按月汇总、
+# 预算对比、数据质量通过率、数据资产规模——这几样才是管理视角真正要的,
+# 而它们的数据不在 Prometheus 里。宁可写明够不着,也不为了凑齐去编数据。
+#
+# 所有 panel 都不写 datasource,用 Grafana 默认数据源(和其它看板一致)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  platform-overview.json: |
+    {
+      "title": "平台总览",
+      "uid": "platform-overview",
+      "schemaVersion": 39,
+      "timezone": "browser",
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "panels": [
+        {
+          "id": 1,
+          "title": "平台能不能用",
+          "type": "stat",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "count((time() - max by (cronjob) (kube_cronjob_status_last_successful_time{namespace=\"monitoring\", cronjob=~\"goldenpath-.*\"})) <= 3600)",
+              "legendFormat": "正常链路数",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "max": 5,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 4
+                  },
+                  {
+                    "color": "green",
+                    "value": 5
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "background"
+          },
+          "description": "**5 条黄金链路里有几条是通的。** 不是「几个 Pod 活着」,是「几件真实的事现在做得成」。绿=5 条全通,橙=断 1 条,红=断 2 条以上。"
+        },
+        {
+          "id": 2,
+          "title": "当前每小时花费",
+          "type": "stat",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "sum(container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) + sum(container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost))",
+              "legendFormat": "工作负载",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "description": "按工作负载的资源申请量折算。**这是「用掉的」不是「账单」**——整机标价见右边,两者的差就是买了没用上的部分。"
+        },
+        {
+          "id": 3,
+          "title": "整机标价(每小时)",
+          "type": "stat",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "sum(node_total_hourly_cost)",
+              "legendFormat": "整机",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "description": "和左边的差额 = 没有被任何工作负载占用的部分。差得越多说明机器买大了或者用得越松。"
+        },
+        {
+          "id": 4,
+          "title": "资源利用率",
+          "type": "gauge",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "100 * (sum(container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) + sum(container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost))) / sum(node_total_hourly_cost)",
+              "legendFormat": "利用率",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 30
+                  },
+                  {
+                    "color": "green",
+                    "value": 60
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "description": "花出去的钱里有多少变成了实际申请的资源。**低不一定是坏事**——留余量本来就要花钱,但长期低于 30% 值得问一句机器是不是买大了。"
+        },
+        {
+          "id": 5,
+          "title": "各组花费(每小时)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "targets": [
+            {
+              "expr": "sum by (queue) ((container_cpu_allocation * on (node) group_left() avg by (node) (node_cpu_hourly_cost)) * on (namespace, pod) group_left (queue) label_replace(max by (namespace, pod, label_kueue_x_k8s_io_queue_name) (kube_pod_labels{label_kueue_x_k8s_io_queue_name!=\"\"}), \"queue\", \"$1\", \"label_kueue_x_k8s_io_queue_name\", \"(.+)\"))",
+              "legendFormat": "{{queue}} CPU",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (queue) ((container_memory_allocation_bytes / 1024 / 1024 / 1024 * on (node) group_left() avg by (node) (node_ram_hourly_cost)) * on (namespace, pod) group_left (queue) label_replace(max by (namespace, pod, label_kueue_x_k8s_io_queue_name) (kube_pod_labels{label_kueue_x_k8s_io_queue_name!=\"\"}), \"queue\", \"$1\", \"label_kueue_x_k8s_io_queue_name\", \"(.+)\"))",
+              "legendFormat": "{{queue}} 内存",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyCNY"
+            },
+            "overrides": []
+          },
+          "description": "只统计打了 Kueue 队列标签的作业(走 platform_sdk 提交的)。常驻服务不进队列,不在这里。"
+        },
+        {
+          "id": 6,
+          "title": "各组配额用了多少",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "targets": [
+            {
+              "expr": "100 * sum by (cluster_queue) (kueue_cluster_queue_resource_usage{replica_role=\"leader\", resource=\"cpu\"}) / sum by (cluster_queue) (kueue_cluster_queue_nominal_quota{replica_role=\"leader\", resource=\"cpu\"})",
+              "legendFormat": "{{cluster_queue}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "description": "超过 100% 说明这个组正在**借用**别的组的空闲配额(Kueue 的 cohort 机制,ADR-064),不是超限——别人要用时会被收回。"
+        },
+        {
+          "id": 7,
+          "title": "这张看板回答什么 / 不回答什么",
+          "type": "text",
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 14
+          },
+          "targets": [],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "### 回答的\n\n- **平台能不能用** —— 五条黄金链路(ADR-079)里有几条通。这是「事情做得成没有」,不是「几个 Pod 活着」;\n- **钱花在哪** —— 当前每小时花费、整机标价、利用率、各组占比(ADR-069);\n- **哪个组快到配额上限了** —— 超过 100% 是在借用别人的空闲配额,不是超限(ADR-064)。\n\n### **不**回答的(免得看着以为已经有了)\n\n- **按月/按账期的汇总和预算对比** —— 现在只有实时值,没有月度聚合,也没有预算这个概念;\n- **数据质量的整体通过率** —— 质量断言的结果在 OpenMetadata 里,不是 Prometheus 指标,进不了这张看板(ADR-073 里记了这个限制);\n- **数据资产规模**(多少张表、多少人在用)—— 同上,在 OpenMetadata 里。\n\n这三条才是「管理驾驶舱」(E 线)真正要的东西,这一版够不着。先把已经有指标的部分聚到一页,而不是为了凑齐去编数据。"
+          }
+        }
+      ]
+    }
