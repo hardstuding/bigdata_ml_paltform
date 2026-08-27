@@ -65,6 +65,34 @@ spec:
       # platform-critical 档。
       priorityClassName: platform-critical
       initContainers:
+        # **等 Postgres 真的能连上再启动。**
+        #
+        # 2026-08-26/27 连着两次开机都撞到:云主机停机重启之后,
+        # hive-metastore 比 Postgres 先起来,连不上库直接退出,然后一路
+        # CrashLoop——**而它本身不重试**。表现是 Trino 查任何表都报
+        # `Failed connecting to Hive metastore`,人得手动
+        # `kubectl rollout restart` 一次才好。
+        #
+        # 这和 airflow-migrate-db 那次是同一类冷启动顺序问题(那次是 Job
+        # 把 backoffLimit 烧光变成永久 Failed),解法也一样:**在启动前等
+        # 依赖就绪,而不是指望应用自己重试**。
+        #
+        # 用 postgres 镜像自带的 pg_isready,不额外引镜像(create-db-job
+        # 用的就是同一个镜像)。
+        - name: wait-for-postgres
+          image: postgres:16.15
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres.data.svc.cluster.local -p 5432 -q; do
+                echo "Postgres 还没就绪,5 秒后重试..."
+                sleep 5
+              done
+              echo "Postgres 就绪"
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
         - name: fetch-postgres-driver
           image: curlimages/curl:8.11.0
           command:

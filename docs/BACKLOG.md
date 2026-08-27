@@ -184,6 +184,27 @@ flink CRD 那个常年 OutOfSync,理由是一样的——**常年黄灯会训练
 
 ---
 
+### hive-metastore 每次 pod 启动都要联网从 Maven 下 3 个 jar
+
+看冷启动问题时顺带发现的:`apps/hive-metastore/manifests/deployment.yaml`
+有两个 initContainer,**每次 Pod 启动都 `curl` 去 repo1.maven.org 下**
+postgres 驱动、hadoop-aws、aws-java-sdk-bundle 三个 jar。
+
+这正是 `docs/BACKLOG.md` 2.1 已经解决过一遍的那一类("引入镜像构建流程,
+停止用运行时 pip install"),只是那次没覆盖到 hive-metastore 这个走
+`curl` 而不是 `pip` 的变种。
+
+**为什么现在更要紧**:这一周反复撞到境外网络不可用(2026-08-26 升级
+OpenMetadata 时云主机同时失去了到 Docker Hub 的所有通路)。真赶上那种时候,
+**hive-metastore 会起不来,而它一挂 Trino 查任何表都报错**——是整个查询
+链路的单点。
+
+解法和 spark-iceberg-image / flink-iceberg-image 一样:自建一个
+`hive-metastore-image`,构建期把三个 jar 打进去,initContainer 整个删掉。
+不是难,是还没做。
+
+---
+
 ## P0(会阻断当前主线的,才有资格排这里)
 
 当前没有。如果出现真实的数据风险/持续计费异常/安全问题,加在这里,
