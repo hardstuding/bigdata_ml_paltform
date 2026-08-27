@@ -1,7 +1,7 @@
 # ADR-074:Superset 改成透传登录用户身份(impersonation)
 
 日期:2026-08-26
-状态:已实现,**未部署验证**;**这是一次行为收紧,上线前必须先盘表**
+状态:**已上线并实机验证**(2026-08-27);盘表已做,影响面确认极小
 
 ## 起因
 
@@ -71,6 +71,32 @@ Superset 用**一个共享的** `superset_service` 账号连 Trino
 就是一片看板报 `PERMISSION_DENIED`。
 
 这次没有立刻在集群上生效,就是为了先把这一步做完。
+
+## 实机验证(cloud-full,2026-08-27)
+
+**盘表结论**(`scripts/40`):Superset 里 22 个数据集,**21 个来自内置的
+`examples` 库(Postgres,不走 Trino,完全不受影响)**,只有 1 个走 Trino
+(`Trino.demo.orders`,1 个 chart);登录过的用户只有 `admin` 一个。所以这次
+切换的影响面是 1 个图表 + 1 个用户 —— 远比预想的小,可以直接切。
+
+切换后在 Superset 里以真实用户身份跑查询:
+
+| | 传给 Trino 的身份 | `demo.orders` | 审计表 |
+|---|---|---|---|
+| `admin`(platform-team) | `admin` | ✅ 10 行 | ✅ 3068 行 |
+| `analyst001`(无 grant,非 platform-team) | `analyst001` | ❌ PERMISSION_DENIED | ❌ PERMISSION_DENIED |
+
+第一行的 `select current_user` 返回 `admin` —— **Superset 传的确实是登录用户
+本人,不再是 `superset_service`**。
+
+第二行是这次改动的全部意义:**改之前 `analyst001` 通过 Superset 能读到任何
+表**(因为一切都走那个无条件放行的服务账号),现在两张表都被拒。
+(验证用的临时 Superset 用户已删除。)
+
+而 `admin` 那一行能通过,**完全依赖 [ADR-078](078-trino-group-provider.md)
+的 group provider**:没有它 Trino 不知道 admin 属于 platform-team,他会和
+analyst001 一样被拒 —— 那就变成"堵了洞、顺便把管理员也锁在外面"。两个 ADR
+是一起才成立的。
 
 ## 还没做的
 
