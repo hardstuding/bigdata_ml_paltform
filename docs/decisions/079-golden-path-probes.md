@@ -120,6 +120,27 @@ MLflow 里**一个注册模型都没有**,实验只有 `Default`。也就是说 
 
 重跑 `scripts/09` 之后探针转绿(`demo-rf-classifier 有 1 个 READY 版本`)。
 
+## 一个副作用:探针失败会把 ArgoCD 应用标成 Degraded
+
+五条全绿之后,`golden-path-probes` 这个 Application 在 ArgoCD 里仍然显示
+**Degraded** —— 因为 `failedJobsHistoryLimit: 3` 保留着之前失败的 Job,而
+ArgoCD 看到 Failed 的 Job 就判 Degraded。
+
+**这个信号是错位的**:探针失败说明"它抓到了东西",不说明"探针这个组件坏了"。
+放着不管的后果很具体——ArgoCD 上会常年挂一个 Degraded,而这个项目已经花了
+力气去消除常年黄灯(比如 flink CRD 那次),就是因为**常年黄灯会训练所有人
+忽略黄灯**。
+
+两个方向,都还没做:
+
+1. 给这个 Application 配 ArgoCD 的自定义健康检查(Lua),让它只看 CronJob
+   本身存不存在,不看历史 Job 的成败;
+2. 或者把 `failedJobsHistoryLimit` 调到 0——但那样就没法 `kubectl logs` 看
+   失败原因了,得不偿失。
+
+倾向第 1 个。**失败信息应该只从告警和看板出去,不该混进部署状态里**——这两
+套信号回答的是不同的问题(部署对不对 vs 平台好不好),混在一起两边都变钝。
+
 ## 还没做的
 
 1. **没部署验证。** 三条探针都还没在集群上跑过一次。

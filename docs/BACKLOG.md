@@ -165,6 +165,25 @@ registry.k8s.io 都不支持按仓库配镜像。
 
 ---
 
+### 黄金链路探针失败会把 ArgoCD 应用标成 Degraded(信号错位)
+
+`golden-path-probes` 这个 Application 只要有过失败的 Job(而
+`failedJobsHistoryLimit: 3` 会保留),ArgoCD 就判 Degraded——**但探针失败
+说明它抓到了东西,不说明这个组件坏了**。
+
+放着不管的后果:ArgoCD 上常年挂一个 Degraded。这个项目刚花力气消掉过
+flink CRD 那个常年 OutOfSync,理由是一样的——**常年黄灯会训练所有人忽略
+黄灯**。
+
+解法倾向给这个 Application 配 ArgoCD 自定义健康检查(Lua),只看 CronJob
+存不存在、不看历史 Job 成败。**失败信息应该只从告警和看板出去,不该混进
+部署状态里**:这两套信号回答的是不同问题(部署对不对 vs 平台好不好),
+混在一起两边都变钝。
+
+细节见 [ADR-079](decisions/079-golden-path-probes.md)。
+
+---
+
 ## P0(会阻断当前主线的,才有资格排这里)
 
 当前没有。如果出现真实的数据风险/持续计费异常/安全问题,加在这里,
