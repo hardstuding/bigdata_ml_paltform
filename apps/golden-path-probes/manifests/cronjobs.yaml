@@ -25,6 +25,12 @@ spec:
   # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
   startingDeadlineSeconds: 120
   jobTemplate:
+    # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
+    # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
+    # 正是 Job 上的这个标签。
+    metadata:
+      labels:
+        platform/golden-path: "probe"
     spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
@@ -71,6 +77,12 @@ spec:
   # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
   startingDeadlineSeconds: 120
   jobTemplate:
+    # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
+    # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
+    # 正是 Job 上的这个标签。
+    metadata:
+      labels:
+        platform/golden-path: "probe"
     spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
@@ -123,6 +135,12 @@ spec:
   # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
   startingDeadlineSeconds: 120
   jobTemplate:
+    # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
+    # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
+    # 正是 Job 上的这个标签。
+    metadata:
+      labels:
+        platform/golden-path: "probe"
     spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
@@ -176,6 +194,12 @@ spec:
   failedJobsHistoryLimit: 3
   startingDeadlineSeconds: 120
   jobTemplate:
+    # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
+    # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
+    # 正是 Job 上的这个标签。
+    metadata:
+      labels:
+        platform/golden-path: "probe"
     spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
@@ -225,6 +249,12 @@ spec:
   failedJobsHistoryLimit: 3
   startingDeadlineSeconds: 120
   jobTemplate:
+    # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
+    # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
+    # 正是 Job 上的这个标签。
+    metadata:
+      labels:
+        platform/golden-path: "probe"
     spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180

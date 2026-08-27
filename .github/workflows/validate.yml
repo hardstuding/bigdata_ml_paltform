@@ -50,6 +50,11 @@ jobs:
       - name: platform/iam 三份数据自洽(每个人都得属于某个组)
         run: python3 scripts/check-iam-consistency.py
 
+      - name: ArgoCD 自定义健康检查的 Lua 真跑一遍
+        run: |
+          pip install --quiet lupa pyyaml pytest
+          python3 -m pytest tests/test_argocd_health_lua.py -q
+
       - name: 镜像版本锁定校验(不允许 latest 这类浮动 tag,见 ADR-010)
         run: python3 scripts/check-image-tags.py
 

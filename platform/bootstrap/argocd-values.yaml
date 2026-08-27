@@ -199,6 +199,46 @@ configs:
     # Service 类型的默认健康检查,不只是 LoadBalancer——但这个集群是单
     # 裸机节点,ClusterIP/NodePort 类型的 Service 本来创建出来就应该算
     # 健康,不会因为这条覆盖丢失真实的异常检测能力。
+    # 黄金链路探针的 Job 失败**不该让 Application 变 Degraded**(ADR-079)。
+    #
+    # 探针的职责就是"失败给你看"。而 `failedJobsHistoryLimit` 会保留失败的
+    # Job,ArgoCD 看到 Failed Job 就判 Degraded —— 结果是探针每抓到一次问题,
+    # ArgoCD 上就多挂一个 Degraded,要等历史 Job 被清掉才恢复。
+    #
+    # **这个信号是错位的**:探针失败说明"它抓到了东西",不说明"探针这个组件
+    # 坏了"。放着不管的后果很具体 —— ArgoCD 上常年挂黄灯,而**常年黄灯会
+    # 训练所有人忽略黄灯**(这个仓库刚为同样的理由消掉过 flink CRD 那个
+    # 常年 OutOfSync)。
+    #
+    # 所以:**失败信息只从告警和看板出去,不混进部署状态里**。这两套信号
+    # 回答的是不同问题(部署对不对 vs 平台好不好),混在一起两边都变钝。
+    #
+    # 只对带 `platform/golden-path` 标签的 Job 特殊处理,其余 Job 保持
+    # ArgoCD 原本的语义(db-init 这类 Job 失败仍然要变 Degraded)。
+    resource.customizations.health.batch_Job: |
+      hs = {}
+      if obj.metadata ~= nil and obj.metadata.labels ~= nil and obj.metadata.labels["platform/golden-path"] ~= nil then
+        hs.status = "Healthy"
+        hs.message = "黄金链路探针:失败信息走告警和看板,不进部署状态(ADR-079)"
+        return hs
+      end
+      if obj.status ~= nil and obj.status.conditions ~= nil then
+        for i, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Failed" and condition.status == "True" then
+            hs.status = "Degraded"
+            hs.message = condition.message
+            return hs
+          end
+          if condition.type == "Complete" and condition.status == "True" then
+            hs.status = "Healthy"
+            hs.message = condition.message
+            return hs
+          end
+        end
+      end
+      hs.status = "Progressing"
+      hs.message = "Job 还在跑"
+      return hs
     resource.customizations.health.Service: |
       hs = {}
       hs.status = "Healthy"

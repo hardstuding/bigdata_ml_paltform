@@ -131,14 +131,26 @@ ArgoCD 看到 Failed 的 Job 就判 Degraded。
 力气去消除常年黄灯(比如 flink CRD 那次),就是因为**常年黄灯会训练所有人
 忽略黄灯**。
 
-两个方向,都还没做:
+**已修**(2026-08-27):给 ArgoCD 加了 `batch/Job` 的自定义健康检查(Lua),
+只对带 `platform/golden-path` 标签的 Job 返回 Healthy,**其余 Job 保持
+ArgoCD 原本的语义**——db-init 这类 Job 失败仍然要变 Degraded。
 
-1. 给这个 Application 配 ArgoCD 的自定义健康检查(Lua),让它只看 CronJob
-   本身存不存在,不看历史 Job 的成败;
-2. 或者把 `failedJobsHistoryLimit` 调到 0——但那样就没法 `kubectl logs` 看
-   失败原因了,得不偿失。
+另一个方案是把 `failedJobsHistoryLimit` 调到 0,否掉了:那样就没法
+`kubectl logs` 看失败原因,得不偿失。
 
-倾向第 1 个。**失败信息应该只从告警和看板出去,不该混进部署状态里**——这两
+两个实现细节:
+
+- **标签要打在 `jobTemplate.metadata.labels` 上,不能只打在 CronJob 上**
+  ——CronJob 自己的 labels 不会传给它生出来的 Job,而健康检查认的是 Job 上
+  的标签。
+- **这段 Lua 有单元测试**(`tests/test_argocd_health_lua.py`,用 lupa 真跑
+  一遍,不是数括号,已进 CI)。给 25 行 Lua 写测试看着夸张,但它跑在 ArgoCD
+  控制器里,**写错的表现不是报错,是所有 Job 的健康判断都变形**:漏了
+  `Failed` 分支的话,db-init 失败就再也不会让 Application 变红,而这段代码
+  平时没人会去看。测试里"普通 Job 失败仍然变红"那条比"探针失败不变红"更
+  重要——前者写错是少一个告警,后者写错是**丢掉一整类真实故障的信号**。
+
+原则记下来:**失败信息应该只从告警和看板出去,不该混进部署状态里**——这两
 套信号回答的是不同的问题(部署对不对 vs 平台好不好),混在一起两边都变钝。
 
 ## 还没做的
