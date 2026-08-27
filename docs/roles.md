@@ -71,7 +71,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 破坏性操作防护 | ✅ | `scripts/confirm-destructive-kubectl.sh`(历史上真误删过 namespace,见 `docs/operations/incidents.md`) |
 | 计费资源门禁 | ✅ | `cloud-full-preflight.sh` + 空闲自动关机看门狗(经济模式) |
 | 排障知识 | ✅ | 2026-08-22 改造成 Runbook:顶部 59 条**症状索引**(按人实际观察到的现象组织),下面按层次分 9 节,每条统一成"症状 → 定位 → 处置"。条目 40 → 66(新增 26 条是从 journal/ADR 搬进来的真实故障),行数 864 → 1632。内容保全做过机械核对:旧版 292 个技术片段(报错原文/命令/版本号/路径)逐个查过,没有丢 |
-| 统一服务目录 / 黄金链路告警 | ❌ | D 线产品主线,未开始 |
+| 统一服务目录 / 黄金链路告警 | 🟡 | **黄金链路那半做完并实机验证**(ADR-079):三条链路各一个探针 CronJob(query / streaming / catalog),做的是真实的小事而不是探进程;配套 `GoldenPathBroken` 告警 + 「黄金链路」看板。实测三条全通(query 0.2s/10 行、catalog 6 个字段、streaming 5 分钟前),而且**停机 22 小时后 streaming 从「1327 分钟前」自己恢复到「5 分钟前」**。**还差**:算法链路和治理链路没有探针;「统一服务目录」(一个地方看到所有服务和负责人)完全没做 |
 | 容量 / 成本看板 | 🟡 | **两半都有面板了**:成本 `platform/grafana-cost-dashboard/`(7 panel,PromQL 在真集群验过);容量 `platform/grafana-capacity-dashboard/`(6 panel:各组配额用量 vs 标称、排队作业区分「等资源」和「永远排不上」、节点剩余可分配)。**容量那份还没部署验证过**,所以整格还是 🟡 |
 | Argo Workflows 授权 | ✅ | **2026-08-19 已修复并验证**:之前 CrashLoopBackOff 2 天多没人发现(issuer/issuerAlias),修好登录后又发现登录成功但调 API 403——`server.sso.rbac.enabled` 不会自动建授权资源,读官方源码(`gatekeeper.go`)确认要手动建 ServiceAccount(挂 rbac-rule 注解)+ 长期 token Secret + Role/RoleBinding,四个都补上了。真实 curl+cookie-jar 验证:登录→列 workflow→建一个真实 workflow→能查到→删除清理 |
 | idle-shutdown-watchdog 开机自愈 | ✅ | **2026-08-19 修复**:停机几天后重新开机,看门狗第一次检查会用几天前的旧时间戳误判"已空闲超过阈值"立刻自动关机——机器刚开机 2-3 分钟就被自己关掉,来不及做任何事。已加开机时重置状态的机制(这个脚本本身按既定政策不进 git,细节记在 `docs/journal/2026-08.md`） |
