@@ -81,7 +81,8 @@
   .card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .card-name { font-weight: 600; font-size: 0.95rem; }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
-  .dot-up { background: var(--up); } .dot-down { background: var(--down); }
+  .dot-up { background: var(--up); } .dot-bad { background: #d1242f; }
+  .dot-down { background: var(--down); }
   .card-desc { color: var(--muted); font-size: 0.84rem; margin-top: 3px; }
 
   footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line);
@@ -95,6 +96,32 @@
     统一 SSO(Keycloak / realm <code>platform</code>),点开任何一个工具都不用重新输密码
   </p>
 </header>
+
+<h2>平台现在通不通</h2>
+<p class="hint">
+  下面每一行是<b>一条真实链路</b>,不是"某个进程活着"——探针每隔几分钟真的去
+  查一次数据、读一次目录。工具卡片上的绿点只说明端口通,这里的绿点说明
+  <b>事情做得成</b>。
+</p>
+{% if golden.error %}
+  <p class="empty">{{ golden.error }}。这一栏取不到不影响下面的内容。</p>
+{% else %}
+<table class="tbl">
+  <thead><tr><th>链路</th><th>一路经过</th><th>上次做成</th></tr></thead>
+  <tbody>
+  {% for g in golden.rows %}
+    <tr>
+      <td>
+        <span class="dot {% if g.state == 'ok' %}dot-up{% elif g.state == 'broken' %}dot-bad{% else %}dot-down{% endif %}"></span>
+        {{ g.label }}
+      </td>
+      <td class="muted">{{ g.chain }}</td>
+      <td>{{ g.ago }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 
 <h2>我的作业</h2>
 {% if jobs.error %}

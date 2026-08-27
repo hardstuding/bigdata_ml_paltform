@@ -6,6 +6,7 @@
 跑法:
   cd apps/platform-portal && python3 -m pytest tests/ -v
 """
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -257,3 +258,60 @@ class TestIndexDegradation:
         body = resp.get_data(as_text=True)
         assert "Trino" in body and "Superset" in body   # 工具入口没受影响
         assert "读不到" in body                          # 而且明说了取不到,不是假装没这回事
+
+
+# ------------------------------------------------------------ 黄金链路
+# 门户原来只回答"工具在不在线",这一块回答"一件真实的事做不做得成"。
+# 下面几条锁住它的**降级行为**:这一栏的数据来自 Prometheus,而门户是
+# "哪里都进不去时最后还能打开的那个页面"——它绝不能因为 Prometheus 挂了
+# 就打不开。
+
+class TestGoldenPaths:
+    def test_prometheus_连不上时整块降级_不抛异常(self):
+        with patch.object(portal.urllib.request, "urlopen",
+                          side_effect=OSError("connection refused")):
+            g = portal.golden_paths()
+        assert g["error"] and g["rows"] == []
+
+    def test_三态要分开_从来没跑过不等于断了(self):
+        # 只返回 query 一条,另外两条没有数据
+        payload = json.dumps({"data": {"result": [
+            {"metric": {"cronjob": "goldenpath-query"}, "value": [0, "120"]}]}}).encode()
+        with patch.object(portal.urllib.request, "urlopen",
+                          return_value=_FakeResp(payload)):
+            rows = {r["label"]: r for r in portal.golden_paths()["rows"]}
+        assert rows["查数据"]["state"] == "ok"
+        # 没有数据的两条是 unknown 而不是 broken:多半是刚部署/探针没起来,
+        # 和"链路真的断了"该分开显示。
+        assert rows["实时数据"]["state"] == "unknown"
+        assert rows["数据目录"]["state"] == "unknown"
+
+    def test_超过阈值算断了_而且阈值和告警一致(self):
+        payload = json.dumps({"data": {"result": [
+            {"metric": {"cronjob": "goldenpath-query"},
+             "value": [0, str(portal.GOLDEN_PATH_STALE_SEC + 1)]}]}}).encode()
+        with patch.object(portal.urllib.request, "urlopen",
+                          return_value=_FakeResp(payload)):
+            rows = {r["label"]: r for r in portal.golden_paths()["rows"]}
+        assert rows["查数据"]["state"] == "broken"
+        # 门户显红而 GoldenPathBroken 告警不响(或反过来)会让人不知道信哪个
+        assert portal.GOLDEN_PATH_STALE_SEC == 3600
+
+    def test_时间显示是人话(self):
+        assert portal._human_ago(30) == "刚刚"
+        assert portal._human_ago(120) == "2 分钟前"
+        assert portal._human_ago(3660) == "1 小时 1 分钟前"
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._p = payload
+
+    def read(self):
+        return self._p
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
