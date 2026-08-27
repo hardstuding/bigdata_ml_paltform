@@ -44,6 +44,21 @@
 **四个都不报错,而且单元测试/同步状态全绿。** 这就是黄金链路探针存在的
 理由——只有"从头做一件真实的事"才发现得了。
 
+### 下次开机必须做的一件事
+
+**ArgoCD 的配置改了,但它不是 GitOps 管的**——ArgoCD 自己是
+`scripts/01-bootstrap-argocd.sh` 手动 helm 装的(这是仓库里唯一允许手动
+helm upgrade 的组件)。2026-08-27 给它加了 `batch/Job` 的自定义健康检查
+(让黄金链路探针的失败不再把 Application 标成 Degraded,ADR-079),**改动
+在 git 里,但集群上还没生效**。
+
+```bash
+./scripts/01-bootstrap-argocd.sh     # 幂等,就是 helm upgrade
+```
+
+不跑的话表现是:探针一失败,`golden-path-probes` 就在 ArgoCD 上挂 Degraded
+——不影响功能,但会攒常年黄灯。
+
 ### 下一步
 
 1. **告警出口**——三个来源(质量/新鲜度/审计断流)接同一个出口。真实阻塞
