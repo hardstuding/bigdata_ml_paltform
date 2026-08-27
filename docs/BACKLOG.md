@@ -194,10 +194,15 @@ postgres 驱动、hadoop-aws、aws-java-sdk-bundle 三个 jar。
 停止用运行时 pip install"),只是那次没覆盖到 hive-metastore 这个走
 `curl` 而不是 `pip` 的变种。
 
+**实测代价**(2026-08-27):云主机到 repo1.maven.org 的下载速度是
+**283 KB/s**,而 `aws-java-sdk-bundle` 有约 100MB —— 也就是**每次 Pod 启动
+要等约 6 分钟**才轮到主容器。这一轮开机就实测等了 7 分钟以上,而且这 7 分钟
+里 Trino 查任何表都是报错的。
+
 **为什么现在更要紧**:这一周反复撞到境外网络不可用(2026-08-26 升级
 OpenMetadata 时云主机同时失去了到 Docker Hub 的所有通路)。真赶上那种时候,
 **hive-metastore 会起不来,而它一挂 Trino 查任何表都报错**——是整个查询
-链路的单点。
+链路的单点。今天只是慢,不是不通;下次未必。
 
 解法和 spark-iceberg-image / flink-iceberg-image 一样:自建一个
 `hive-metastore-image`,构建期把三个 jar 打进去,initContainer 整个删掉。
