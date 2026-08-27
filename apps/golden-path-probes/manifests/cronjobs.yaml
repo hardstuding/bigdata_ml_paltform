@@ -142,6 +142,13 @@ spec:
                     secretKeyRef:
                       name: trino-service-account
                       key: password-goldenpath_probe
+                # 复用 quality-alerts 那个 CronJob 已经在用的同一个 bot token
+                # (scripts/27 建的),不另发一份。
+                - name: OPENMETADATA_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: openmetadata-quality-alerts-token
+                      key: token
               resources:
                 requests: {cpu: 20m, memory: 64Mi}
                 limits: {memory: 128Mi}

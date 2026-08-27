@@ -103,11 +103,17 @@ data:
     def probe_catalog():
         """链路三:数据目录。Trino 元数据 -> OpenMetadata 采集 -> 目录可查。
 
-        用**匿名**接口探(表实体是公开可读的),不需要 bot token ——
-        少一个凭据就少一个会过期、会漏配的东西。
+        **第一版以为表实体匿名可读,实测 HTTP 401** —— OpenMetadata 的
+        /api/v1/tables 需要带 token。复用 openmetadata-quality-alerts 那个
+        CronJob 已经在用的同一个 bot token(scripts/27 建的),不另发一份:
+        多一份 token 就多一个会过期、会漏配、会忘了轮换的东西。
         """
+        token = os.environ.get("OPENMETADATA_TOKEN", "")
+        if not token:
+            raise RuntimeError("没有 OPENMETADATA_TOKEN,先跑 scripts/27-configure-openmetadata-bot.sh")
         try:
-            t = _req(f"{OM}/api/v1/tables/name/trino.iceberg.demo.orders?fields=columns")
+            t = _req(f"{OM}/api/v1/tables/name/trino.iceberg.demo.orders?fields=columns",
+                     headers={"Authorization": f"Bearer {token}"})
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"OpenMetadata 查不到 trino.iceberg.demo.orders(HTTP {e.code})")
         cols = t.get("columns") or []
