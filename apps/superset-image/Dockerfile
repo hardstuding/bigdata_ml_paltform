@@ -62,3 +62,18 @@ RUN uv pip install \
 RUN pybabel compile -d /app/superset/translations 2>&1 | tail -3 && \
     echo "编译出的 .mo 个数: $(find /app/superset/translations -name '*.mo' | wc -l)" && \
     test "$(find /app/superset/translations -name '*.mo' | wc -l)" -gt 0
+
+# 汉化的**第二半**:React 主界面的翻译(ADR-077)。
+#
+# 上面的 pybabel compile 只产出 gettext 的 `.mo`,那是给 Flask/FAB 渲染的
+# 页面(登录、管理页)用的。**React 主界面读的是完全另一套东西**:
+# `messages.json`(jed 1.x 格式)。2026-08-27 实测:只编译 .mo 之后,前端
+# 翻译目录里只有 empty_language_pack.json、最大的 JS chunk 里一个中文都没有
+# ——也就是绝大多数人真正在看的界面**仍然全英文**。
+#
+# 官方是在前端构建时用 npm 脚本生成它的,而我们是在官方镜像上加东西、没有
+# 前端构建链。这个脚本从同一份 .po 直接生成等价 JSON,不需要 node。
+COPY build-language-packs.py /tmp/build-language-packs.py
+RUN python3 /tmp/build-language-packs.py /app/superset/translations && \
+    test "$(find /app/superset/translations -name 'messages.json' | wc -l)" -gt 0 && \
+    rm -f /tmp/build-language-packs.py

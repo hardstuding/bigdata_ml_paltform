@@ -40,6 +40,9 @@ table-registration-app)同一个"不用前端框架"的路线,见 ADR-032。
 """
 import concurrent.futures
 import os
+import urllib.request
+import urllib.parse
+import json
 
 import requests
 from flask import Flask, render_template, request
@@ -315,6 +318,78 @@ def my_jobs(username, limit=8):
 ARGO_NAMESPACE = os.environ.get("PLATFORM_ARGO_NAMESPACE", "argo-workflows")
 
 
+# --------------------------------------------------------------- 黄金链路
+#
+# **门户原来只回答"每个工具在不在线",这一块回答"一件真实的事做不做得成"。**
+# 这两个不是一回事——这个平台反复吃的亏就是组件全绿而链路是断的(ADR-079
+# 开头列了四个实例)。工具卡片上的绿点是探端口通不通,这里的绿点是探针**真的
+# 查了一次数据、真的读了一次目录**之后的结果。
+#
+# 数据来自 Prometheus 的 `kube_cronjob_status_last_successful_time`
+# ——探针每条链路一个 CronJob,kube-state-metrics 天然就有这个指标,门户
+# 不需要自己去跑探针,也不需要任何凭据(集群内 Prometheus 免认证)。
+PROM = os.environ.get(
+    "PROMETHEUS_URL",
+    "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
+)
+
+# 链路名 -> 给人看的说明。key 是 CronJob 名字去掉 goldenpath- 前缀。
+GOLDEN_PATHS = {
+    "query": ("查数据", "Trino → Iceberg → MinIO/Hive Metastore → OPA"),
+    "streaming": ("实时数据", "Kafka → Flink → Iceberg(看的是数据新鲜度)"),
+    "catalog": ("数据目录", "Trino 元数据 → OpenMetadata 采集"),
+}
+
+# 多久没成功算"断了"。和 GoldenPathBroken 告警同一个阈值,**故意保持一致**
+# ——门户显红而告警不响(或者反过来)会让人不知道该信哪个。
+GOLDEN_PATH_STALE_SEC = 3600
+
+
+def golden_paths():
+    """每条黄金链路上次做成事是多久以前。取不到就整块降级,不影响别处。"""
+    try:
+        q = urllib.parse.urlencode({
+            "query": 'time() - max by (cronjob) ('
+                     'kube_cronjob_status_last_successful_time'
+                     '{namespace="monitoring", cronjob=~"goldenpath-.*"})'
+        })
+        with urllib.request.urlopen(f"{PROM}/api/v1/query?{q}", timeout=4) as r:
+            data = json.load(r)
+    except Exception:  # noqa: BLE001 - 取不到就降级,门户不能因为它打不开
+        return {"error": "连不上 Prometheus,拿不到链路状态", "rows": []}
+
+    ages = {}
+    for item in data.get("data", {}).get("result", []):
+        name = item["metric"].get("cronjob", "").removeprefix("goldenpath-")
+        try:
+            ages[name] = float(item["value"][1])
+        except (TypeError, ValueError, IndexError):
+            continue
+
+    rows = []
+    for key, (label, chain) in GOLDEN_PATHS.items():
+        age = ages.get(key)
+        rows.append({
+            "label": label,
+            "chain": chain,
+            # 三态而不是两态:"从来没跑过"和"跑过但很久没成功"要分开,
+            # 前者多半是刚部署/探针没起来,后者才是链路真的断了。
+            "state": "unknown" if age is None
+                     else ("ok" if age <= GOLDEN_PATH_STALE_SEC else "broken"),
+            "ago": "—" if age is None else _human_ago(age),
+        })
+    return {"error": None, "rows": rows}
+
+
+def _human_ago(seconds: float) -> str:
+    m = int(seconds // 60)
+    if m < 1:
+        return "刚刚"
+    if m < 60:
+        return f"{m} 分钟前"
+    return f"{m // 60} 小时 {m % 60} 分钟前"
+
+
 @app.route("/")
 def index():
     username = request.headers.get("X-Forwarded-User", "")
@@ -330,6 +405,7 @@ def index():
         categories=categories,
         queues=queue_usage(),
         jobs=my_jobs(username),
+        golden=golden_paths(),
     )
 
 

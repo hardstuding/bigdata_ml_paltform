@@ -47,13 +47,35 @@ superset/translations/ 下:22 个 .po,0 个 .mo,0 个 .json
 **能这么修是因为 Superset 镜像是我们自己构建的**
 (`ghcr.io/hardstuding/bigdata_ml_paltform/superset`),不是官方镜像。
 
+## 第三半:React 主界面读的是另一套翻译(2026-08-27 实测确认)
+
+上一节那个"可能还需要另一份产物"的猜测,实测**成立**。镜像重建后进 pod 看:
+
+```
+编译出的 .mo 个数: 22          ← pybabel compile 生效了
+前端翻译 json:  只有 empty_language_pack.json
+最大的 JS chunk 里的中文:  0 个
+```
+
+也就是说 Superset 的界面分两半,用的是**完全不同的两套翻译产物**:
+
+| 界面 | 读什么 | 谁产出 |
+|---|---|---|
+| Flask / FAB 渲染的(登录、管理页) | gettext 的 `.mo` | `pybabel compile` |
+| **React 主界面**(看板/图表/SQL Lab,绝大多数人真正在看的) | `messages.json`(jed 1.x) | 官方前端构建的 npm 脚本 |
+
+**只做第一半,用户感知到的就是"没汉化"。**
+
+官方是在前端构建时生成那个 JSON 的,而我们的镜像是在官方镜像上加东西、
+没有前端构建链。解法是 `apps/superset-image/build-language-packs.py`:
+从同一份 `.po` 直接生成等价的 jed JSON,不需要 node、不改任何翻译内容。
+转换逻辑先在运行中的 pod 里试过再固化进 Dockerfile——**4053 条真实中文条目**。
+
+两个构建步骤都带 `test ... -gt 0` 断言:哪天上游改了目录结构,构建会失败,
+而不是静默产出一个没有翻译的镜像(这个项目最忌讳的"看起来成功了")。
+
 ## 还没做的
 
-1. **镜像没重新构建验证过。** 下次构建之后要实际打开界面看,不能只看
-   "构建成功"。
-2. **前端可能还需要另一份翻译产物。** Superset 的主界面是 React,它的文案
-   走的是前端的翻译文件(`messages.json`),不是 `.mo`。这个镜像里
-   `.json` 也是 0 个。也就是说编译 `.mo` 之后,**Flask/FAB 渲染的那部分
-   (登录、管理页)会变中文,React 主界面可能仍然是英文**。
-   要彻底汉化可能还需要在构建期跑 Superset 前端的翻译生成步骤——那是更重
-   的一步,等第 1 条验完看实际效果再决定要不要做。
+1. **加了 language pack 的镜像还没构建验证过。** 要实际登录看 React 界面
+   是不是中文,不能只看"构建成功"和"文件存在"。
+2. 其它组件(Airflow / Grafana / OpenMetadata)还是英文,没动。
