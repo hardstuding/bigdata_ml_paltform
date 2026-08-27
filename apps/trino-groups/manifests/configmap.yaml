@@ -12,4 +12,7 @@ metadata:
   namespace: trino
 data:
   group.txt: |
+    algorithm-team:algo001
+    data-analysts:analyst001
     platform-team:admin,zhenghe
+    viewers:ceo001
