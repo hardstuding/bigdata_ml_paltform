@@ -338,6 +338,10 @@ GOLDEN_PATHS = {
     "query": ("查数据", "Trino → Iceberg → MinIO/Hive Metastore → OPA"),
     "streaming": ("实时数据", "Kafka → Flink → Iceberg(看的是数据新鲜度)"),
     "catalog": ("数据目录", "Trino 元数据 → OpenMetadata 采集"),
+    # 这条和上面几条方向相反:探的是"**该拒的有没有被拒**"。
+    # 它红了不代表某个组件坏了,而是**授权可能已经不生效**。
+    "authz": ("权限在生效", "拿一张没授权的表去查,查得通才是故障"),
+    "model": ("模型可取用", "MLflow 注册表 → 模型有 READY 版本"),
 }
 
 # 多久没成功算"断了"。和 GoldenPathBroken 告警同一个阈值,**故意保持一致**

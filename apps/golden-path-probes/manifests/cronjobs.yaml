@@ -159,3 +159,90 @@ spec:
             - name: probe
               configMap:
                 name: golden-path-probes
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: goldenpath-authz
+  namespace: monitoring
+  labels:
+    platform/golden-path: "authz"
+spec:
+  # 比别的探针跑得勤一点:授权失效是"平台门户大开"级别的问题,发现得越早
+  # 越好,而这条探针本身极轻(一条会被拒的 SQL)。
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 180
+      template:
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              command: ["python3", "/probe/probe.py", "authz"]
+              env:
+                - name: TRINO_USER
+                  value: goldenpath_probe
+                - name: TRINO_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trino-service-account
+                      key: password-goldenpath_probe
+                - name: AUTHZ_DENY_TABLE
+                  # 这张表 goldenpath_probe **没有** grant(grants 在
+                  # platform/iam/table-access-grants.csv,只发了 demo.orders
+                  # 和 demo.device_events_stream)。**查得通才是故障。**
+                  value: iceberg.demo.access_test_l1
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - name: probe
+                  mountPath: /probe
+          volumes:
+            - name: probe
+              configMap:
+                name: golden-path-probes
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: goldenpath-model
+  namespace: monitoring
+  labels:
+    platform/golden-path: "model"
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 180
+      template:
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              command: ["python3", "/probe/probe.py", "model"]
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - name: probe
+                  mountPath: /probe
+          volumes:
+            - name: probe
+              configMap:
+                name: golden-path-probes

@@ -35,6 +35,10 @@ data:
     PASSWORD = os.environ.get("TRINO_PASSWORD", "")
     OM = os.environ.get("OPENMETADATA_URL",
                         "http://openmetadata.openmetadata.svc.cluster.local:8585")
+    MLFLOW = os.environ.get("MLFLOW_TRACKING_URI",
+                            # Service 名是 mlflow-mlflow(chart 的 fullname 拼出来的),不是 mlflow
+    # ——从 platform-sdk/platform_sdk/config.py 抄的实际值,不是猜的。
+                            "http://mlflow-mlflow.mlflow.svc.cluster.local:5000")
 
     # Trino 的 https 是 cert-manager 自签的(ADR-016),集群内这一跳不需要
     # 被信任 —— 和 table-registration-app / Superset 连 Trino 的做法一致。
@@ -122,7 +126,67 @@ data:
         return f"目录里有这张表,{len(cols)} 个字段"
 
 
-    PROBES = {"query": probe_query, "streaming": probe_streaming, "catalog": probe_catalog}
+    def probe_authz():
+        """链路四:授权还在不在生效。
+
+        **这条探的是"该拒的有没有被拒",不是"该通的有没有通"。** 前三条链路
+        探的都是"事情做得成";这一条反过来——如果 OPA 悄悄不生效了(策略加载
+        失败、有人加了一条放行所有的规则、grants 同步挂了导致判断失效),
+        前面那些探针**全都还是绿的**,而平台已经门户大开。
+
+        这不是假想:2026-08-26/27 两天里这个控制悄悄坏过两次——
+        `is_platform_admin` 因为 Trino 没配 group provider 从来没触发过
+        (ADR-078),Superset 用共享服务账号导致列级脱敏在 BI 路径上完全
+        不生效(ADR-074)。**两次都是查别的东西时顺手发现的,不是被监控发现的。**
+
+        探法:goldenpath_probe 只被授予了 demo.orders 和 demo.device_events_stream
+        两张表(platform/iam/table-access-grants.csv)。让它去查一张**没有被
+        授予**的表,期望被拒。**查得通才是故障。**
+        """
+        table = os.environ.get("AUTHZ_DENY_TABLE", "iceberg.demo.access_test_l1")
+        try:
+            trino_query(f"select count(*) from {table}")
+        except Exception as exc:  # noqa: BLE001
+            if "PERMISSION_DENIED" in str(exc) or "Access Denied" in str(exc):
+                return f"没有 grant 的表({table})确实被拒了"
+            # 别的错误(表不存在、Trino 挂了)不能当成"授权生效"——那会让这条
+            # 探针在平台整体故障时反而变绿,是最坏的一种假阳性。
+            raise RuntimeError(f"期望 PERMISSION_DENIED,实际是另一种失败:{exc}")
+        raise RuntimeError(
+            f"**{table} 被放行了**,而 goldenpath_probe 并没有它的 grant。"
+            "OPA 的表级授权可能已经不生效——检查 opa 的策略是否加载成功、"
+            "grants 同步 CronJob 是否还在跑。")
+
+
+    def probe_model():
+        """链路五:模型注册表。训练 -> MLflow -> 模型可被取用。
+
+        探的是"**注册表里那个模型还在、而且是 READY**",不是"MLflow 进程活着"
+        ——模型的元数据在 Postgres 里、产物在 MinIO 上,任何一个断了模型都取
+        不出来,而 MLflow 的首页照样打得开。
+
+        刻意不探 KServe 推理:现在集群里一个 InferenceService 都没有
+        (`kubectl get inferenceservice -A` 是空的),探它只会得到一条永远红
+        的告警——**一直红的告警比没有告警更糟**。等真有常驻推理服务了再加。
+        """
+        name = os.environ.get("MODEL_NAME", "demo-rf-classifier")
+        try:
+            d = _req(f"{MLFLOW}/api/2.0/mlflow/registered-models/get?name={name}")
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"MLflow 里查不到模型 {name}(HTTP {e.code})")
+        versions = (d.get("registered_model") or {}).get("latest_versions") or []
+        if not versions:
+            raise RuntimeError(f"模型 {name} 存在,但一个版本都没有")
+        ready = [v for v in versions if v.get("status") == "READY"]
+        if not ready:
+            raise RuntimeError(
+                f"模型 {name} 有 {len(versions)} 个版本,但没有一个是 READY"
+                "(产物可能没上传成功,元数据却写进去了)")
+        return f"{name} 有 {len(ready)} 个 READY 版本"
+
+
+    PROBES = {"query": probe_query, "streaming": probe_streaming,
+              "catalog": probe_catalog, "authz": probe_authz, "model": probe_model}
 
     if __name__ == "__main__":
         name = sys.argv[1]

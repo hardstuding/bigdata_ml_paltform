@@ -28,6 +28,35 @@
 | `goldenpath-query` | `select count(*) from iceberg.demo.orders` ≥ 1 | Trino → Iceberg → MinIO / Hive Metastore → **OPA** |
 | `goldenpath-streaming` | `demo.device_events_stream` 最新一条数据不超过 N 分钟 | Kafka → Flink → Iceberg |
 | `goldenpath-catalog` | OpenMetadata 里 `trino.iceberg.demo.orders` 有字段 | Trino 元数据 → 采集 → 目录 |
+| `goldenpath-authz` | 拿一张**没有 grant** 的表去查,**期望被拒** | OPA 策略 + grants 同步 |
+| `goldenpath-model` | MLflow 注册表里 demo 模型有 READY 版本 | MLflow → Postgres(元数据)+ MinIO(产物) |
+
+### `authz` 这条方向是反的,值得单独说
+
+前四条探的都是"事情做得成";**`authz` 探的是"该拒的有没有被拒"**。
+
+如果 OPA 悄悄不生效了(策略加载失败、有人加了一条放行所有的规则、grants
+同步挂了),**前面几条探针全都还是绿的**,而平台已经门户大开。
+
+这不是假想。2026-08-26/27 两天里这个控制悄悄坏过两次:
+
+- `is_platform_admin` 因为 Trino 没配 group provider,**从来没触发过**
+  ([ADR-078](078-trino-group-provider.md));
+- Superset 用共享服务账号连 Trino,导致列级脱敏和行级过滤在 BI 这条路上
+  **完全不生效**([ADR-074](074-superset-impersonation.md))。
+
+**两次都是查别的东西时顺手发现的,不是被监控发现的。** 这条探针就是为了让
+下一次不用靠运气。
+
+实现上有个细节:探针遇到"别的错误"(表不存在、Trino 挂了)时**不能当成
+授权生效**——那会让它在平台整体故障时反而变绿,是最坏的一种假阳性。所以
+它明确要求错误里出现 `PERMISSION_DENIED`。
+
+### `model` 刻意不探 KServe 推理
+
+集群里现在一个 InferenceService 都没有(`kubectl get inferenceservice -A`
+是空的),探它只会得到一条**永远红**的告警——而一直红的告警比没有告警更糟。
+等真有常驻推理服务了再加。
 
 ### 为什么是"三个 CronJob"而不是"一个 CronJob 跑三条"
 
@@ -67,9 +96,10 @@ prod 30。local-lite 那一档 Flink/Kafka 常是 park 状态,给短了只会一
 ## 还没做的
 
 1. **没部署验证。** 三条探针都还没在集群上跑过一次。
-2. **只覆盖了三条链路。** 算法链路(notebook → submit_job → Argo → MLflow →
-   KServe)和治理链路(建表 → 目录 → 审批 → OPA 生效)还没有探针。算法那条
-   要真跑一次训练,成本高得多,得单独设计"轻量版"。
+2. **算法链路只探到 MLflow 为止。** 完整的 notebook → submit_job → Argo →
+   MLflow → KServe 要真跑一次训练,成本高得多;现在探的是"训练的产物还
+   取得出来",覆盖了这条链上最容易悄悄坏的那一段(元数据在 Postgres、
+   产物在 MinIO,断一个就取不到而 MLflow 首页照样打得开)。
 3. 审计链路故意没做探针:它已经有 `AuditSinkJobNotRunning`(作业级),而要
    探它就得读 `audit.query_events`,那张表[刚刚才收紧](066-trino-query-audit.md)
    成只有 platform-team 能读——为了探针去开一个口子不划算。

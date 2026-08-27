@@ -143,7 +143,7 @@ data:
           },
           "options": {
             "mode": "markdown",
-            "content": "### 这三条链路各自覆盖什么\n\n| 链路 | 一路要经过 | 断了意味着 |\n|---|---|---|\n| **query** | Trino → Iceberg → MinIO / Hive Metastore → OPA | 没人能查数据。OPA 挂了也会红——Trino 是 fail-closed |\n| **streaming** | Kafka → Flink → Iceberg | 实时数据停了。**看的是数据新鲜度,不是 Flink 进程活着**(ADR-062 实测过 Pod Running 而作业已 FAILED)|\n| **catalog** | Trino 元数据 → OpenMetadata 采集 → 目录可查 | 新建的表不会出现在数据目录里 |\n\n探针账号 `goldenpath_probe` **不在 OPA 的豁免名单里**,走和真实用户一样的授权路径——所以 grants 同步挂了它也会红。\n\n详见 [ADR-079](https://github.com/hardstuding/bigdata_ml_paltform/blob/main/docs/decisions/079-golden-path-probes.md)。"
+            "content": "### 这五条链路各自覆盖什么\n\n| 链路 | 一路要经过 | 断了意味着 |\n|---|---|---|\n| **query** | Trino → Iceberg → MinIO / Hive Metastore → OPA | 没人能查数据。OPA 挂了也会红——Trino 是 fail-closed |\n| **streaming** | Kafka → Flink → Iceberg | 实时数据停了。**看的是数据新鲜度,不是 Flink 进程活着**(ADR-062 实测过 Pod Running 而作业已 FAILED)|\n| **catalog** | Trino 元数据 → OpenMetadata 采集 → 目录可查 | 新建的表不会出现在数据目录里 |\n| **authz** | 拿一张**没授权**的表去查 | **方向和上面相反:查得通才是故障。** 授权失效时前面几条全是绿的,而平台已经门户大开 |\n| **model** | MLflow 注册表 → 模型有 READY 版本 | 训练好的模型取不出来。元数据在 Postgres、产物在 MinIO,断一个就取不到,而 MLflow 首页照样打得开 |\n\n探针账号 `goldenpath_probe` **不在 OPA 的豁免名单里**,走和真实用户一样的授权路径。\n\n详见 [ADR-079](https://github.com/hardstuding/bigdata_ml_paltform/blob/main/docs/decisions/079-golden-path-probes.md)。"
           }
         }
       ]
