@@ -1,0 +1,3 @@
+# 数据质量断言模板。只查不写,默认资源就够。
+name: data-quality-check-demo
+script: job.py

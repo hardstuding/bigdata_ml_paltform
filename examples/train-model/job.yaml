@@ -1,0 +1,8 @@
+# 训练模板。训练比查询吃资源,默认值不够。
+name: train-model-demo
+script: job.py
+cpu: "1"
+memory: "2Gi"
+env:
+  EXPERIMENT_NAME: my-experiment
+  REGISTERED_MODEL_NAME: my-model

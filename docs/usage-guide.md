@@ -186,6 +186,34 @@ curl -s localhost:8081/subjects/device-events-avro-value/versions/latest | pytho
 > Confluent 那套文档和客户端库直接可用:
 > https://docs.confluent.io/platform/current/schema-registry/
 
+## 从模板起步,不要从空文件起步
+
+写一个新作业之前先看一眼有什么现成的:
+
+```bash
+platform-submit --list-templates
+platform-submit --new batch-etl --into my-first-etl
+```
+
+四个模板对应四类真实工作:
+
+| 模板 | 什么时候用 |
+|---|---|
+| `hello-job` | 第一次跑,验证连接都通了 |
+| `batch-etl` | 从 Iceberg 读、算、写回 Iceberg —— 最常见的一类 |
+| `train-model` | 取数 → 训练 → 记实验 → **注册模型**(注册 ≠ 上线,是两步) |
+| `data-quality-check` | 业务规则断言,**不合格就让作业失败** |
+
+**模板里已经写进去、你可能想不到要加的两件事**:
+
+- `batch-etl` 写完会**回查一次**再退出。这个平台反复吃过"作业显示成功但
+  数据没落盘"的亏(Iceberg 靠 commit 提交),所以模板不把这步留给你想起来加。
+- `data-quality-check` 检查不通过时**非零退出**,不是打印警告。打印的警告
+  没人看;作业挂了才会有人管。数据质量的价值在于**阻断**,不在于记录。
+
+生成出来的目录里 `job.yaml` 的字段就是 `submit_job()` 的参数,没有另一套
+schema 要学。
+
 ## 提交训练任务 / 跑在集群上
 
 在 notebook 里一行提交,不用写 Argo YAML:

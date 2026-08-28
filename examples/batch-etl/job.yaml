@@ -1,0 +1,6 @@
+# 批处理模板。字段和 platform_sdk.submit.submit_job() 的参数一一对应。
+name: batch-etl-demo
+script: job.py
+# 批处理通常比默认值需要更多内存(要把结果拉回来看一眼)。
+cpu: "500m"
+memory: "1Gi"
