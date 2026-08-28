@@ -56,6 +56,37 @@ port-forward,而 kubectl 权限本身就是平台管理组才有的。再包一�
 一套要维护的凭据,真正的边界在 kubectl 那一层。审批人从 `whoami` 取并记进
 tag,可追溯。
 
+## 实机验证(cloud-full,2026-08-28)
+
+**完整链路跑通了**:训练 → 注册 → 审批 → 部署 → 真实推理 → 回滚守卫。
+
+| 步骤 | 结果 |
+|---|---|
+| `41-approve-model.sh demo-rf-classifier 1` | 打上 approval/approved_by/approved_at,alias `production` → v1 |
+| `11-deploy-...sh` | 打印「将部署 demo-rf-classifier v1(批准人 zhenghe,时间 …)」 |
+| InferenceService | Ready=True |
+| **真实推理请求** | 2 条样本(20 特征)→ 返回 `[0, 1]` |
+| `42-rollback` 无更老版本时 | 拒绝:「当前已经是最老的已批准版本(v1),没有可回退的了」 |
+| `42-rollback ... 99`(没批准过的版本) | 拒绝:「回滚只能回到批准过的版本,否则等于绕过审批」 |
+
+### 中途撞到两个真实缺陷,都不是这次改动引入的
+
+**一、`model_version.source` 是逻辑地址不是存储路径。** MLflow 3.x 给的是
+`models:/m-7cb31…`,KServe 的 storageUri 认不了。第一版**明确报错而不是猜一个
+转换规则**,实测之后才补上正确的解法(`GET /api/2.0/mlflow/logged-models/<id>`
+→ `artifact_uri`)。**这个选择得到了回报**:如果当时随便猜一个路径拼法,部署会
+「成功」,然后几十秒后以 Pod 拉不到模型的形式失败——而那个报错离真正的原因隔着
+好几层。
+
+**二、`kserve-demo` 不在 MinIO 的 NetworkPolicy 白名单里。** storage-initializer
+报 `Could not connect to the endpoint URL`。也就是说 ADR-035 上线之后**这条推理
+链路就已经断了**,而没人发现——因为从那以后没人再跑过 `scripts/11`。
+
+后者还暴露了检查器的一个盲区:`check-networkpolicy-consumers.py` 只扫仓库里的
+manifest,而 `kserve-demo` 是脚本运行时 `kubectl` 建的,它看不到。已加
+`EXTRA_CONSUMERS` 手工登记并写明盲区——**报绿而实际是断的,比没有检查器更糟,
+因为它让人更信任一个并不配被信任的绿灯**。
+
 ## 还没做的
 
 1. **没部署验证。** MLflow 3.x 的 `model_version.source` 到底是 `s3://` 还是
