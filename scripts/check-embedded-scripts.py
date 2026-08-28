@@ -75,6 +75,10 @@ INLINE_ONLY = {
     # 地方**——这个检查器本身就是为了防那个而写的。
     ("apps/golden-path-probes/manifests/configmap.yaml", "probe.py"):
         "只有这一份(源在 templates/,scripts/ 下没有副本),见 ADR-079",
+    # 告警回显接收端(ADR-081)。同上:只有这一份,55 行,只在集群里跑,
+    # scripts/ 下放副本没有意义、只会多一处会漂移的地方。
+    ("apps/alert-echo-sink/manifests/configmap.yaml", "sink.py"):
+        "只有这一份(不在 scripts/ 下留副本),见 ADR-081",
     # 这个是统一镜像的自检 demo 脚本,只在这一处存在,没有 scripts/ 副本。
     ("apps/platform-image/manifests/demo-script-configmap.yaml", "job.py"):
         "只有 ConfigMap 这一份,scripts/ 下没有对应文件",

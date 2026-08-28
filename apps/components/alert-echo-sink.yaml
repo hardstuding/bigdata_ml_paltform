@@ -1,0 +1,21 @@
+# 告警回显接收端(ADR-081)。见 apps/alert-echo-sink/manifests/ 里的说明:
+# 它把"告警能不能送出去"从一条从未验证过的路径,变成一条一直在被验证的路径。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alert-echo-sink
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/alert-echo-sink/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: ["CreateNamespace=true"]

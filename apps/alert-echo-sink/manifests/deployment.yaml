@@ -1,0 +1,65 @@
+# 告警回显接收端(ADR-081)。
+#
+# **它存在的理由不是"测试用的假东西",是把一条一直没被验证过的路径变成
+# 一直在被验证的路径。**
+#
+# 背景:`platform/alertmanager-notification/` 那套外部通知配置结构早就写好了,
+# 但 cloud-full 一直是 `alert_notification_mode: none`——因为没有真实的企业微信/
+# 飞书 webhook 地址(zhenghe 2026-08-22:"等后面上生产来测试")。结果是:
+# **告警规则、Alertmanager、路由配置全都在,而"告警能不能送出去"从来没有被
+# 验证过一次**。真到上生产那天配上 webhook,是第一次跑这条路,那时候出问题
+# 才最麻烦。
+#
+# 这个接收端就是一个**收得下 JSON POST 的终点**:换真实渠道时只要改
+# `alertmanager-webhook` 这个 Secret 里的 url,机制那半已经验过了。
+#
+# 顺带一个实际用处:它把收到的告警**原样存下来并能用 HTTP 取回**,所以能
+# 直接看到"企业微信那边会收到什么样的 payload",而不用先接上真实渠道再猜。
+#
+# 只用标准库,不装依赖,不建镜像——和黄金链路探针同一个模式。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-echo-sink
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: alert-echo-sink}
+  template:
+    metadata:
+      labels: {app: alert-echo-sink}
+    spec:
+      priorityClassName: batch
+      containers:
+        - name: sink
+          image: python:3.12-slim
+          command: ["python3", "/app/sink.py"]
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests: {cpu: 10m, memory: 48Mi}
+            limits: {memory: 96Mi}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            initialDelaySeconds: 3
+          volumeMounts:
+            - name: app
+              mountPath: /app
+      volumes:
+        - name: app
+          configMap:
+            name: alert-echo-sink-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-echo-sink
+  namespace: monitoring
+spec:
+  selector: {app: alert-echo-sink}
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http

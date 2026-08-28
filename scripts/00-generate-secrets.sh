@@ -452,6 +452,23 @@ copy_secret trino platform-sdk-demo trino-service-account
 # (table-access-grants.csv 里给它发了两张 demo 表的 grant),这样它顺带
 # 还验证了"授权链路本身是通的"——用豁免账号探测的话,OPA 的 grants 同步
 # 挂了它也照样绿。
+# 告警外部通知的目的地(ADR-081)。**默认指向集群内的 alert-echo-sink**,
+# 不是留空——留空的话 Alertmanager 会拒绝加载那份 AlertmanagerConfig,
+# 于是"告警能不能送出去"继续处于未验证状态,而这正是要解决的问题。
+#
+# **换成真实渠道就是改这一个 Secret**(企业微信/飞书/自建转换服务都行):
+#   kubectl -n monitoring delete secret alertmanager-webhook
+#   kubectl -n monitoring create secret generic alertmanager-webhook \
+#     --from-literal=url='https://<真实地址>'
+# 机制那一半已经被 echo sink 持续验证着,换地址不用重新趟一遍。
+if kubectl -n monitoring get secret alertmanager-webhook >/dev/null 2>&1; then
+  echo "已存在,跳过: monitoring/alertmanager-webhook(换真实渠道见 scripts/00 里的说明)"
+else
+  kubectl -n monitoring create secret generic alertmanager-webhook \
+    --from-literal=url='http://alert-echo-sink.monitoring.svc.cluster.local/' \
+    && echo "已创建: monitoring/alertmanager-webhook -> 集群内 alert-echo-sink"
+fi
+
 ensure_trino_service_account goldenpath_probe
 copy_secret trino monitoring trino-service-account
 copy_secret minio platform-sdk-demo minio-root

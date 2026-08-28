@@ -25,7 +25,14 @@ tls_issuer_mode: selfsigned
 
 # 告警外部通知渠道:none | webhook。见 ADR-060 的条件生成机制。
 # 集成环境,告警看 Alertmanager 自己的 UI 就够,不往外推。
-alert_notification_mode: none
+# 2026-08-28 从 none 改成 webhook(ADR-081)。**不是因为拿到了真实的企业微信
+# 地址**,是因为"告警能不能送出去"这条路径一直没被验证过——规则、
+# Alertmanager、路由配置全都在,而从来没有一条告警真的被 POST 出去过。
+#
+# 现在指向集群内的 alert-echo-sink(它把收到的 payload 存下来能回看)。
+# **换真实渠道只要改 monitoring/alertmanager-webhook 这个 Secret 里的 url**,
+# 机制那半已经验过了。这样上生产那天不是第一次跑这条路。
+alert_notification_mode: webhook
 
 # Postgres 备份传到哪。默认就是集群自己的 MinIO。
 # **注意:这不是真正的异地备份。** MinIO 就跑在这台云主机上,机器整个出

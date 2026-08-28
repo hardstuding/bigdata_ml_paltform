@@ -1,0 +1,56 @@
+# 告警外部通知:通用 webhook 渠道。
+#
+# **为什么用 AlertmanagerConfig 这个 CR,而不是直接改 kube-prometheus-stack
+# 的 values**:values 里那份 `alertmanager.config` 是 chart 的一部分,里面
+# 已经有一整段"照抄可用"的注释模板(邮件/企业微信/Slack 各一份)。但注释
+# 不会生效,也没有任何机制保证它和现实不脱节——用户要的是"留好配置项、
+# 能够生效",不是"留好说明书"。拆成独立的 CR 之后,开不开这个渠道由
+# environments/<env>/config.yaml 的一个键决定,和这个仓库其它环境差异
+# 走的是同一套机制。
+#
+# **webhook URL 不写在这里**:它通常带鉴权 token,属于敏感值。用
+# `urlSecret` 引用 monitoring 命名空间里的一个 Secret:
+#
+#   kubectl -n monitoring create secret generic alertmanager-webhook \
+#     --from-literal=url='https://<真实的 webhook 地址>'
+#
+# 这个 Secret 没建之前,Alertmanager 会拒绝加载这份配置——**这是有意的**,
+# 比"静默地什么都不发"好:配置错了要能立刻看出来,不要等真出故障时才发现
+# 告警从来没送出去过。
+#
+# **为什么是通用 webhook 而不是企业微信/飞书原生**:企业微信有原生
+# receiver(wechat_configs),飞书没有(payload 格式不兼容,要额外部署一个
+# 转换服务)。通用 webhook 是最小公分母——任何能收 JSON POST 的东西都能接,
+# 包括自建的转换服务。真要用企业微信原生,照
+# platform/apps/kube-prometheus-stack.yaml 里那段注释改这个文件即可,
+# 结构是一样的。
+#
+# **这一档还没有在真实环境验证过**(用户 2026-08-22 明确说等上生产再测)。
+# 配置结构就位、改一个键就生效,不代表通知真的能送达。
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: external-notification
+  namespace: monitoring
+spec:
+  route:
+    receiver: external-webhook
+    groupBy: [alertname, namespace]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    # Watchdog 是 chart 自带的"心跳"告警,设计上永远 firing,不该推到
+    # 外部渠道(推了等于每 4 小时给运维发一条"一切正常")。
+    routes:
+      - receiver: "null"
+        matchers:
+          - name: alertname
+            value: Watchdog
+  receivers:
+    - name: "null"
+    - name: external-webhook
+      webhookConfigs:
+        - urlSecret:
+            name: alertmanager-webhook
+            key: url
+          sendResolved: true
