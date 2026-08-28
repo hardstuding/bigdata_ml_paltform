@@ -19,16 +19,20 @@
 # 一遍的那类问题,只是那次覆盖的是 `pip install`,漏掉了这个走 `curl` 的变种。
 #
 # 版本全部照抄原来 initContainer 里写死的那几个,**一个字节都没改**——
-# 这次改的是"什么时候下载",不是"下载什么"。要升级版本是另一件事,不要和
-# 这次改动混在一起。
-FROM apache/hive:3.1.3
+# 这次改的是"什么时候下载",不是"下载什么"。要升级版本是另一件事。
 
-USER root
+# ---------- 第一阶段:下 jar ----------
+#
+# **用多阶段而不是在 hive 镜像里直接 curl**:第一版就是后者,CI 构建失败。
+# 线索其实一开始就在——原来那两个 initContainer 用的是 `curlimages/curl`
+# 镜像,说明**当时的人也知道 hive 镜像里没有 curl**,只是那个信息藏在
+# "用哪个 initContainer 镜像"里,没有写成一句话。
+#
+# 多阶段还有个好处:下载工具不会进最终镜像,产物只有那三个 jar。
+FROM curlimages/curl:8.11.0 AS jars
 
-# 官方镜像的 /opt/hive/lib 属主是 hive,构建期切 root 只是为了写进去;
-# 运行时仍然由 entrypoint 用原来的用户跑,没有引入新的权限提升。
+WORKDIR /jars
 RUN set -eux; \
-    cd /opt/hive/lib; \
     curl -fsSL -o postgres.jar \
       https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.13/postgresql-42.7.13.jar; \
     curl -fsSL -o hadoop-aws.jar \
@@ -37,10 +41,18 @@ RUN set -eux; \
       https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.271/aws-java-sdk-bundle-1.11.271.jar; \
     # 断言三个都真的下下来了而且不是空文件。没有这一步的话,某次网络抖动
     # 会构建出一个"看起来成功、缺 jar"的镜像,而症状要到运行时才以
-    # ClassNotFoundException 的形式冒出来。
+    # ClassNotFoundException 的形式冒出来——那是最难查的一类。
+    # 用 `wc -c` 而不是 `stat -c%s`:这一层是 busybox,stat 的参数不一样。
     for f in postgres.jar hadoop-aws.jar awssdk-bundle.jar; do \
       test -s "$f" || { echo "!! $f 没下下来或者是空的"; exit 1; }; \
-      echo "$f $(stat -c%s "$f") 字节"; \
+      echo "$f $(wc -c < "$f") 字节"; \
     done
 
+# ---------- 第二阶段:装进 Hive ----------
+FROM apache/hive:3.1.3
+
+# 官方镜像默认 USER=hive(`crane config apache/hive:3.1.3` 确认过),
+# 而 /opt/hive/lib 属主是 root,所以 COPY 要以 root 身份做。
+USER root
+COPY --from=jars --chown=hive:hive /jars/*.jar /opt/hive/lib/
 USER hive

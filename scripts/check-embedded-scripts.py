@@ -65,6 +65,16 @@ INLINE_ONLY = {
         "由 sync-airflow-dags-configmap.py 负责",
     ("apps/airflow/manifests/dags-configmap.yaml", "platform_sdk_demo.py"):
         "由 sync-airflow-dags-configmap.py 负责",
+    # 黄金链路探针(ADR-079)。**它只有这一份**:源文件在
+    # templates/apps-golden-path-probes-manifests/,渲染产物在
+    # apps/golden-path-probes/manifests/,scripts/ 下没有对应副本。
+    #
+    # 为什么不像 flink/kafka 那两个作业那样在 scripts/ 下也放一份"给人看的":
+    # 那个模式存在的理由是那些脚本人要在本地读、要能单独跑;而这段探针只在
+    # CronJob 里跑、120 行、逻辑全在注释里,**多一份副本就是多一处会漂移的
+    # 地方**——这个检查器本身就是为了防那个而写的。
+    ("apps/golden-path-probes/manifests/configmap.yaml", "probe.py"):
+        "只有这一份(源在 templates/,scripts/ 下没有副本),见 ADR-079",
     # 这个是统一镜像的自检 demo 脚本,只在这一处存在,没有 scripts/ 副本。
     ("apps/platform-image/manifests/demo-script-configmap.yaml", "job.py"):
         "只有 ConfigMap 这一份,scripts/ 下没有对应文件",
