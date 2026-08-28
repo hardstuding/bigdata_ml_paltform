@@ -45,7 +45,7 @@ data:
         spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
         # 版本对齐 apps/spark-iceberg-demo/manifests/sparkapplication.yaml 已经
         # 验证过的组合(ADR-036),不是另挑一套。
-        spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
+        spark.jars.packages: "org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.11.0,org.apache.hadoop:hadoop-aws:3.4.2,software.amazon.awssdk:bundle:2.29.52"
         spark.jars.ivy: "/tmp/.ivy2"
         # 2026-08-20 真实踩坑:`spark.jars.packages` 触发的 Ivy 解析直连
         # repo1.maven.org(Maven Central 官方源)在这片网络下会真的卡死不动

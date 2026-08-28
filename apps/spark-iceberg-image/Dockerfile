@@ -17,11 +17,31 @@
 #
 # 三个 jar 的版本和 scripts/feast_feature_repo/feature_store.yaml、
 # apps/argo-workflows-training-image/Dockerfile 里用的完全一致,不是另挑
-# 一套 —— iceberg-spark-runtime 选 1.10.0 是有原因的:1.11.0 起改用
-# Java 17 编译(class file version 61),而这个 Spark 镜像自带的是 Java 11,
-# 用 1.11.0 driver 启动直接 UnsupportedClassVersionError(ADR-036 里逐个
-# 版本二分定位过,不是随便选的)。
-FROM apache/spark:3.5.9-python3
+# 一套。
+#
+# 2026-08-28(ADR-076):Spark 3.5.9 → 4.1.3,整条线一起动,原因是它们本来
+# 就是一个死结——iceberg-spark-runtime 之前锁 1.10.0,是因为 1.11.0 起改用
+# Java 17 编译(class file version 61)而 Spark 3.5 镜像自带 Java 11,driver
+# 启动直接 UnsupportedClassVersionError(ADR-036 逐版本二分定位过);而
+# Iceberg 给 Spark 4.1 只发了 1.11.0 这一个版本。Spark 4 本身要求 Java 17,
+# 所以升 Spark 恰好解开 Iceberg 的天花板,反过来也一样,只能一起升。
+#
+# 连带变的三处(都不是可选项):
+#   - 镜像 tag 从 `-python3` 换成 `4.1.3-scala2.13-java17-python3-ubuntu`
+#     ——Spark 4 官方只发 Scala 2.13,不再有 2.12。
+#   - hadoop-aws 3.3.4 → 3.4.2:必须匹配 Spark 4.1.3 内置的 hadoop-client
+#     (spark-parent POM 里 hadoop.version=3.4.2)。
+#   - AWS SDK v1 的 aws-java-sdk-bundle:1.12.262 → v2 的
+#     software.amazon.awssdk:bundle:2.29.52。Hadoop 3.4.0 起 S3A 迁到了
+#     SDK v2(HADOOP-18073),hadoop-aws:3.4.2 的 POM 里依赖的就是它;
+#     继续带 v1 的包会在初始化 S3AFileSystem 时 ClassNotFoundException。
+#     版本取 Spark POM 的 aws.java.sdk.v2.version,和引擎同一套。
+#
+# Hive Metastore 仍然是 3.1.3,不跟着动 —— 那个版本锁定的原因和 Spark 无关
+# (Iceberg 自带的 Hive Catalog 客户端只会发已被 Hive 4.x 删掉的 `get_table`),
+# apps/hive-metastore/manifests/deployment.yaml 里有完整论证,包括
+# "升到 Spark 4 是不是就不用锁 3.1.3" 这个问题当时查证过的否定结论。
+FROM apache/spark:4.1.3-scala2.13-java17-python3-ubuntu
 
 # 官方镜像默认以非 root 用户(spark)运行,$SPARK_HOME/jars 属主是 root,
 # 构建期要写进去得先切 root,装完切回去 —— 不改变运行时的用户身份。
@@ -29,8 +49,8 @@ USER root
 
 RUN set -eux; \
     cd "${SPARK_HOME}/jars"; \
-    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.10.0/iceberg-spark-runtime-3.5_2.12-1.10.0.jar; \
-    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar; \
-    curl -fsSL -O https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
+    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.1_2.13/1.11.0/iceberg-spark-runtime-4.1_2.13-1.11.0.jar; \
+    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar; \
+    curl -fsSL -O https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.29.52/bundle-2.29.52.jar
 
 USER spark

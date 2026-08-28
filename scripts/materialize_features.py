@@ -35,9 +35,9 @@ _conf.pop("spark.jars.packages", None)
 _conf.pop("spark.jars.repositories", None)
 _conf["spark.jars"] = ",".join(
     [
-        "/opt/spark-jars/iceberg-spark-runtime-3.5_2.12-1.10.0.jar",
-        "/opt/spark-jars/hadoop-aws-3.3.4.jar",
-        "/opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar",
+        "/opt/spark-jars/iceberg-spark-runtime-4.1_2.13-1.11.0.jar",
+        "/opt/spark-jars/hadoop-aws-3.4.2.jar",
+        "/opt/spark-jars/bundle-2.29.52.jar",
     ]
 )
 _builder = SparkSession.builder

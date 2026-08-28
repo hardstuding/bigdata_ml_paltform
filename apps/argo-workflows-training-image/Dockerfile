@@ -36,23 +36,22 @@ FROM python:3.11-slim
 # feast==0.65.0 和已部署的 Feast(quay.io/feastdev/feature-server:0.65.0,
 # 见 apps/feast/manifests/feature-server.yaml)版本对齐——client/server
 # 版本不匹配可能导致 feature_store.yaml/registry 格式不兼容,不是随便
-# 挑的。pyspark==3.5.9 和 apps/feast/feature-server-image/Dockerfile
+# 挑的。pyspark==4.1.3 和 apps/feast/feature-server-image/Dockerfile
 # 用的是同一个版本(那边已经验证过这个版本能跑 Feast 的 Spark offline
 # store),不单独选一个新版本增加不必要的变量。
 #
-# **真实踩坑,记录一下**:`feast[spark]==0.65.0` 这个 extras 语法要求
-# `pyspark>=4.0.0`(`pip install` 直接报 ResolutionImpossible)——但这个
-# 项目的整条 Spark/Iceberg 链路(`feature_store.yaml` 的
-# `spark.jars.packages` 引用的是 `iceberg-spark-runtime-3.5_2.12`,
-# apps/feast/feature-server-image/Dockerfile、这个仓库其它所有跑 Spark
-# 的地方)都锁定在 Spark 3.5 系列,升级到 Spark 4.x 是刻意推迟的独立课题
-# (见 docs/BACKLOG.md"Spark 4.x 评估"那条——不是没想到,是评估过“方向对
-# 但现在不是时候”,牵涉 Scala 2.13/Java 17/`iceberg-spark-runtime-4.x`
-# 一整套变化)。改成不用 extras 语法,直接分别装 `feast==0.65.0`(不带
-# `[spark]`)+ `pyspark==3.5.9`——`feast[spark]` 这个 extras 只是 pip
-# 层面声明"官方验证过的搭配版本范围",不代表 spark_offline_store 这个
-# contrib 模块的实际 Python 代码在 pyspark 3.5 上一定跑不通(这个模块的
-# 源码本身不会因为有没有装 extras 而变化,只是绕开了 pip 的版本强校验)。
+# 依赖这里分别装 `feast==0.65.0`(不带 `[spark]` extras)+ `pyspark`,
+# 不用 `feast[spark]` 的 extras 语法。历史原因是 extras 要求
+# `pyspark>=4.0.0`(不满足时 pip 直接 ResolutionImpossible),而当时整条
+# Spark/Iceberg 链路锁在 3.5 系列。2026-08-28 已经整体升到 Spark 4.1.3
+# (ADR-076),这个冲突本身消失了,但仍然保持分开装:版本由这个仓库统一
+# 钉死(和 apps/spark-iceberg-image、apps/feast/feature-server-image、
+# scripts/feast_feature_repo/feature_store.yaml 同一个版本),不想让
+# extras 的版本范围在某次 feast 升级时把 pyspark 悄悄带走。
+#
+# 注意 Java:pyspark 4 要求 Java 17+。这个镜像装的是 `default-jre-headless`
+# (见下面),在 python:3.11-slim 的 Debian bookworm 上就是 OpenJDK 17,
+# 满足;换基础镜像时要重新确认这一点,不能想当然。
 # 这是这次没有把握、需要实测验证的一处,如果真的踩到运行时 API 不兼容,
 # 再回来处理(可能的方向:等 feast 出一个对 3.5 更宽松的版本,或者接受
 # 升到 Spark 4.x 这个更大的变化)。
@@ -78,7 +77,7 @@ RUN pip install --no-cache-dir \
     pandas==2.2.3 \
     boto3==1.35.36 \
     feast==0.65.0 \
-    pyspark==3.5.9 \
+    pyspark==4.1.3 \
     redis==6.4.0
 # ↑ redis 客户端(2026-08-20 真实踩坑,cloud-full 上跑第一次才暴露):
 # feature_store.yaml 里 online_store.type 配的是 redis(和 Feast Serving/
@@ -105,12 +104,12 @@ RUN pip install --no-cache-dir \
 # scripts/feast_feature_repo/feature_store.yaml 里的
 # spark.jars.packages 保持一致,不是另挑一套。
 RUN mkdir -p /opt/spark-jars \
-    && curl -fsSL -o /opt/spark-jars/iceberg-spark-runtime-3.5_2.12-1.10.0.jar \
-        https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.10.0/iceberg-spark-runtime-3.5_2.12-1.10.0.jar \
-    && curl -fsSL -o /opt/spark-jars/hadoop-aws-3.3.4.jar \
-        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
-    && curl -fsSL -o /opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar \
-        https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
+    && curl -fsSL -o /opt/spark-jars/iceberg-spark-runtime-4.1_2.13-1.11.0.jar \
+        https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.1_2.13/1.11.0/iceberg-spark-runtime-4.1_2.13-1.11.0.jar \
+    && curl -fsSL -o /opt/spark-jars/hadoop-aws-3.4.2.jar \
+        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar \
+    && curl -fsSL -o /opt/spark-jars/bundle-2.29.52.jar \
+        https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.29.52/bundle-2.29.52.jar
 
 # train_demo_model.py 不打进镜像——通过 ConfigMap 挂载(见
 # apps/argo-workflows-training-image/manifests/script-configmap.yaml),

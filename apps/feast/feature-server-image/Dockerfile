@@ -30,6 +30,6 @@ FROM quay.io/feastdev/feature-server:0.65.0
 
 USER root
 RUN microdnf install -y java-17-openjdk-headless && microdnf clean all
-RUN /opt/app-root/bin/pip install --no-cache-dir pyspark==3.5.9
+RUN /opt/app-root/bin/pip install --no-cache-dir pyspark==4.1.3
 
 USER 1001

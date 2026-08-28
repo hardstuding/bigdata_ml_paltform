@@ -10,16 +10,20 @@
 #
 # hadoop-aws 版本特意不跟 Trino/Hive Metastore 那边保持一致(那两处是
 # 3.4.1/3.1.0,各自匹配自己镜像内置的 hadoop-common)——这里必须匹配
-# apache/spark:3.5.9-python3 自己镜像内置的 hadoop-client-api/runtime
-# 版本,实测是 3.3.4(`docker run --entrypoint sh apache/spark:3.5.9-python3
-# -- ls /opt/spark/jars/ | grep hadoop-client` 确认),不是 3.4.1。塞一个
-# 3.4.1 的 hadoop-aws 进去会在真正读表时报
-# ClassNotFoundException: org.apache.hadoop.fs.BulkDelete(这个类是 Hadoop
-# 3.4.0 才加的批量删除 API,3.3.4 里没有)。hadoop-aws 3.3.4 对应的 AWS SDK
-# 也不是 Trino 那边用的 SDK v2(software.amazon.awssdk),是 SDK v1 的
-# aws-java-sdk-bundle:1.12.262(查的是 hadoop-aws:3.3.4 那份 POM 里
-# aws-java-sdk.version 属性)。iceberg-spark-runtime 版本见下面 1.10.0 那条
-# 注释。
+# apache/spark 镜像自己内置的 hadoop-client-api/runtime 版本。
+#
+# 2026-08-28 随 Spark 3.5.9 → 4.1.3 一起改过一次(ADR-076):Spark 4.1.3 的
+# spark-parent POM 里 hadoop.version 是 **3.4.2**(不是 3.5 线的 3.3.4),
+# 所以 hadoop-aws 跟着上 3.4.2。连带的一个不那么显然的变化:Hadoop 3.4.0
+# 起 S3A 已经迁到 AWS SDK v2(HADOOP-18073),hadoop-aws:3.4.2 的 POM 里
+# 依赖的是 `software.amazon.awssdk:bundle`,不再是 SDK v1 的
+# `com.amazonaws:aws-java-sdk-bundle`——照抄旧版本会在初始化 S3AFileSystem
+# 时报 ClassNotFoundException。版本取 Spark POM 里的
+# aws.java.sdk.v2.version = 2.29.52,和引擎保持同一套。
+# 代价是这个 bundle 比 v1 的大(611 MB vs 267 MB),镜像会胖一圈;换成
+# Iceberg 自己的 S3FileIO + iceberg-aws-bundle(60 MB)能省下来,但
+# spark.eventLog.dir 和 Flink 那两条链路都还是走 s3a://,S3A 去不掉,
+# 所以没换。
 #
 # Hive Metastore URI 和 S3A 端点配置照抄 apps/hive-metastore/manifests/
 # core-site-configmap.yaml(和 Trino 连的是同一个 Hive Metastore、同一个
@@ -32,14 +36,14 @@ metadata:
 spec:
   type: Python
   mode: cluster
-  # 2026-08-21:从官方 apache/spark:3.5.9-python3 换成自建镜像——Iceberg/
+  # 2026-08-21:从官方 apache/spark 镜像换成自建镜像——Iceberg/
   # hadoop-aws/aws-sdk 三个 jar 已经在构建期打进 $SPARK_HOME/jars/,不再靠
   # spark.jars.packages 在运行时拉(那条路在这台云主机上会卡死,见
   # apps/spark-iceberg-image/Dockerfile 里的完整说明和实测数据)。
   image: ghcr.io/hardstuding/bigdata_ml_paltform/spark-iceberg@sha256:afbf3cd189045744417d1dc5813fdb31d8664f2e8d080ef512ec947c2012de5b
   imagePullPolicy: IfNotPresent
   mainApplicationFile: local:///opt/spark-demo/spark_iceberg_demo.py
-  sparkVersion: "3.5.9"
+  sparkVersion: "4.1.3"
   sparkConf:
     spark.sql.catalog.iceberg: org.apache.iceberg.spark.SparkCatalog
     spark.sql.catalog.iceberg.type: hive
@@ -70,9 +74,11 @@ spec:
     # 现在都删了——三个 jar 已经在镜像构建期放进 $SPARK_HOME/jars/,driver 和
     # executor 都会自动加载,运行时完全不联网。删掉的两行各自解决过一个真实
     # 问题,理由都搬进了 apps/spark-iceberg-image/Dockerfile,没有丢:
-    #   - iceberg-spark-runtime 锁 1.10.0 不用 1.11.0:后者用 Java 17 编译
-    #     (class file version 61),Spark 镜像自带 JDK 11,driver 直接
-    #     UnsupportedClassVersionError(逐版本二分定位过)。
+    #   - iceberg-spark-runtime 曾经锁在 1.10.0:1.11.0 起用 Java 17 编译
+    #     (class file version 61),而 Spark 3.5 镜像自带 JDK 11,driver 直接
+    #     UnsupportedClassVersionError(逐版本二分定位过)。2026-08-28 升到
+    #     Spark 4.1.3 之后这条天花板没了——Spark 4 本身就要求 Java 17,现在
+    #     用的是 iceberg-spark-runtime-4.1_2.13:1.11.0。
     #   - Ivy 缓存路径要显式指定:spark-operator controller 跑在没有可写
     #     $HOME 的受限用户下。**这条现在自然消失了**,因为压根不再做 Ivy
     #     依赖解析——不是绕过去,是这个问题的前提没有了。

@@ -1,7 +1,7 @@
-# ADR-076:Spark 4.x 评估 —— 暂不升,但它能解开 Iceberg 卡在 1.10.0 的那个结
+# ADR-076:Spark 3.5.9 → 4.1.3 + Iceberg 1.10.0 → 1.11.0(一起升)
 
-日期:2026-08-26
-状态:**评估结论,暂不执行**
+日期:2026-08-26(评估) / 2026-08-28(执行)
+状态:**已执行**
 
 ## 起因
 
@@ -79,3 +79,42 @@ tag 存不存在"的判断会误报。差一点就报了个"我们钉的镜像�
 `scripts/13-run-spark-iceberg-demo.sh` 能用环境变量切镜像,两条链路对着跑
 一遍同一张表——**Iceberg 的价值就在于同一张表多引擎读写,那正好是这次升级
 唯一必须验证的东西**。验完再切换,而不是切换完再验。
+
+
+---
+
+## 2026-08-28:执行
+
+上面写的触发条件("等到有需求真的被 Iceberg 1.10.0 挡住")没有等到,是
+zhenghe 直接问的:既然 Spark 4 和 Iceberg 1.11.0 互为对方的解锁条件,
+"那是不是一起升级就好了"。对——这两条本来就不是两个决定,是一个。拆开
+升任何一边都不成立,继续拖着只是让 3.5 这条线上再多堆一年的东西。
+
+### 实际改的版本(都在 Maven / Docker Hub 上核对过当天的可用版本)
+
+| 项 | 从 | 到 | 为什么是这个值 |
+|---|---|---|---|
+| Spark 镜像 | `apache/spark:3.5.9-python3` | `apache/spark:4.1.3-scala2.13-java17-python3-ubuntu` | 4.1 线最新;Iceberg 只给 4.0/4.1 发 runtime,4.2.0 虽然 GA 了但没有对应 runtime |
+| pyspark | 3.5.9 | 4.1.3 | 和引擎同版本 |
+| iceberg-spark-runtime | `3.5_2.12:1.10.0` | `4.1_2.13:1.11.0` | Spark 4 官方只发 Scala 2.13 |
+| iceberg-flink-runtime | `1.20:1.10.0` | `1.20:1.11.0` | 全平台同一个 Iceberg 版本;Flink 镜像本来就是 java17,没额外代价 |
+| hadoop-aws | 3.3.4 | 3.4.2 | Spark 4.1.3 的 `spark-parent` POM 里 `hadoop.version=3.4.2` |
+| AWS SDK | `com.amazonaws:aws-java-sdk-bundle:1.12.262` | `software.amazon.awssdk:bundle:2.29.52` | **这条最容易漏**:Hadoop 3.4.0 起 S3A 迁到 SDK v2(HADOOP-18073),`hadoop-aws:3.4.2` 的 POM 依赖的是 v2 bundle;继续带 v1 会在初始化 `S3AFileSystem` 时 ClassNotFoundException。版本取 Spark POM 的 `aws.java.sdk.v2.version` |
+
+### 明确没有跟着动的
+
+- **Hive Metastore 仍然是 3.1.3**。这个版本锁定和 Spark 无关:Iceberg 自带的
+  Hive Catalog 客户端只会发 Hive 4.x 已经删掉的 `get_table`
+  (HIVE-26537)。2026-08-15 专门查证过"升到 Spark 4 是不是就不用锁 3.1.3"
+  ——结论是不能,SPARK-45265 修的是 Spark 自己的 HiveExternalCatalog,
+  不是 Iceberg 那份独立的 Thrift 客户端(证据:apache/iceberg#13572)。
+  完整论证在 `apps/hive-metastore/manifests/deployment.yaml` 顶部。
+- **Flink 侧的 hadoop-aws / aws-sdk**。它匹配的是 flink 镜像自己的 hadoop,
+  和 Spark 内置的那套无关,一起动只会多一个变量。
+
+### 一个被认真考虑过、但没做的取舍
+
+SDK v2 的 bundle 是 611 MB,v1 是 267 MB,镜像会胖 350 MB。换成 Iceberg
+自己的 S3FileIO + `iceberg-aws-bundle`(60 MB)能省下来,但 `spark.eventLog.dir`
+和 Flink 那两条链路都还是 `s3a://`,S3A 去不掉,换了等于两套 S3 客户端
+并存。所以没换。

@@ -13,17 +13,21 @@
 #     iceberg-flink-runtime 和 flink-connector-kafka 都还在正常发新版本
 #     的最新 1.x 分支(Flink 2.x 已发布到 2.3.0,但那条线要求的连接器/
 #     生态还在快速变动中,这个仓库其它组件——Kafka 4.3.0、Iceberg
-#     1.10.0——都还是稳定线,不跟进 Flink 2.x 这条更激进的线)。
+#     1.11.0——都还是稳定线,不跟进 Flink 2.x 这条更激进的线)。
 #   - apache-flink==1.20.5(PyPI,和 Flink 核心版本完全对齐,PyFlink 的
 #     Python API 版本必须和集群跑的 Flink 版本一致,这是 PyFlink 的硬性
 #     要求,不是建议)。
-#   - iceberg-flink-runtime-1.20:1.10.0——Iceberg 官方给 Flink 1.20 单独发
+#   - iceberg-flink-runtime-1.20:1.11.0——Iceberg 官方给 Flink 1.20 单独发
 #     了一份 runtime jar(Maven Central 确认存在),版本号故意和
 #     apps/spark-iceberg-image、apps/argo-workflows-training-image、
 #     scripts/feast_feature_repo/feature_store.yaml 用的 iceberg-spark-
-#     runtime 保持同一个 1.10.0,不是另挑一套——这个仓库现在所有引擎读写
+#     runtime 保持同一个 1.11.0,不是另挑一套——这个仓库现在所有引擎读写
 #     的是同一份 Iceberg 表格式,版本不一致会增加"这张表某个引擎读不了"
-#     的风险面,没有理由不统一。
+#     的风险面,没有理由不统一。2026-08-28 从 1.10.0 一起抬到 1.11.0
+#     (ADR-076):1.11.0 要 Java 17,这个 base 本来就是 java17,Flink 这边
+#     没有额外代价;真正被 Java 11 卡住的是 Spark 3.5,那条线同时升到了
+#     Spark 4.1.3。Flink 侧的 hadoop-aws/aws-sdk 不跟着 Spark 改——它匹配的
+#     是 flink 镜像自己的 hadoop,和 Spark 内置的那套无关。
 #   - flink-connector-kafka(SQL 版,fat jar 自带 kafka-clients,不用额外
 #     管理 kafka-clients 版本):3.4.0-1.20,Maven Central 上 Flink 1.20
 #     线最新的一版。Kafka broker 是 4.3.0(见 apps/kafka/manifests/
@@ -57,7 +61,7 @@ RUN set -eux; \
 
 RUN set -eux; \
     cd "${FLINK_HOME}/lib"; \
-    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.10.0/iceberg-flink-runtime-1.20-1.10.0.jar; \
+    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.11.0/iceberg-flink-runtime-1.20-1.11.0.jar; \
     curl -fsSL -O https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.4.0-1.20/flink-sql-connector-kafka-3.4.0-1.20.jar; \
     curl -fsSL -O https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-api/3.3.4/hadoop-client-api-3.3.4.jar; \
     curl -fsSL -O https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.3.4/hadoop-client-runtime-3.3.4.jar; \

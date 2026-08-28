@@ -17,7 +17,7 @@ localhost,同一份文件能在人手动跑(port-forward)和 Argo Workflows
 里跑(集群内部 Service DNS)两种场景下工作,调用方负责设置这些变量。
 
 依赖(见 apps/argo-workflows-training-image/Dockerfile):
-    feast==0.65.0 pyspark==3.5.9 mlflow-skinny scikit-learn pandas redis
+    feast==0.65.0 pyspark==4.1.3 mlflow-skinny scikit-learn pandas redis
 """
 import os
 
@@ -73,9 +73,9 @@ _spark_conf.pop("spark.jars.packages", None)
 _spark_conf.pop("spark.jars.repositories", None)
 _spark_conf["spark.jars"] = ",".join(
     [
-        "/opt/spark-jars/iceberg-spark-runtime-3.5_2.12-1.10.0.jar",
-        "/opt/spark-jars/hadoop-aws-3.3.4.jar",
-        "/opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar",
+        "/opt/spark-jars/iceberg-spark-runtime-4.1_2.13-1.11.0.jar",
+        "/opt/spark-jars/hadoop-aws-3.4.2.jar",
+        "/opt/spark-jars/bundle-2.29.52.jar",
     ]
 )
 _builder = SparkSession.builder
