@@ -76,6 +76,7 @@ enabled_components:
   - network-policies.yaml
   - opa.yaml
   - golden-path-probes.yaml
+  - alert-echo-sink.yaml
   - openmetadata-db-init.yaml
   - openmetadata.yaml
   - openmetadata-quality-alerts.yaml
