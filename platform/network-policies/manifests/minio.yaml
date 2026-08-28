@@ -104,6 +104,22 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: platform-sdk-demo
+        - namespaceSelector:
+            matchLabels:
+              # kserve-demo(2026-08-28 补)。KServe 的 storage-initializer 要从
+              # MinIO 拉模型产物,不放行的话推理服务永远起不来,报
+              #   Could not connect to the endpoint URL: "http://minio.minio...:9000/mlflow"
+              #
+              # **这个遗漏是怎么躲过检查的**:`scripts/check-networkpolicy-consumers.py`
+              # 扫的是仓库里的 manifest,而 kserve-demo 这个命名空间是
+              # `scripts/11-deploy-demo-inference-service.sh` **运行时 kubectl
+              # 建出来的**(它是一次性 demo 资源,不归 ArgoCD 管),所以检查器
+              # 看不到它。结果就是:NetworkPolicy 上线(ADR-035)之后这条推理
+              # 链路其实已经断了,而没人发现——因为从那以后没人再跑过 scripts/11。
+              #
+              # 和 08-27 发现"MLflow 注册表空了三天"是同一类:**能力表记的是
+              # 某天验证过,而验证过的东西后来被别的改动打断了**。
+              kubernetes.io/metadata.name: kserve-demo
         # flink(2026-08-22 新增,docs/decisions/062-flink-streaming-pipeline.md):
         # Flink 流式作业的 JobManager/TaskManager 直连 MinIO(S3A)写
         # Iceberg warehouse——和 spark-operator 是同一类需求,提前加上,

@@ -33,6 +33,17 @@ REST API 把作业提交给 `seatunnel-0`,真正连 Hive Metastore 的是 seatun
 
 用法:
     python3 scripts/check-networkpolicy-consumers.py
+
+
+**已知盲区(2026-08-28 实测撞到)**:这个检查器只扫**仓库里的 manifest**。
+`scripts/11-deploy-demo-inference-service.sh` 在运行时用 kubectl 建
+`kserve-demo` 命名空间并在里面拉 MinIO 的模型产物——检查器看不到它,于是
+NetworkPolicy 上线(ADR-035)之后那条推理链路其实已经断了,而没人发现,
+因为从那以后没人再跑过 scripts/11。
+
+下面的 EXTRA_CONSUMERS 就是为这类"命名空间不在 git 里"的消费者准备的:
+**手工登记,并写明它由哪个脚本创建**。手工登记不优雅,但比"检查器报绿而
+实际是断的"强——后者会让人更信任这个检查器,而它并不配。
 """
 import re
 import sys
@@ -114,6 +125,14 @@ def consumer_namespaces(path: Path, dns: str) -> set[str]:
     return found
 
 
+# 命名空间不在仓库 manifest 里、由脚本运行时创建的消费者。
+# 格式:命名空间 -> (它要访问的服务, 由谁创建)
+EXTRA_CONSUMERS = {
+    "kserve-demo": ("minio.minio.svc.cluster.local",
+                    "scripts/11-deploy-demo-inference-service.sh 运行时 kubectl 创建"),
+}
+
+
 def main() -> None:
     problems = []
     for dns, (policy_rel, policy_name) in SERVICES.items():
@@ -149,7 +168,15 @@ def main() -> None:
                 continue
             problems.append((dns, policy_rel, policy_name, ns, files))
 
-        print(f"{dns}: 白名单 {len(allowed)} 个命名空间,扫到 {len(consumers)} 个引用方")
+        # 登记在册、但命名空间不在 git 里的消费者(见文件头部「已知盲区」)
+        for ns, (service, who) in EXTRA_CONSUMERS.items():
+            if service == dns and ns not in allowed:
+                problems.append((dns, policy_rel, policy_name, ns,
+                                 [f"(不在 git 里:{who})"]))
+
+        extra_here = sum(1 for _, (svc, _) in EXTRA_CONSUMERS.items() if svc == dns)
+        print(f"{dns}: 白名单 {len(allowed)} 个命名空间,扫到 {len(consumers)} 个引用方"
+              + (f",另有 {extra_here} 个手工登记的(命名空间不在 git 里)" if extra_here else ""))
 
     if problems:
         print("\n!! 发现可能漏加白名单的消费者:", file=sys.stderr)
