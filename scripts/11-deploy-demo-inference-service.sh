@@ -27,24 +27,64 @@ LOG_FILE="/tmp/kserve-demo-deploy.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 NS="kserve-demo"
+# 连 MLflow 查"哪个版本被批准了"(ADR-080)。原来这个脚本只连 MinIO,
+# 因为它是直接翻对象存储挑最新目录的;现在要问注册表,所以多一个 port-forward。
+kubectl port-forward -n mlflow svc/mlflow-mlflow 15500:5000 >> "$LOG_FILE" 2>&1 &
+MLFLOW_PF=$!
+trap 'kill $MLFLOW_PF 2>/dev/null || true' EXIT
+for _ in $(seq 1 30); do
+  curl -s --max-time 2 http://127.0.0.1:15500/health >/dev/null 2>&1 && break
+  sleep 1
+done
+
 MINIO_USER=$(kubectl get secret -n minio minio-root -o jsonpath='{.data.rootUser}' | base64 -d)
 MINIO_PASS=$(kubectl get secret -n minio minio-root -o jsonpath='{.data.rootPassword}' | base64 -d)
 
-# 挑 MinIO 里时间戳最新的一个 model 目录(scripts/09 可能被重复跑过,mlflow
-# 3.x 的 model registry 用 model_id 而不是老式 run_id/artifacts/model 路径)。
-MODEL_URI=$(python3 -c "
-import boto3
-s3 = boto3.client('s3', endpoint_url='http://localhost:9000', aws_access_key_id='${MINIO_USER}', aws_secret_access_key='${MINIO_PASS}')
-paginator = s3.get_paginator('list_objects_v2')
-latest = None
-for page in paginator.paginate(Bucket='mlflow', Prefix='2/models/'):
-    for obj in page.get('Contents', []):
-        if obj['Key'].endswith('/MLmodel'):
-            if latest is None or obj['LastModified'] > latest[0]:
-                latest = (obj['LastModified'], obj['Key'])
-prefix = latest[1].rsplit('/', 1)[0]
-print(f's3://mlflow/{prefix}')
-")
+# **只部署被批准过的那个版本**(ADR-080,2026-08-28)。
+#
+# 这里原来的做法是"挑 MinIO 里时间戳最新的一个 model 目录"——注释里自己
+# 写着那是权宜之计。后果比不优雅严重:没有版本概念 ⇒ 谈不上回滚(出事了
+# 不知道切回哪个);没有审批 ⇒ 任何人跑一次训练,产物就自动成了下次上线的
+# 那个;甚至可能上线一个失败的或纯实验性的产物,只因为它最新。
+#
+# 现在改成:认 MLflow 注册表里 `production` 这个 alias 指向的版本。
+# alias 由 `scripts/41-approve-model.sh` 在审批时设置,`scripts/42` 回滚时
+# 改。**"批准"和"会被部署"是同一个动作的两面**,不会出现"批了没生效"或者
+# "没批却上线了"。
+MODEL_NAME="${MODEL_NAME:-demo-rf-classifier}"
+MODEL_URI=$(python3 - "${MODEL_NAME}" <<'PYEOF'
+import json, sys, urllib.error, urllib.request
+
+model = sys.argv[1]
+B = "http://127.0.0.1:15500"
+try:
+    mv = json.load(urllib.request.urlopen(
+        f"{B}/api/2.0/mlflow/registered-models/alias?name={model}&alias=production",
+        timeout=30))["model_version"]
+except urllib.error.HTTPError as e:
+    raise SystemExit(
+        f"!! {model} 没有 production 这个 alias(HTTP {e.code})。\n"
+        f"   **这不是 bug,是审批没做**:先跑\n"
+        f"     ./scripts/41-approve-model.sh {model} <版本号>\n"
+        f"   批准一个版本之后再来部署。拒绝部署未经批准的模型是有意的。")
+
+tags = {t["key"]: t["value"] for t in mv.get("tags", [])}
+if tags.get("approval") != "approved":
+    raise SystemExit(f"!! v{mv['version']} 上没有 approval=approved 的标记——"
+                     "alias 可能是手工改的,绕过了审批。拒绝部署。")
+
+source = mv.get("source") or ""
+if not source.startswith("s3://"):
+    # MLflow 3.x 有时给的是 models:/m-<id> 这种逻辑地址,KServe 认不了,
+    # 要换成真实的 artifact 路径。
+    raise SystemExit(f"!! 版本 source 不是 s3:// 地址而是 {source!r},"
+                     "KServe 的 storageUri 认不了。需要在这里补一次转换。")
+print(source)
+sys.stderr.write(f"   将部署 {model} v{mv['version']}"
+                 f"(批准人 {tags.get('approved_by','?')},"
+                 f"时间 {tags.get('approved_at','?')})\n")
+PYEOF
+)
 echo "MODEL_URI=${MODEL_URI}"
 
 echo "=== 建 namespace / S3 凭据 / ServiceAccount ==="
