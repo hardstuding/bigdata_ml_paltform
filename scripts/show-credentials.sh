@@ -25,6 +25,7 @@
 #   ./scripts/show-credentials.sh --show       # 打印明文(慎用,会留在终端历史里)
 #   ./scripts/show-credentials.sh --show trino # 只看某个关键字相关的
 #   ./scripts/show-credentials.sh --audit-file # 逐行检查 secrets/generated-credentials.txt
+#   ./scripts/show-credentials.sh --audit-file --file=secrets/别的.txt  # 检查别的文件
 #                                              # 里哪些条目已经失效(不打印任何明文)
 #   ./scripts/show-credentials.sh --write-pruned  # 同上,并把"只保留有效条目"的结果
 #                                              # 写到 secrets/generated-credentials.pruned.txt
@@ -39,11 +40,16 @@ SHOW=0
 AUDIT=0
 PRUNE=0
 FILTER=""
+CRED_FILE="secrets/generated-credentials.txt"
 for arg in "$@"; do
   case "$arg" in
     --show) SHOW=1 ;;
     --audit-file) AUDIT=1 ;;
     --write-pruned) AUDIT=1; PRUNE=1 ;;
+    # 2026-08-28:--audit-file 原本把路径写死成 secrets/generated-credentials.txt,
+    # 结果 `--audit-file 另一个文件` 会被当成过滤词吃掉,静默审了错的文件——
+    # 输出看起来完全正常(还是那 82 行),很容易信了。改成可以带路径。
+    --file=*) CRED_FILE="${arg#--file=}" ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) FILTER="$arg" ;;
   esac
@@ -103,12 +109,12 @@ fi
 
 if [ "$AUDIT" = "1" ]; then
   echo
-  echo "=== 逐行检查 secrets/generated-credentials.txt ==="
+  echo "=== 逐行检查 ${CRED_FILE} ==="
   echo "(只比对指纹,不打印任何明文)"
-  PRUNE="$PRUNE" python3 - <<'PYEOF'
-import base64, hashlib, pathlib, re, subprocess
+  PRUNE="$PRUNE" CRED_FILE="$CRED_FILE" python3 - <<'PYEOF'
+import base64, hashlib, os, pathlib, re, subprocess
 
-f = pathlib.Path("secrets/generated-credentials.txt")
+f = pathlib.Path(os.environ.get("CRED_FILE", "secrets/generated-credentials.txt"))
 if not f.exists():
     print("  没有这个文件,不用清理。")
     raise SystemExit(0)
