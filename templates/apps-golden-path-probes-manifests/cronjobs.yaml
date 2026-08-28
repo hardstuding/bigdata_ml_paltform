@@ -1,3 +1,15 @@
+# startingDeadlineSeconds 一律设成**和自己的调度周期相同**(*/10 → 600,
+# */30 → 1800),不是随便取的 120。
+#
+# 2026-08-28 实测:cloud-full 开机之后,`*/30` 的 catalog 探针在门户上红了
+# 27 分钟——不是链路真的断了,是开机那一刻上一个整点已经过去超过 120 秒,
+# CronJob 控制器直接跳过,只能等下一个半点。deadline 和周期对齐之后,含义
+# 变成"开机时如果上一个计划时刻还在本周期内,就立刻补跑一次",开机后第一
+# 眼看到的就是真实状态。周期内最多补跑 1 次,不会触发 k8s 的
+# "too many missed start times (>100)" 保护。
+#
+# 同一类问题在 OpenMetadata 那边更严重(它写死 60 秒,结果三个采集/质量
+# CronJob 建出来 5 天一次都没跑过),见 scripts/fix-openmetadata-cronjob-deadline.sh。
 # 黄金链路探针的 CronJob(ADR-079)。**这是渲染产物的源文件**,改这里。
 #
 # **三条链路三个 CronJob,不是一个 CronJob 跑三条。** 这样
@@ -23,7 +35,7 @@ spec:
   failedJobsHistoryLimit: 3
   # 探针本身卡住也算失败:不设这个的话,一个卡死的探针会让
   # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
-  startingDeadlineSeconds: 120
+  startingDeadlineSeconds: 600
   jobTemplate:
     # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
     # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
@@ -75,7 +87,7 @@ spec:
   failedJobsHistoryLimit: 3
   # 探针本身卡住也算失败:不设这个的话,一个卡死的探针会让
   # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
-  startingDeadlineSeconds: 120
+  startingDeadlineSeconds: 600
   jobTemplate:
     # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
     # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
@@ -133,7 +145,7 @@ spec:
   failedJobsHistoryLimit: 3
   # 探针本身卡住也算失败:不设这个的话,一个卡死的探针会让
   # last_successful_time 一直不更新,而 Job 永远不结束、也不算 Failed。
-  startingDeadlineSeconds: 120
+  startingDeadlineSeconds: 1800
   jobTemplate:
     # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
     # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
@@ -192,7 +204,7 @@ spec:
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
-  startingDeadlineSeconds: 120
+  startingDeadlineSeconds: 300
   jobTemplate:
     # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
     # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
@@ -247,7 +259,7 @@ spec:
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
-  startingDeadlineSeconds: 120
+  startingDeadlineSeconds: 1800
   jobTemplate:
     # **标签要打在 jobTemplate 上,不能只打在 CronJob 上** —— CronJob 自己的
     # labels 不会传给它生出来的 Job,而下面那条 ArgoCD 自定义健康检查认的
@@ -289,7 +301,7 @@ spec:
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
-  startingDeadlineSeconds: 120
+  startingDeadlineSeconds: 900
   jobTemplate:
     metadata:
       labels:
