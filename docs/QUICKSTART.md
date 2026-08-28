@@ -104,12 +104,26 @@ wf = submit_job("my-job", "train.py")                       # 丢到集群上跑
 ## 第 6 步:训练一个模型并上线
 
 ```bash
-./scripts/09-train-demo-model.sh          # 训练,产物记进 MLflow
-./scripts/11-deploy-demo-inference-service.sh   # 从 MLflow 拉模型,用 KServe 起在线推理服务
+./scripts/09-train-demo-model.sh          # 训练,产物注册进 MLflow 模型注册表
+./scripts/41-approve-model.sh demo-rf-classifier 1 "离线指标达标,同意上线"
+./scripts/11-deploy-demo-inference-service.sh   # 部署被批准的那个版本(KServe)
 ```
 
-**这一步跑通意味着**:算法工程师从"在 notebook 里试出一个模型"到"这个
-模型有一个能被调用的 HTTP 接口",全程不需要找运维。
+**中间那步不能跳**:`scripts/11` 只部署带 `approval=approved` 标记的版本,
+没盖章的直接拒绝(ADR-080)。这不是形式主义——在加这道门之前,上线的是
+"MinIO 里时间戳最新的那个目录",意味着任何人跑一次训练、哪怕是失败的或
+纯实验性的产物,都会自动成为下次上线的东西,而且出事了没有版本概念、
+无从回滚。
+
+出事了往回切:
+
+```bash
+./scripts/42-rollback-model.sh demo-rf-classifier   # 切回上一个被批准过的版本
+```
+
+**这三步跑通意味着**:算法工程师从"在 notebook 里试出一个模型"到"这个
+模型有一个能被调用的 HTTP 接口",全程不需要找运维;而平台这边知道线上
+跑的是哪一个版本、谁批的、出事往哪回退。
 
 > MLflow:https://mlflow.org/docs/latest/ ·
 > KServe:https://kserve.github.io/website/
