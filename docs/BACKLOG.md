@@ -538,6 +538,23 @@ GitHub Pages 巨型 index.yaml 的 Application,一旦需要真正重新同步
 
 3 台新机器 × 全量镜像,方案没定之前不要租。
 
+**2026-08-28 实测,这条从"以后再说"升级成"已经在挡路了"**:升 Spark 4
+之后镜像大了 350MB(AWS SDK v2 的 bundle 一个层就 570MB),四个新镜像
+在云主机上**全部 ImagePullBackOff**——旧 pod 还在跑所以没断服务,但新
+版本根本上不去。当天量到的数字:
+
+- kubelet 拉:`Failed to pull image ... context canceled`(进度超时打断)
+- `docker pull` 直连 ghcr.io:**25 秒 0 字节**,`/data/docker` 完全不增长
+- `ghcr.nju.edu.cn`:manifest 拿得到(HTTP 200),但拉 blob 30 秒超时,
+  **兜底方案 2 这次不成立**
+- 同一时间小镜像(platform-portal,约 100MB)拉得下来——不是 GHCR 挂了,
+  是大 blob 过不去
+
+最后是用 `scripts/38-ship-image-to-cloud.sh` 一个一个搬 tar 过去的(本机
+crane 拉 4 分钟,rsync 上传约 5 MB/s)。**这个办法能用但不可持续**:每次
+改镜像都要人在场手工搬,和"一键部署"是直接冲突的。方案 1(阿里云 ACR)
+需要用户提供凭据,这是现在真正的阻塞点。
+
 ### 2.5 扩大 CI
 
 **已迈出几步**(chart 渲染校验、DAG 单一源码、app ConfigMap 单一源码、
