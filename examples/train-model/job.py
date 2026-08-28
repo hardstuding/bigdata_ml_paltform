@@ -43,5 +43,8 @@ with mlflow.start_run(run_name="train-model-template"):
 
 print(f"训练完成:accuracy={acc:.3f},模型已注册为 {MODEL_NAME}")
 
-# 上线看 scripts/11-deploy-demo-inference-service.sh —— 它从注册表拉模型
-# 起 KServe 推理服务。**注册 ≠ 上线**,这是两步。
+# 上线是**另外两步**,不会因为训练完就自动发生:
+#   ./scripts/41-approve-model.sh <模型名> <版本号> "批注"   # 盖章
+#   ./scripts/11-deploy-demo-inference-service.sh            # 部署被批准的那版
+# scripts/11 只认带 approval=approved 标记的版本,没盖章直接拒绝(ADR-080)。
+# **注册 ≠ 批准 ≠ 上线**,是三件事。
