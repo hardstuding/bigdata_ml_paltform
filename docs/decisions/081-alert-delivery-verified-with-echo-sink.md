@@ -56,6 +56,37 @@ Alertmanager 分组 → 路由匹配 → receiver POST 出去——一直有东�
 把 `alert_notification_mode` 改回 `none`、从 `enabled_components` 里去掉它即可
 ——但那样就回到"未知"状态,这个取舍要明确知道自己在换什么。
 
+## 实机验证(cloud-full,2026-08-28)
+
+往 Alertmanager 推一条真实告警(`POST /api/v2/alerts`),然后:
+
+```
+sink 日志:  收到 1 条告警: ['EchoSinkEndToEndTest'] status=firing
+GET /alerts:receiver = monitoring/external-notification/external-webhook
+            summary  = 验证告警能不能送到外部终点
+            externalURL = http://kube-prometheus-stack-alertmanager.monitoring:9093
+```
+
+**这条路径以前从来没有被走通过一次。** 现在走通了,而且 receiver 名字确认了
+它走的正是 `AlertmanagerConfig` 里那份配置(不是 chart 的默认 null receiver)
+——也就是说 `alertmanagerConfigSelector` / `MatcherStrategy` 那两处配置是对的,
+而它们恰恰是最容易静默失效的地方。
+
+`GET /alerts` 拿到的就是**外部渠道会收到的完整 payload**。要调告警文案,
+照着这个改就行。
+
+### 中途犯的一个错,值得记
+
+第一次提交时写了"cloud-full 启用它",实际**没生效**:我用
+`t.replace("  - prometheus-rules.yaml\n", ...)` 往 `enabled_components` 里加,
+而 `prometheus-rules` 是 **platform 层的 app**、根本不在那个列表里。
+replace 不匹配就是静默无操作,而我**没有加断言**——于是提交、推送、同步全都
+"成功",直到查 ArgoCD 才发现应用不存在。
+
+**只验证了"我做了一个操作",没验证"操作真的改到了东西"。** 同一个模式今天
+已经出现过三次(`re.sub` 的 `\1` 被当成八进制、YAML 重复键静默覆盖、
+jobTemplate 标签没传给 Job)。
+
 ## 还没做的
 
 1. **没部署验证。** 要验的是:AlertmanagerConfig 真的被 Alertmanager 收编、

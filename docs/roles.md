@@ -59,7 +59,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 指标 | ✅ | kube-prometheus-stack,Grafana 接 Keycloak SSO(本次会话端到端验证过登录) |
 | 日志 | ✅ | Loki + Alloy 采集全部 pod stdout,和指标同一个 Grafana 界面(ADR-020) |
 | 告警产生 | ✅ | Alertmanager 已开,chart 自带规则生效,抓到过真实问题(ADR-034) |
-| 告警送达 | 🟡 | **7 条规则,质量/新鲜度那条实机验证过端到端**(ADR-071/073):造了一条故意失败的断言 → CronJob 检出 → 推进 Alertmanager,`DataQualityCheckFailed` 和 `DataQualityCheckStale` 两条路径都验过,告警文案里带 OpenMetadata 给的真实原因。**`BackupJobFailed` 上线当场就抓到一个真实失败的备份任务**。仍然**没有外部通知渠道**,告警停在 Alertmanager 界面里(卡真实凭据) |
+| 告警送达 | ✅ | **2026-08-28 端到端验证通过**(ADR-081):告警从 Alertmanager 出去、POST 到外部终点、payload 完整可见。在这之前**这条路径一次都没有跑过**——规则、路由、receiver 全都在,而「能不能送出去」是未知的。现在终点是集群内的 alert-echo-sink,**换真实渠道只要改一个 Secret 的 url**,机制那一半一直有真实告警流量在验证。`GET /alerts` 能直接看到企业微信那边会收到什么 payload |
 | 数据质量断言 | ✅ | OpenMetadata 自带 Data Quality(ADR-065/070),三条断言 + 一条新鲜度断言实机跑通;用一条故意失败的探针验证过「绿灯能变红」。新鲜度实测 `insertedRows=1640`。局限:覆盖两张表,断言失败时还没有告警通道 |
 | 备份 / 恢复 | ✅ | Postgres 每日备份,恢复演练验证过(ADR-033) |
 | 资源治理(组件级上限) | ✅ | ResourceQuota / LimitRange / PriorityClass(ADR-041)——防「单个组件失控拖死机器」 |
