@@ -50,6 +50,9 @@ jobs:
       - name: platform/iam 三份数据自洽(每个人都得属于某个组)
         run: python3 scripts/check-iam-consistency.py
 
+      - name: 每个要构建的镜像都有 paths 触发(漏了的话改 Dockerfile 不会重建)
+        run: python3 scripts/check-build-triggers.py
+
       - name: ArgoCD 自定义健康检查的 Lua 真跑一遍
         run: |
           pip install --quiet lupa pyyaml pytest
