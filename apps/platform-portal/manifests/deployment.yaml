@@ -34,7 +34,7 @@ spec:
           # 同一次重新构建),对应 commit
           # eac7f6052f00883fe46fd076248a224eecce695d(2026-08-23 ADR-067 那次改造)。
           # 已核实是 amd64+arm64 双架构 manifest list。
-          image: ghcr.io/hardstuding/bigdata_ml_paltform/platform-portal@sha256:7bca54034c33163924e6794368c9d8f458b210f14651fa90826de67714d15fa1
+          image: ghcr.io/hardstuding/bigdata_ml_paltform/platform-portal@sha256:45ac007df3fb1a7f2f71171c45510bc8ecffa5989045d39384c4b73f0572d89c
           env:
             # 2026-08-16 真实故障:门户列出的 13 个工具链接全部没带端口,
             # cloud-full 的 ingress-nginx 是 NodePort(32460 http、32535
