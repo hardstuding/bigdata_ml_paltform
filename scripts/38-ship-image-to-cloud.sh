@@ -43,6 +43,21 @@ PLATFORM="${PLATFORM:-linux/amd64}"
 
 command -v crane >/dev/null || { log "本机没有 crane,先 brew install crane。"; exit 1; }
 
+# **目标引用不能是 digest**(2026-08-28 撞到才发现,白搬了 1.3GB):
+# `crane pull` 一个 `repo@sha256:...` 之后,tar 里的 tag 是 crane 自己造的
+# `repo:i-was-a-digest`(digest 不能当 tag 用),而 `docker tag` 拒绝把
+# digest 作为目标——`refusing to create a tag with a digest reference`。
+# 也就是说这条搬运路径**天然只支持 tag 引用**。
+# 对应的做法:仓库里这些自建镜像用 commit SHA 当 tag(和 flink-iceberg
+# 一直以来的写法一致),既是不可变引用,也能被这条路径搬。
+case "$TARGET_REF" in
+  *@sha256:*)
+    log "!! 目标引用是 digest:${TARGET_REF}"
+    log "   这条路径搬不了 digest(docker tag 拒绝 digest 作目标)。"
+    log "   把清单里的引用换成 commit SHA tag(例:repo/name:<commit sha>)再来。"
+    exit 1 ;;
+esac
+
 SAFE="$(echo "$TARGET_REF" | tr '/:@' '___')"
 TAR="/tmp/${SAFE}.tar"
 
