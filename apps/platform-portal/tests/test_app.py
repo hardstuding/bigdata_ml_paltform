@@ -113,8 +113,8 @@ class TestRoutes:
         body = resp.get_data(as_text=True)
         card_dots = [line for line in body.splitlines() if 'class="dot ' in line]
         assert card_dots, "页面里没找到任何卡片状态点"
-        assert all("dot-down" in line for line in card_dots)
-        assert not any("dot-up" in line for line in card_dots)
+        assert all("dot down" in line for line in card_dots)
+        assert not any("dot up" in line for line in card_dots)
 
 
 class TestApplyPortSuffix:

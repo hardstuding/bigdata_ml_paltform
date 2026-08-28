@@ -260,7 +260,7 @@ def queue_usage():
         items = api.list_cluster_custom_object(
             "kueue.x-k8s.io", "v1beta1", "clusterqueues")["items"]
     except Exception as exc:
-        return {"error": f"读不到队列信息({type(exc).__name__})", "rows": []}
+        return {"error": f"读不到队列信息({type(exc).__name__})", "rows": [], "pending_total": 0}
 
     rows = []
     for cq in items:
@@ -283,7 +283,9 @@ def queue_usage():
             "mem_used": used.get("memory", "0"),
             "pending": cq.get("status", {}).get("pendingWorkloads", 0),
         })
-    return {"error": None, "rows": sorted(rows, key=lambda r: r["name"])}
+    rows = sorted(rows, key=lambda r: r["name"])
+    pending_total = sum(int(r.get("pending") or 0) for r in rows)
+    return {"error": None, "rows": rows, "pending_total": pending_total}
 
 
 def my_jobs(username, limit=8):
@@ -363,7 +365,8 @@ def golden_paths():
         with urllib.request.urlopen(f"{PROM}/api/v1/query?{q}", timeout=4) as r:
             data = json.load(r)
     except Exception:  # noqa: BLE001 - 取不到就降级,门户不能因为它打不开
-        return {"error": "连不上 Prometheus,拿不到链路状态", "rows": []}
+        return {"error": "连不上 Prometheus,拿不到链路状态",
+                "rows": [], "healthy": 0, "total": 0}
 
     ages = {}
     for item in data.get("data", {}).get("result", []):
@@ -385,7 +388,8 @@ def golden_paths():
                      else ("ok" if age <= GOLDEN_PATH_STALE_SEC else "broken"),
             "ago": "—" if age is None else _human_ago(age),
         })
-    return {"error": None, "rows": rows}
+    healthy = sum(1 for r in rows if r["state"] == "ok")
+    return {"error": None, "rows": rows, "healthy": healthy, "total": len(rows)}
 
 
 def _human_ago(seconds: float) -> str:
@@ -413,6 +417,8 @@ def index():
         queues=queue_usage(),
         jobs=my_jobs(username),
         golden=golden_paths(),
+        tool_count=len(TOOLS),
+        tool_up=sum(1 for v in up.values() if v),
     )
 
 
