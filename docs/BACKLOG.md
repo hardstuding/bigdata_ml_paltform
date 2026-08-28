@@ -184,29 +184,21 @@ flink CRD 那个常年 OutOfSync,理由是一样的——**常年黄灯会训练
 
 ---
 
-### hive-metastore 每次 pod 启动都要联网从 Maven 下 3 个 jar
+### ~~hive-metastore 每次 pod 启动都要联网从 Maven 下 3 个 jar~~ —— 已解决(2026-08-28)
 
-看冷启动问题时顺带发现的:`apps/hive-metastore/manifests/deployment.yaml`
-有两个 initContainer,**每次 Pod 启动都 `curl` 去 repo1.maven.org 下**
-postgres 驱动、hadoop-aws、aws-java-sdk-bundle 三个 jar。
+自建了 `apps/hive-metastore-image/`(多阶段构建:`curlimages/curl` 下 jar,
+再 COPY 进 hive 镜像),两个下载用的 initContainer 整个删掉。
 
-这正是 `docs/BACKLOG.md` 2.1 已经解决过一遍的那一类("引入镜像构建流程,
-停止用运行时 pip install"),只是那次没覆盖到 hive-metastore 这个走
-`curl` 而不是 `pip` 的变种。
+**实测:Pod 创建 → Ready 从 6~7 分钟降到 55 秒**,initContainer 从 3 个减到
+1 个(只剩 `wait-for-postgres`)。换完跑 `goldenpath-query` 探针确认链路正常
+——不只是"Pod 起来了"。
 
-**实测代价**(2026-08-27):云主机到 repo1.maven.org 的下载速度是
-**283 KB/s**,而 `aws-java-sdk-bundle` 有约 100MB —— 也就是**每次 Pod 启动
-要等约 6 分钟**才轮到主容器。这一轮开机就实测等了 7 分钟以上,而且这 7 分钟
-里 Trino 查任何表都是报错的。
-
-**为什么现在更要紧**:这一周反复撞到境外网络不可用(2026-08-26 升级
-OpenMetadata 时云主机同时失去了到 Docker Hub 的所有通路)。真赶上那种时候,
-**hive-metastore 会起不来,而它一挂 Trino 查任何表都报错**——是整个查询
-链路的单点。今天只是慢,不是不通;下次未必。
-
-解法和 spark-iceberg-image / flink-iceberg-image 一样:自建一个
-`hive-metastore-image`,构建期把三个 jar 打进去,initContainer 整个删掉。
-不是难,是还没做。
+顺带修了两个自己挖的坑:第一版直接在 `apache/hive:3.1.3` 里 `RUN curl`,
+CI 构建失败(**线索一开始就在**:原来的 initContainer 用的是
+`curlimages/curl` 镜像,说明当时的人也知道 hive 镜像里没有 curl,只是那个
+信息藏在"用哪个镜像"里没写成一句话);以及往 matrix 加了镜像却忘了加
+`on.push.paths` 触发,导致改 Dockerfile 后 CI 根本不跑——已加
+`scripts/check-build-triggers.py` 进 CI 拦这一类。
 
 ---
 
