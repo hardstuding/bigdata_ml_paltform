@@ -150,6 +150,28 @@ EOF
 # 还在服务,所以回退不需要重新拉模型**,这正是 canary 比"直接换掉"强的地方。
 CANARY_LINE=""
 if [ -n "${CANARY_PERCENT:-}" ]; then
+  # **先确认这套 KServe 支不支持灰度。** 2026-08-28 实测:这个平台的
+  # `defaultDeploymentMode` 是 `Standard`(RawDeployment,见
+  # apps/components/kserve-resources.yaml——刻意不装 Knative),而
+  # `canaryTrafficPercent` **需要 Knative 的流量切分**。
+  #
+  # 在 RawDeployment 下,这个字段会被 CRD 老实收下、然后**完全不生效**:
+  # 实测带 `canaryTrafficPercent: 10` 部署之后,集群里仍然只有 1 个
+  # Deployment、0 个 Revision,新版本**拿走了 100% 流量**。
+  #
+  # **这正是这个仓库反复吃亏的那种形态**:字段接受了、apply 成功了、
+  # 状态是 Ready,而语义完全没实现。所以这里明确拒绝,而不是"配上去看看"
+  # ——一个自以为在灰度、实际全量切换的上线,比不做灰度危险得多。
+  MODE=$(kubectl -n kserve get cm inferenceservice-config -o jsonpath='{.data.deploy}' 2>/dev/null | tr -d ' \n' || true)
+  case "$MODE" in
+    *Serverless*) : ;;   # Knative 模式,支持
+    *)
+      echo "!! 这套 KServe 是 RawDeployment/Standard 模式(没装 Knative),"
+      echo "   canaryTrafficPercent **不生效**——带上它的结果是新版本直接拿 100% 流量,"
+      echo "   而你以为只放了 ${CANARY_PERCENT}%。拒绝执行。"
+      echo "   要真做灰度,见 docs/decisions/080-model-approval-and-rollback.md 的「灰度」一节。"
+      exit 1 ;;
+  esac
   case "$CANARY_PERCENT" in
     ''|*[!0-9]*) echo "!! CANARY_PERCENT 必须是 0-100 的整数,收到 '${CANARY_PERCENT}'"; exit 1 ;;
   esac

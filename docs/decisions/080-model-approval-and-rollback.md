@@ -87,29 +87,45 @@ manifest,而 `kserve-demo` 是脚本运行时 `kubectl` 建的,它看不到。�
 `EXTRA_CONSUMERS` 手工登记并写明盲区——**报绿而实际是断的,比没有检查器更糟,
 因为它让人更信任一个并不配被信任的绿灯**。
 
-## 灰度(2026-08-28 补,未验证)
+## 灰度:实测发现这套架构不支持,改成明确拒绝
 
-做成 `scripts/11` 的一个参数,不是单写一个脚本:
+第一版把灰度做成 `scripts/11` 的一个参数
+(`CANARY_PERCENT=10 ./scripts/11-...`),依据是 KServe 原生的
+`canaryTrafficPercent`。**实测发现它在这个平台上不生效。**
 
-```bash
-CANARY_PERCENT=10 ./scripts/11-deploy-demo-inference-service.sh   # 新版本拿 10%
-./scripts/11-deploy-demo-inference-service.sh                     # 全量
-```
+原因是架构选择:`apps/components/kserve-resources.yaml` 里
+`deploymentMode: Standard`(RawDeployment)——**刻意不装 Knative**,避免为了
+推理再引入一整套 Serverless 组件。而 `canaryTrafficPercent` **依赖 Knative 的
+流量切分**。
 
-KServe 原生的机制是:更新 `storageUri` 时带上 `canaryTrafficPercent: N`,
-它**保留上一个 revision 继续服务 (100-N)%**。所以灰度不是"部署两套",是
-"一次更新 + 一个百分比"。
+实测过程和证据:
 
-**为什么是参数而不是 `scripts/43-canary.sh`**:灰度和全量走的是同一条部署
-路径,只差一个字段。拆成两个脚本意味着两份几乎一样的 YAML 生成逻辑,而它们
-迟早会漂移——这个仓库在"两处源码人工同步"上已经吃过亏(BACKLOG 2.2)。
+| 检查 | 结果 |
+|---|---|
+| `spec.predictor.canaryTrafficPercent` | `10`(CRD 老实收下了) |
+| `kubectl get revision` | **0 个**(没有 Knative) |
+| `kubectl get deploy -n kserve-demo` | **1 个**(灰度应该有两个在跑) |
+| Pod 里挂的模型 | `m-be3f6da3…` = **v2**,也就是新版本拿走了 **100%** |
+| `inferenceservice-config` 的 `deploy` | `{"defaultDeploymentMode": "Standard"}` |
 
-**0 和 100 都被明确拒绝**:0 等于不部署,100 等于全量(不带参数即可)。
-照做的话会得到一个谁都说不清是什么状态的服务——有人写 0 大概是想"先别放
-流量",那是另一个需求(KServe 有 `minReplicas: 0`),不该用这个参数表达。
+**这正是这个仓库反复吃亏的那种形态**:字段被接受、`apply` 成功、状态 Ready,
+而语义完全没有实现。一个自以为在灰度、实际全量切换的上线,**比不做灰度危险
+得多**——人会因为"我只放了 10%"而降低警惕。
 
-灰度期间旧 revision 还在服务,**所以回退不需要重新拉模型**——这正是 canary
-比"直接换掉"强的地方。
+所以改成:`scripts/11` 检测到 RawDeployment 模式时**明确拒绝** `CANARY_PERCENT`,
+并说明原因。**留一个不生效的参数比没有这个参数更糟。**
+
+### 真要做灰度,有两条路
+
+1. **装 Knative Serving**,把 `deploymentMode` 换成 `Serverless`。代价是引入
+   一整套组件(Activator/Autoscaler/网络层),而当初不装它是有意的取舍——
+   要重开这个话题,得先说清楚为了灰度值不值。
+2. **在入口层做流量切分**:部署成两个 InferenceService(`-v1`/`-v2`),用
+   ingress-nginx 的 `canary-weight` 注解分流。不引入新组件,代价是要自己管
+   两个服务的生命周期,而且"哪个是当前版本"这件事从 KServe 挪到了 Ingress。
+
+**两条都没做。** 现在的状态是:审批和回滚可用且验证过,灰度明确不可用且会
+被拒绝——这比"有一个看起来能用的灰度参数"诚实。
 
 ## 还没做的
 
