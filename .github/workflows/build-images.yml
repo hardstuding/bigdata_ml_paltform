@@ -77,6 +77,8 @@ jobs:
             image: iam-sync
           - context: apps/superset-image
             image: superset
+          - context: apps/hive-metastore-image
+            image: hive-metastore
           - context: apps/argo-workflows-training-image
             image: argo-workflows-training
           - context: apps/feast/feature-server-image
