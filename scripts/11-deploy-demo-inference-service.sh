@@ -74,11 +74,26 @@ if tags.get("approval") != "approved":
                      "alias 可能是手工改的,绕过了审批。拒绝部署。")
 
 source = mv.get("source") or ""
+if source.startswith("models:/"):
+    # **MLflow 3.x 给的是逻辑地址,不是存储路径。** 2026-08-28 实测:
+    # model_version.source = "models:/m-7cb31...",而 KServe 的 storageUri
+    # 只认真实的 s3:// 路径。用 logged-models 接口换成 artifact_uri:
+    #   GET /api/2.0/mlflow/logged-models/<model_id>
+    #   -> artifact_uri = s3://mlflow/1/models/m-.../artifacts
+    #
+    # 这一步是这次改造里唯一"猜不出来只能实测"的地方——所以第一版写的是
+    # 明确报错而不是猜一个转换规则。宁可让它停在这里,也不要部署出一个
+    # KServe 认不了的 storageUri、几十秒后才以 Pod 启动失败的形式暴露。
+    model_id = source.split("models:/", 1)[1]
+    lm = json.load(urllib.request.urlopen(
+        f"{B}/api/2.0/mlflow/logged-models/{model_id}", timeout=30))
+    info = lm.get("model", lm)
+    info = info.get("info", info)
+    source = info.get("artifact_uri") or ""
+
 if not source.startswith("s3://"):
-    # MLflow 3.x 有时给的是 models:/m-<id> 这种逻辑地址,KServe 认不了,
-    # 要换成真实的 artifact 路径。
-    raise SystemExit(f"!! 版本 source 不是 s3:// 地址而是 {source!r},"
-                     "KServe 的 storageUri 认不了。需要在这里补一次转换。")
+    raise SystemExit(f"!! 解析不出 s3:// 地址(拿到的是 {source!r})。"
+                     "KServe 的 storageUri 认不了,先别部署。")
 print(source)
 sys.stderr.write(f"   将部署 {model} v{mv['version']}"
                  f"(批准人 {tags.get('approved_by','?')},"
