@@ -50,34 +50,38 @@ hive-metastore 自建镜像。
 4. **改了 Dockerfile 但 CI 不构建** —— matrix 里加了镜像却漏了 `paths` 触发。
    已加 `scripts/check-build-triggers.py` 拦这一类。
 
-### 下次开机必须做的一件事### 下次开机必须做的一件事
+### 2026-08-28 晚这一轮
 
-**ArgoCD 的配置改了,但它不是 GitOps 管的**——ArgoCD 自己是
-`scripts/01-bootstrap-argocd.sh` 手动 helm 装的(这是仓库里唯一允许手动
-helm upgrade 的组件)。2026-08-27 给它加了 `batch/Job` 的自定义健康检查
-(让黄金链路探针的失败不再把 Application 标成 Degraded,ADR-079),**改动
-在 git 里,但集群上还没生效**。
-
-```bash
-./scripts/01-bootstrap-argocd.sh     # 幂等,就是 helm upgrade
-```
-
-不跑的话表现是:探针一失败,`golden-path-probes` 就在 ArgoCD 上挂 Degraded
-——不影响功能,但会攒常年黄灯。
+1. **门户改版**。zhenghe:"毫无设计感""一些文字像是我们的对话,而不是
+   一个产品应该有的形态"。文案和视觉分开修——标题改成名词短语、删掉所有
+   "不是……而是……"式的解释和 ADR 编号(解释挪进 `title` 悬停),加了顶部
+   四个概览数字和一套统一的 design token(含深色模式)。文案规则写死在
+   模板顶部注释里,免得下次又写回去。已部署,页面实测 12 KB。
+2. **Spark 3.5.9 → 4.1.3 + Iceberg 1.10.0 → 1.11.0**([ADR-076](decisions/076-spark-4-evaluation.md))。
+   这两条本来就是一个决定:Iceberg 锁 1.10.0 是因为 1.11.0 要 Java 17 而
+   Spark 3.5 镜像自带 Java 11,而 Spark 4 本身要求 Java 17。连带 hadoop-aws
+   3.3.4→3.4.2、AWS SDK v1→v2(Hadoop 3.4 起 S3A 迁到 SDK v2,最容易漏的
+   一条)。Hive Metastore 仍锁 3.1.3,理由和 Spark 无关。
+3. **secrets 清理**。两份文件、42 条记录,实测比对集群指纹后只剩 16 条
+   有效的;`generated-credentials-cloud-full.txt`(8-15 那份)13 条全失效,
+   已删。顺手修了 `show-credentials.sh --audit-file` 路径写死、传别的文件
+   会被静默忽略的问题。
+4. **ArgoCD 的 `batch/Job` 健康检查已经生效**(查 `argocd-cm` 确认),
+   上一轮写的"下次开机必须做的一件事"是过期信息,已删。
 
 ### 下一步
 
-1. **告警出口**——三个来源(质量/新鲜度/审计断流)接同一个出口。真实阻塞
-   是没有通知渠道凭据。
-2. **算法链路和治理链路的探针**(ADR-079 只覆盖了三条)。
+1. **算法链路和治理链路的探针**(ADR-079 只覆盖了三条)。
+2. **A 线的 CI-CD 那半**、**C 线的灰度**、**E 线的按月聚合**(要等数据攒够)。
 3. **prod 不要跟 OpenMetadata 2.0.0**,等 2.0.x 出到两三个补丁版本。
-4. 五条产品主线 A/C/E 仍然基本没开始。
+
+告警出口按 zhenghe 明确要求**不再推进**——"上生产了再说,现在留好配置
+就好"。配置项都在,`alert-echo-sink` 那次已经验证过链路能通到出口。
 
 ### 云主机状态
 
-已停机。2026-08-26 开了两次:一次因为镜像拉不动主动停机止损、把镜像在
-本地准备好再开第二次(按量付费的既定做法:先把要做的事准备到开机就能
-立刻跑,再开机)。
+**运行中**(2026-08-28 22:56 开机)。这一轮要在集群上实测 Spark 4 那条链路,
+用完记得 `./scripts/26-stop-cloud-vm-economical.sh`。
 
 ---
 
