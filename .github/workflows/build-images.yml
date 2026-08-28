@@ -25,21 +25,19 @@
 # 第一次构建后要去 GitHub 网页确认一下(Package -> Package settings ->
 # Change visibility),不是这个 workflow 能自动保证的。
 #
-# **必须多架构构建(linux/amd64 + linux/arm64)**,不能只建 amd64:
-# local-lite(colima,跑在 Apple Silicon 上默认是 aarch64)和 cloud-full
-# (阿里云 ECS,x86_64)都会拉这些镜像跑同一批组件(见
-# environments/local-lite/config.yaml 的 enabled_components,这三个
-# Flask 应用和 iam-sync 都在里面)。iam-sync 这个尤其关键——它的镜像里
-# 打包了 kubectl,这个仓库已经真实踩过"amd64 的 kubectl 靠 QEMU 在 arm64
-# 节点上模拟执行,会触发 client-go 的一个真实并发 bug(concurrent map
-# writes,栈在 k8s.io/client-go/restmapper/discovery.go)"这个坑(见
-# apps/iam-sync/manifests/cronjob.yaml 里退役前那段 initContainer 的
-# 注释,当时的解法是运行时动态探测架构装原生二进制)——只建 amd64 镜像会
-# 在 local-lite 上把这个已经修好的坑重新引入,不是"能用但慢",是真的会
-# 崩。`docker/setup-qemu-action` + `buildx` 在 GitHub Actions 的
-# ubuntu-latest runner(amd64)上交叉构建 arm64 镜像,`apt-get install
-# kubectl` 这类命令在交叉构建时会装对应目标架构的包(dpkg 自己识别构建
-# 目标架构,不需要额外配置)。
+# **只建 linux/amd64**。2026-08-23 起三档环境统一 x86_64(生产是已有的
+# x86_64 服务器,cloud-full 是 x86_64 ECS),arm64 那条腿没有落脚点了。
+# 这段注释在 2026-08-28 之前还写着"必须多架构构建",而下面的 build 步骤
+# 早就只建 amd64——**注释和代码互相矛盾,这比没有注释更危险**,所以一起
+# 改掉,顺带删了不再需要的 `docker/setup-qemu-action`(交叉构建才用得上,
+# 每次构建都白跑一步)。
+#
+# 历史包袱备查:当年要建 arm64,是因为本机开发环境是 Mac M2 上的 colima
+# (aarch64)。那条线上踩过一个真实的坑——iam-sync 镜像里打包的 kubectl
+# 如果是 amd64、靠 QEMU 在 arm64 节点上模拟执行,会触发 client-go 的一个
+# 并发 bug(concurrent map writes,栈在
+# k8s.io/client-go/restmapper/discovery.go)。现在没有 arm64 节点了,这个
+# 坑不会再出现,但记着它,免得以后有人重新引入 arm64 时再踩一遍。
 name: Build Images
 
 on:
@@ -92,9 +90,6 @@ jobs:
             image: kafka-device-events-producer
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU (交叉构建 arm64 需要)
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
