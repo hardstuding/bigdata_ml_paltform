@@ -118,3 +118,43 @@ SDK v2 的 bundle 是 611 MB,v1 是 267 MB,镜像会胖 350 MB。换成 Iceberg
 自己的 S3FileIO + `iceberg-aws-bundle`(60 MB)能省下来,但 `spark.eventLog.dir`
 和 Flink 那两条链路都还是 `s3a://`,S3A 去不掉,换了等于两套 S3 客户端
 并存。所以没换。
+
+
+### 实机验证(2026-08-28 23:43,cloud-full)
+
+`spark-iceberg-demo` 这个 SparkApplication 跑完 `COMPLETED`,driver 日志里:
+
+```
+INFO SparkContext: Running Spark version 4.1.3
+读到 10 行
+...
+INFO SparkWrite: Committing overwrite by filter true with 1 new data files
+      to table demo.orders_by_region_spark
+| South|      280.00|
+|  East|      280.74|
+|  West|      241.00|
+| North|      275.50|
+SPARK_ICEBERG_DEMO_OK
+```
+
+这一条日志同时证了四件事,不是"pod 起来了"级别的验证:
+
+1. Spark 真的是 4.1.3(不是镜像换了但跑的还是旧的)
+2. 读得到 **Trino 建的** Iceberg 表 —— 说明 Iceberg 1.11.0 的 Hive Catalog
+   客户端和**没有跟着升的 HMS 3.1.3** 仍然对得上,这是这次升级最大的风险点
+3. 写得进去(`s3a://lakehouse/...` 提交了新数据文件)—— 说明
+   hadoop-aws 3.4.2 + AWS SDK **v2** 这套换血是对的
+4. 读得回来,数字对
+
+### 一个没预料到的连带工作:镜像引用形式
+
+云主机拉不动 GHCR 的大镜像(升级后单个 AWS SDK v2 层就 570MB,实测
+`docker pull` 25 秒 0 字节),只能用 `scripts/38-ship-image-to-cloud.sh`
+搬 tar。搬完最后一步才发现这条路径**不支持 digest 引用**:`crane pull`
+一个 `repo@sha256:...` 之后 tar 里的 tag 是 crane 造的
+`repo:i-was-a-digest`,而 `docker tag` 拒绝把 digest 作为目标。
+
+所以 spark-iceberg / feast-feature-server / argo-workflows-training 三个
+的引用从 digest 改成了 commit SHA tag(flink-iceberg 一直就是这么写的)。
+commit SHA 当 tag 同样是不可变引用。`scripts/38` 也加了显式拦截,不要再
+让人搬完 1.3GB 才在最后一步失败。
