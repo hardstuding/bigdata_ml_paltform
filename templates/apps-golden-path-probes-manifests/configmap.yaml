@@ -185,8 +185,47 @@ data:
         return f"{name} 有 {len(ready)} 个 READY 版本"
 
 
+    def probe_inference():
+        """链路六:在线推理。KServe 服务能不能真的返回预测。
+
+        **ADR-079 第一版刻意跳过了这条**,理由是"集群里一个 InferenceService
+        都没有,探它只会得到一条永远红的告警"。2026-08-28 那条链路真正跑通之后
+        (ADR-080:训练→注册→审批→部署),这个理由不成立了,补上。
+
+        探的是**发一次真实请求拿到预测**,不是"Pod Ready"。这个区分在这条链路
+        上格外重要:2026-08-28 实测过 Ready=True 但模型拉不下来的中间态,
+        以及模型拉下来了但特征维度对不上直接报错的情况——**两种都是 Pod 健康
+        而服务不可用**。
+
+        特征维度从环境变量来,因为它取决于训练用的数据集(demo 模型是 20 维)。
+        """
+        import urllib.error as _ue
+
+        url = os.environ.get(
+            "INFERENCE_URL",
+            "http://demo-rf-classifier-predictor.kserve-demo.svc.cluster.local/"
+            "v2/models/demo-rf-classifier/infer")
+        n = int(os.environ.get("INFERENCE_FEATURES", "20"))
+        body = json.dumps({
+            "inputs": [{"name": "input-0", "shape": [1, n], "datatype": "FP32",
+                        "data": [0.1] * n, "parameters": {"content_type": "np"}}],
+            "parameters": {"content_type": "np"},
+        }).encode()
+        try:
+            out = _req(url, data=body, headers={"Content-Type": "application/json"})
+        except _ue.HTTPError as e:
+            raise RuntimeError(f"推理请求失败(HTTP {e.code}):{e.read()[:160].decode(errors='ignore')}")
+        outputs = out.get("outputs") or []
+        if not outputs or not outputs[0].get("data"):
+            # 有 200 但没有预测值,说明模型加载了却没真的算——这种"半通"
+            # 状态只有看返回内容才发现,看状态码是看不出来的。
+            raise RuntimeError(f"返回里没有预测值:{json.dumps(out, ensure_ascii=False)[:160]}")
+        return f"返回预测 {outputs[0]['data'][:3]}"
+
+
     PROBES = {"query": probe_query, "streaming": probe_streaming,
-              "catalog": probe_catalog, "authz": probe_authz, "model": probe_model}
+              "catalog": probe_catalog, "authz": probe_authz,
+              "model": probe_model, "inference": probe_inference}
 
     if __name__ == "__main__":
         name = sys.argv[1]

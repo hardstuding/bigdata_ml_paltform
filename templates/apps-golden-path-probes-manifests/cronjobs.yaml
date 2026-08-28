@@ -276,3 +276,47 @@ spec:
             - name: probe
               configMap:
                 name: golden-path-probes
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: goldenpath-inference
+  namespace: monitoring
+  labels:
+    platform/golden-path: "inference"
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    metadata:
+      labels:
+        platform/golden-path: "probe"
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 180
+      template:
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              command: ["python3", "/probe/probe.py", "inference"]
+              env:
+                # 特征维度取决于训练用的数据集(demo 模型是 20 维合成数据)。
+                # 换模型时要一起改——写成环境变量就是为了不用改脚本。
+                - name: INFERENCE_FEATURES
+                  value: "20"
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - name: probe
+                  mountPath: /probe
+          volumes:
+            - name: probe
+              configMap:
+                name: golden-path-probes

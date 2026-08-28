@@ -52,11 +52,22 @@
 授权生效**——那会让它在平台整体故障时反而变绿,是最坏的一种假阳性。所以
 它明确要求错误里出现 `PERMISSION_DENIED`。
 
-### `model` 刻意不探 KServe 推理
+### `model` 一开始刻意不探 KServe 推理,2026-08-28 补上了
 
-集群里现在一个 InferenceService 都没有(`kubectl get inferenceservice -A`
-是空的),探它只会得到一条**永远红**的告警——而一直红的告警比没有告警更糟。
-等真有常驻推理服务了再加。
+第一版的理由是:集群里一个 InferenceService 都没有,探它只会得到一条**永远
+红**的告警——而一直红的告警比没有告警更糟。
+
+[ADR-080](080-model-approval-and-rollback.md) 把那条链路真正跑通之后(训练→
+注册→审批→部署→真实推理返回预测),这个理由不成立了,于是补上第六条
+`goldenpath-inference`。
+
+它探的是**发一次真实请求拿到预测**,不是 Pod Ready。这个区分在这条链路上格外
+重要——08-28 实测撞到过两种"Pod 健康而服务不可用":Ready=True 但模型根本没
+拉下来(NetworkPolicy 挡住 MinIO);模型拉下来了但特征维度对不上,请求直接
+报错。**两种状态下 Pod 都是绿的。**
+
+而且它还检查返回体里**真的有预测值**,不只看状态码 200:模型加载了却没算出
+东西是一种"半通"状态,只有看内容才发现。
 
 ### 为什么是"三个 CronJob"而不是"一个 CronJob 跑三条"
 
@@ -180,10 +191,9 @@ ArgoCD 原本的语义**——db-init 这类 Job 失败仍然要变 Degraded。
 ## 还没做的
 
 1. **没部署验证。** 三条探针都还没在集群上跑过一次。
-2. **算法链路只探到 MLflow 为止。** 完整的 notebook → submit_job → Argo →
-   MLflow → KServe 要真跑一次训练,成本高得多;现在探的是"训练的产物还
-   取得出来",覆盖了这条链上最容易悄悄坏的那一段(元数据在 Postgres、
-   产物在 MinIO,断一个就取不到而 MLflow 首页照样打得开)。
+2. **算法链路的「训练」那一段仍然没探。** 现在 `model` 探"产物取得出来"、
+   `inference` 探"在线服务算得出来",覆盖了注册表之后的全部;但
+   notebook → submit_job → Argo 这一段要真跑一次训练,成本高得多,还没做。
 3. 审计链路故意没做探针:它已经有 `AuditSinkJobNotRunning`(作业级),而要
    探它就得读 `audit.query_events`,那张表[刚刚才收紧](066-trino-query-audit.md)
    成只有 platform-team 能读——为了探针去开一个口子不划算。
