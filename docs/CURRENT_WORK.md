@@ -111,6 +111,24 @@ helm upgrade 的组件)。2026-08-27 给它加了 `batch/Job` 的自定义健康
 
 ## 已知的、还没解决的事(不要重新排查一遍)
 
+### 两个 CronJob 类应用在 ArgoCD 上显示 Degraded(2026-08-28)
+
+`golden-path-probes` 和 `openmetadata-quality-alerts`。原因和处置**不一样**,
+不要一起当成同一个问题:
+
+- **`golden-path-probes`**:ADR-079 已经给它配了 ArgoCD 自定义健康检查
+  (`batch/Job` 的 Lua,只对带 `platform/golden-path` 标签的 Job 返回 Healthy)。
+  但**标签是 2026-08-28 才加到 `jobTemplate` 上的**,在那之前生成的失败 Job
+  没有这个标签,所以还会拉低健康状态。`failedJobsHistoryLimit: 3`,**会自己
+  老化掉**,不用处理。下次开机确认一下就行。
+- **`openmetadata-quality-alerts`**:它的 Job **没有**那个标签,也不该有——
+  这个 CronJob 失败意味着"质量告警这座桥没跑",那是**真的降级**,变红是对的。
+  当前这次失败来自云主机冷启动时 CoreDNS 还没就绪(`Temporary failure in
+  name resolution`),下一轮定时执行会自愈。
+  **但值得想一下**:冷启动瞬态失败不该长期挂红。可选做法是给它加
+  `startingDeadlineSeconds` + 重试,或者接受"每次开机红一轮"。还没定。
+
+
 - **idle-shutdown-watchdog 的开机自愈**(2026-08-19 修复,这个脚本本身
   按既定政策不进 git):停机几天后重新开机,看门狗第一次检查会用几天前
   的旧时间戳误判"已空闲超过阈值",机器刚开机 2-3 分钟就被自己关掉。
