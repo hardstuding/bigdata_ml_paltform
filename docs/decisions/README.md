@@ -97,6 +97,7 @@
 | [027](027-kserve-model-serving.md) | KServe 模型上线服务 | 已验证 |
 | [042](042-feast-feature-store.md) | Feast 特征存储 | 已验证 |
 | [058](058-lightweight-developer-experience.md) | 开发者体验:薄 SDK + 脚手架 + skill,不自建平台 UI | 第一、二批已验证,第三批(skill)未经真实使用验证 |
+| [059](059-resource-profiles.md) | 规格分档:同一份组件定义,三个环境不同资源规格 | 机制已实现并验证(2026-08-21),helm 类和裸 manifest 类各有一个样本(Trino、Postgres HA),其余组件按需铺开 |
 
 ## 可观测性、可靠性与运维
 
