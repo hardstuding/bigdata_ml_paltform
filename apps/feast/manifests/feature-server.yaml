@@ -50,7 +50,7 @@ spec:
           # 2026-08-20(BACKLOG 2.1):从"只在本地 docker 里,imagePullPolicy:
           # Never"改成 GitHub Actions 自动构建推 GHCR + digest 引用,见
           # apps/feast/feature-server-image/Dockerfile。
-          image: ghcr.io/hardstuding/bigdata_ml_paltform/feast-feature-server@sha256:dd0fbc978b6d30c099dc9d6929a895bdd8f03a38f102cdd1b347c4e2f0b55b2f
+          image: ghcr.io/hardstuding/bigdata_ml_paltform/feast-feature-server@sha256:175d9f762bc0eb512082eb7c01ff1f3289e59a3cd05533a9d7a4e9326ba81176
           imagePullPolicy: IfNotPresent
           command: ["feast", "serve", "-h", "0.0.0.0"]
           ports:

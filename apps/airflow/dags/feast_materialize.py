@@ -20,7 +20,7 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from airflow.sdk import DAG
 from kubernetes.client import models as k8s
 
-FEAST_IMAGE = "ghcr.io/hardstuding/bigdata_ml_paltform/feast-feature-server@sha256:dd0fbc978b6d30c099dc9d6929a895bdd8f03a38f102cdd1b347c4e2f0b55b2f"
+FEAST_IMAGE = "ghcr.io/hardstuding/bigdata_ml_paltform/feast-feature-server@sha256:175d9f762bc0eb512082eb7c01ff1f3289e59a3cd05533a9d7a4e9326ba81176"
 
 # feature_store.yaml/definitions.py 权威源是 scripts/feast_feature_repo/,
 # 部署态的拷贝在 apps/feast/manifests/feature-repo-configmap.yaml——和

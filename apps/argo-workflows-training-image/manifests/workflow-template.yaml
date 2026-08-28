@@ -55,7 +55,7 @@ spec:
         # digest 引用,`imagePullPolicy` 可以留 IfNotPresent(值不会变,
         # 没必要每次都联网确认),Kubernetes 对 digest 引用的镜像本来就
         # 会做内容校验,不会有拉到旧版本的风险。
-        image: "ghcr.io/hardstuding/bigdata_ml_paltform/argo-workflows-training@sha256:95feb41657b00d5b701fb695ce9062b3f9aaf4cf9884b9648e4017d4a01a54ba"
+        image: "ghcr.io/hardstuding/bigdata_ml_paltform/argo-workflows-training@sha256:6b5c126f65c705d0280d4ba893e5a0990e9a21e21600c74548fc50c14aea811b"
         imagePullPolicy: IfNotPresent
         command: ["python3", "/scripts/train_demo_model.py"]
         env:

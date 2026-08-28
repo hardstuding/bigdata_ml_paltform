@@ -34,7 +34,7 @@ spec:
   templates:
     - name: train
       container:
-        image: "ghcr.io/hardstuding/bigdata_ml_paltform/argo-workflows-training@sha256:95feb41657b00d5b701fb695ce9062b3f9aaf4cf9884b9648e4017d4a01a54ba"
+        image: "ghcr.io/hardstuding/bigdata_ml_paltform/argo-workflows-training@sha256:6b5c126f65c705d0280d4ba893e5a0990e9a21e21600c74548fc50c14aea811b"
         imagePullPolicy: IfNotPresent
         command: ["python3", "/scripts/train_from_feast_features.py"]
         securityContext:
