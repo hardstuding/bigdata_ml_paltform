@@ -130,6 +130,41 @@ secrets:
   - name: kserve-minio-s3-creds
 EOF
 
+# ---- 灰度(ADR-080 的"还没做的"第 2 条,2026-08-28 补)----
+#
+# KServe 原生的做法:更新 InferenceService 的 storageUri 时带上
+# `canaryTrafficPercent: N`,它会**保留上一个 revision 继续服务 (100-N)%**,
+# 新 revision 拿 N%。也就是说灰度不是"部署两套",是"一次更新 + 一个百分比"。
+#
+# **为什么做成部署脚本的一个参数,而不是单写一个 43-canary 脚本**:灰度和
+# 全量上线走的是同一条部署路径,只差一个字段。拆成两个脚本意味着两份几乎
+# 一样的 YAML 生成逻辑,而它们迟早会漂移——这个仓库在"两处源码人工同步"上
+# 已经吃过亏(BACKLOG 2.2)。
+#
+# 用法:
+#   CANARY_PERCENT=10 ./scripts/11-deploy-demo-inference-service.sh   # 新版本拿 10%
+#   ./scripts/11-deploy-demo-inference-service.sh                     # 全量(默认)
+#
+# 提升到全量就是不带 CANARY_PERCENT 再跑一次;回退是
+# `scripts/42-rollback-model.sh` 切回旧版本之后再跑一次。**灰度期间旧版本
+# 还在服务,所以回退不需要重新拉模型**,这正是 canary 比"直接换掉"强的地方。
+CANARY_LINE=""
+if [ -n "${CANARY_PERCENT:-}" ]; then
+  case "$CANARY_PERCENT" in
+    ''|*[!0-9]*) echo "!! CANARY_PERCENT 必须是 0-100 的整数,收到 '${CANARY_PERCENT}'"; exit 1 ;;
+  esac
+  if [ "$CANARY_PERCENT" -lt 1 ] || [ "$CANARY_PERCENT" -gt 99 ]; then
+    # 0 和 100 都不该走灰度这条路:0 等于不部署,100 等于全量(不带这个参数即可)。
+    # 明确拒绝而不是"照做",免得有人写 0 以为是"先别放流量"、实际得到一个
+    # 谁都不知道是什么状态的服务。
+    echo "!! CANARY_PERCENT 要在 1-99 之间。全量就别带这个参数;0 没有意义。"
+    exit 1
+  fi
+  CANARY_LINE="    canaryTrafficPercent: ${CANARY_PERCENT}
+"
+  echo "=== 灰度模式:新版本拿 ${CANARY_PERCENT}% 流量,旧 revision 继续服务其余部分 ==="
+fi
+
 echo "=== 部署 InferenceService ==="
 cat <<EOF | kubectl apply -f -
 apiVersion: serving.kserve.io/v1beta1
@@ -139,7 +174,7 @@ metadata:
   namespace: ${NS}
 spec:
   predictor:
-    serviceAccountName: kserve-minio-sa
+${CANARY_LINE}    serviceAccountName: kserve-minio-sa
     model:
       modelFormat:
         name: mlflow
