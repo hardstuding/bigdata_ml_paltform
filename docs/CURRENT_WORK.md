@@ -13,38 +13,44 @@
 > 想知道"以前某个问题怎么解决的" → [`docs/journal/`](journal/) 和
 > [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
 
-## CURRENT(2026-08-27):补"整体"——按链路看平台,不按组件看
+## CURRENT(2026-08-28):A/C/D/E 四条主线各推进第一步
 
 六条生产可用性缺口 08-26 已补完并实机验证。这一轮转向 zhenghe 说的
 "先有整体":平台有 8 条告警、4 个看板、ArgoCD 健康、roles.md 能力表,
 **但它们回答的全是组件层面的问题**,没有一个地方回答"一件真实的事现在
 做不做得成"。
 
-### 这一轮做完并实机验证的
+### 这一轮(2026-08-28)做完并实机验证的
 
-| 事情 | 证据 |
+**六条黄金链路全通**(`平台能不能用 = 6`)。四条产品主线各推进了第一步:
+
+| 主线 | 做到哪 |
 |---|---|
-| **黄金链路探针**(ADR-079,D 线第一步) | 三条链路各一个 CronJob,实测全通:query 0.2s/10 行、catalog 6 个字段、streaming 最新数据 5 分钟前 |
-| **Trino group provider**(ADR-078) | `is_platform_admin` 之前**从来没生效过**;修完后 platform-team 的人能查审计表、查带行级过滤的表拿到全部 6 行 |
-| **IAM 数据补齐** | 5 个 demo 用户里 3 个不属于任何组、Keycloak 里根本没建号——补齐并加 CI 检查 |
-| **Superset 汉化的另一半**(ADR-077) | 镜像里 22 个 `.po`、**0 个 `.mo`**,只加配置界面不会变中文;Dockerfile 加了 `pybabel compile` |
-| KServe runtime 精简(ADR-075) | 12 → 4,镜像清单 77 → 69 |
-| Spark 4.x 评估(ADR-076) | 暂不升,但查出它能解开 Iceberg 卡在 1.10.0 的天花板 |
-| P5 瘦身 | 删掉 13MB 陈旧 worktree 副本;CURRENT_WORK 647 → 131 行;4 篇被推翻的 ADR 加前向指针 |
+| A 统一开发工作台 | 🟡 4 个作业模板(`examples/`)+ `platform-submit --new` 脚手架。**CI-CD 那半没做** |
+| C 完整 MLOps | ✅ 审批/回滚闭环([ADR-080](decisions/080-model-approval-and-rollback.md)):训练→注册→审批→部署→**真实推理返回 `[0,1]`**→回滚守卫。**灰度没做** |
+| D 统一运维控制面 | ✅ 六条链路探针 + 告警 + 看板([ADR-079](decisions/079-golden-path-probes.md)) |
+| E 管理驾驶舱 | 🟡 平台总览看板;**按月聚合的前提刚补上**(见下面第 2 条) |
 
-### 这一轮反复出现的一个模式
+另外:Superset 汉化实机验证通过(4054 条,`Dashboards→看板`);
+hive-metastore 自建镜像。
 
-**"机制建好了,但它作用的对象不存在 / 它依赖的输入永远是空的"**:
+### 这一轮挖出来的四个"早就断了"
 
-- `is_platform_admin` 规则写了,但 Trino 从不传 groups(ADR-078)
-- 组、角色、队列、策略全配好了,但 5 个用户里 3 个不在任何组里
-- Kueue 的配额指标默认不导出,容量看板 6 个 panel 空了 4 个
-- Superset 汉化配置生效了,但翻译文件没编译
+**都不是这次改动引入的**,共同点是**每一层都显示正常**:
 
-**四个都不报错,而且单元测试/同步状态全绿。** 这就是黄金链路探针存在的
-理由——只有"从头做一件真实的事"才发现得了。
+1. **KServe 推理链路** —— `kserve-demo` 不在 MinIO 的 NetworkPolicy 白名单里,
+   [ADR-035](decisions/035-network-policies.md) 上线之后就断了,而没人发现
+   (从那以后没人跑过 `scripts/11`)。检查器报绿,是因为那个命名空间是脚本
+   运行时建的、不在 git 里——**报绿而实际是断的,比没有检查器更糟**。
+2. **Prometheus 指标每次开机清零** —— cloud-full 用的是 `retention: 6h` +
+   emptyDir。我在 ADR-069 里写"没有月度聚合"时以为只是没写查询,**实际上是
+   数据压根不存在**。已改成 15d + 20Gi 持久卷。
+3. **hive-metastore 每次启动等 6~7 分钟**下 100MB 的 jar,而且把整条查询链路
+   挂在境外网络上。自建镜像后**实测 55 秒**。
+4. **改了 Dockerfile 但 CI 不构建** —— matrix 里加了镜像却漏了 `paths` 触发。
+   已加 `scripts/check-build-triggers.py` 拦这一类。
 
-### 下次开机必须做的一件事
+### 下次开机必须做的一件事### 下次开机必须做的一件事
 
 **ArgoCD 的配置改了,但它不是 GitOps 管的**——ArgoCD 自己是
 `scripts/01-bootstrap-argocd.sh` 手动 helm 装的(这是仓库里唯一允许手动
