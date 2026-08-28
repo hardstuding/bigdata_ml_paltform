@@ -140,6 +140,39 @@ fail-closed 的组件配好 rollout,这次真的兜住了。
 
 ### 本机(colima)/ 云主机环境与脚本习惯
 
+### 云主机上想手动预拉镜像:用 `docker pull`,不是 `k3s ctr` / `crictl`
+
+**症状**:大镜像被 kubelet 的拉取超时打断(`Failed to pull image ...
+rpc error: code = Canceled desc = context canceled` → `ImagePullBackOff`),
+想绕开 kubelet 直接在节点上拉,结果:
+
+- `k3s ctr images pull` → `cannot access socket /run/k3s/containerd/containerd.sock`
+- `crictl` → 不可用
+- `ctr -a /run/containerd/containerd.sock -n k8s.io images pull` → **拉得下来,
+  但白拉**:那个 containerd 的 `k8s.io` 命名空间是空的,kubelet 根本不用它
+
+**原因**:cloud-full 的 k3s 是用 `--docker` 起的(cri-dockerd,见
+`scripts/21-bootstrap-cloud-vm.sh`)。容器运行时是 **Docker**,镜像存在
+Docker 那边(containerd 的 `moby` 命名空间),不在 `k8s.io` 命名空间里。
+所以判断"某个镜像在不在节点上"要看 `docker images`,不是 `ctr images ls`。
+
+**做法**:
+
+```bash
+ssh -i "$KEY" root@"$IP" "nohup docker pull '<镜像@digest>' > /root/pull.log 2>&1 &"
+```
+
+`docker pull` 没有 kubelet 那个进度超时,大镜像慢慢拉能拉完;拉完之后
+Pod 的 `imagePullPolicy: IfNotPresent` 会直接用本地这份。
+
+**怎么一眼确认运行时是哪个**:`ls /data/k3s/agent/` 里有 `cri-dockerd`
+这个目录就是走 Docker。或者 `ctr -n k8s.io images ls -q | wc -l`,是 0
+而集群里明明有一堆 Pod 在跑,就说明拉错 daemon 了。
+
+**这次花的时间**:2026-08-28 升 Spark 4 时,镜像比原来大 350MB,被 kubelet
+超时打断,然后在错误的 containerd 上拉了两轮才发现,约 20 分钟。
+
+
 - [colima 会自动把 k3s LoadBalancer 的 80/443 转发到 Mac 的 localhost](#colima-会自动把-k3s-loadbalancer-的-80443-转发到-mac-的-localhost)
 - [bash 脚本用 `set -euo pipefail`,给不存在的东西 `grep` 会让脚本"悄悄卡住"](#bash-脚本用-set--euo-pipefail给不存在的东西-grep-会让脚本悄悄卡住)
 - [`03-configure-keycloak.sh` 遇到还没 unpark 的命名空间直接报错退出,后面的 client 全部没建成](#03-configure-keycloaksh-遇到还没-unpark-的命名空间直接报错退出后面的-client-全部没建成)
