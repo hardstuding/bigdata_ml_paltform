@@ -78,9 +78,33 @@ hive-metastore 自建镜像。
 告警出口按 zhenghe 明确要求**不再推进**——"上生产了再说,现在留好配置
 就好"。配置项都在,`alert-echo-sink` 那次已经验证过链路能通到出口。
 
+### 这一轮挖出来的(都不是这次改动引入的)
+
+1. **OpenMetadata 的采集/质量管道建出来 5 天,一次都没跑过** —— 三层叠加:
+   ① OpenMetadata 自己建 CronJob 时写死 `startingDeadlineSeconds=60`,而
+   这台机器大部分时间关机,每个计划时刻都在关机期间过去 ⇒ 永远跳过;
+   ② 改完第一层立刻撞到命名空间内存配额(6Gi,常驻已占 4864Mi,采集任务
+   要 1536Mi)—— **这个配额坑仓库里栽第三次了**,表现每次一样:Job 显示
+   `Running 0/1`、一个 Pod 都没有;③ CronJob 里还是 `ingestion-base:1.13.3`
+   而服务端已 2.0.0 ⇒ `VersionMismatchException`,升级 OpenMetadata 时没
+   重新 deploy 采集管道。三层都修了,实测跑出
+   `Data Quality Summary: Processed records: 4 / Errors: 0 / Success 100%`。
+2. **黄金链路探针的 deadline 也偏小**(120 秒 vs `*/30` 的周期)⇒ 开机后
+   catalog 那条在门户上红了 27 分钟,链路其实没断。改成 deadline = 周期。
+3. **`scripts/38` 会把半截的本地 tar 当成"已下载"送上云主机**,`docker load`
+   在最远端才报 `unexpected EOF`。改成认 `.done` 标记。
+4. **QUICKSTART 第 6 步是断的** —— 加了模型审批门禁(ADR-080)之后
+   `09 → 11` 会被拒,文档还写着两步。
+5. **ADR-059 不在 ADR 索引里**;**BACKLOG 里"五条产品主线都还没开始"**
+   和 **roles.md 里几行状态**都已经和事实相反。
+
 ### 云主机状态
 
-**运行中**(2026-08-28 22:56 开机)。这一轮要在集群上实测 Spark 4 那条链路,
+**运行中**(2026-08-28 22:56 开机)。08-29 02:00 前后因为我这边被用量限制
+卡住,机器空转了约 2.5 小时(约 ¥10)—— 记在这里不是自责,是这类"我不在
+但机器在计费"的空档目前没有任何自动兜底,idle-shutdown 看门狗只看负载,
+而集群一直有定时任务在跑,负载不为零。
+
 用完记得 `./scripts/26-stop-cloud-vm-economical.sh`。
 
 ---
