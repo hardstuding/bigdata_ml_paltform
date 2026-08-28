@@ -61,11 +61,18 @@ esac
 SAFE="$(echo "$TARGET_REF" | tr '/:@' '___')"
 TAR="/tmp/${SAFE}.tar"
 
-if [ -s "$TAR" ]; then
-  log "本地已有 $TAR($(du -h "$TAR" | cut -f1)),跳过下载"
+# 只判断"文件非空"就跳过下载是不够的 —— 2026-08-28 实测踩到:上一轮
+# 中断留下的**半截 tar** 被当成"已有",直接送上云主机,`docker load` 在
+# 那边才报 `short read: expected 406167128 bytes but got 242154186:
+# unexpected EOF`,白传了 1.2GB。改成只认"上次确实下载完成"的标记文件,
+# 半截的一律重下。
+if [ -s "$TAR" ] && [ -f "${TAR}.done" ]; then
+  log "本地已有完整的 $TAR($(du -h "$TAR" | cut -f1)),跳过下载"
 else
+  rm -f "${TAR}.done"
   log "1/3 从 ${SOURCE_REF} 下载(${PLATFORM},不经过 docker 守护进程)"
   crane pull --platform "$PLATFORM" "$SOURCE_REF" "$TAR" 2>&1 | tee -a "$LOG_FILE"
+  touch "${TAR}.done"
 fi
 log "    大小 $(du -h "$TAR" | cut -f1)"
 
