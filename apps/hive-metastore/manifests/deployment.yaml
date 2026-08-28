@@ -99,7 +99,7 @@ spec:
           # 原来是两个 initContainer 每次启动现下,实测每次要等约 6 分钟,
           # 而且把整条查询链路挂在境外网络上——见那个 Dockerfile 的说明。
           # tag 由 CI 按 commit SHA 打,这里的值改动时要一起更新。
-          image: ghcr.io/hardstuding/bigdata_ml_paltform/hive-metastore:REPLACE_ME
+          image: ghcr.io/hardstuding/bigdata_ml_paltform/hive-metastore:189b58f1d646f0364af3b2a415830076fba89fa6
           # 官方镜像的 entrypoint.sh 只看 IS_RESUME 这一个静态开关决定要不要
           # initSchema,不会自己探测 schema 是不是已经建过——第一次能正常
           # 初始化,但 pod 只要重启(改配置、节点重调度、colima 重启……)就会
