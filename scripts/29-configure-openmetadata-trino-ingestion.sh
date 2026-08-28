@@ -190,5 +190,8 @@ if [ -z "$PIPELINE_ID" ]; then
 fi
 
 log "完成。IngestionPipeline id=${PIPELINE_ID}。"
+log "把 OpenMetadata 建的 CronJob 的 startingDeadlineSeconds 放大(理由见那个脚本)..."
+"$(dirname "$0")/fix-openmetadata-cronjob-deadline.sh" 2>&1 | tee -a "$LOG_FILE"
+
 log "接下来跑 ./scripts/30-verify-openmetadata-trino-ingestion.sh 触发一次真实扫描并独立核实结果"
 log "(不是只看这一步的返回码——deploy 成功不等于扫描真的跑成功过一次)。"
