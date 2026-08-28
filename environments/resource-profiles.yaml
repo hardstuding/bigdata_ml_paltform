@@ -171,6 +171,14 @@ local-lite:
   # 给短了只会一直红,而"一直红的告警"比没有告警更糟。
   goldenpath_streaming_max_age_min: "120"
 
+  # Prometheus。笔记本上不持久化、只留 6 小时——这一档的目的是"验证指标
+  # 链路能跑通",不是看趋势。
+  prometheus_retention: "6h"
+  prometheus_cpu: "100m"
+  prometheus_memory_request: "512Mi"
+  prometheus_memory_limit: "1024Mi"
+  prometheus_storage_spec: "{}"
+
 
 
 
@@ -318,6 +326,16 @@ cloud-full:
   # checkpoint,正常情况下数据不会超过几分钟旧。给 60 分钟是为了容忍
   # 一次 producer 失败 + 一次 checkpoint 延迟,不是因为链路真的那么慢。
   goldenpath_streaming_max_age_min: "60"
+
+  # Prometheus。**2026-08-28 从 6h/无持久化改过来**:这一档是"功能完整的
+  # 集成环境",而指标每次开机清零的话,成本/容量/黄金链路的历史全是空的,
+  # 上面那些看板等于只能看瞬时值。15 天够看周趋势,20Gi 按当前序列数量
+  # 估的(69 个镜像 + kube-state-metrics + 6 条探针,远没到需要精算的规模)。
+  prometheus_retention: "15d"
+  prometheus_cpu: "200m"
+  prometheus_memory_request: "1Gi"
+  prometheus_memory_limit: "2Gi"
+  prometheus_storage_spec: '{"volumeClaimTemplate":{"spec":{"storageClassName":"local-path","accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"20Gi"}}}}}'
 
 
 
@@ -498,6 +516,15 @@ prod:
   # 黄金链路探针(ADR-079)。生产给得最严:流式数据半小时没更新就该
   # 有人知道了。
   goldenpath_streaming_max_age_min: "30"
+
+  # Prometheus。生产要能回答"上个月各组花了多少"——那是 E 线管理驾驶舱
+  # 的核心问题,90 天是为了跨月对比留余量。**这个数字是方向性起步值**,
+  # 真实容量要按序列数量算,上生产后按 prometheus_tsdb_head_series 回调。
+  prometheus_retention: "90d"
+  prometheus_cpu: "1"
+  prometheus_memory_request: "4Gi"
+  prometheus_memory_limit: "8Gi"
+  prometheus_storage_spec: '{"volumeClaimTemplate":{"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"200Gi"}}}}}'
 
 
 

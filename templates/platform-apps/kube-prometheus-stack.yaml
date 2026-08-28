@@ -191,14 +191,27 @@ spec:
             kubeProxy: false
         prometheus:
           prometheusSpec:
-            retention: 6h
+            # **2026-08-28 之前这里是写死的 `retention: 6h` + `storageSpec: {}`,
+            # 而且 cloud-full 也照着走。** 后果比"看不到历史"严重:
+            #
+            #   - 指标存在 emptyDir 里,**云主机每次重启全部清零**——这周做的
+            #     成本、容量、黄金链路历史,每次开机都从头开始;
+            #   - 6 小时之后连"过去 24 小时"这种最基本的看板视图都是半空的;
+            #   - 「管理驾驶舱」(E 线)要的按月聚合,在这个前提下根本无从谈起
+            #     ——ADR-069 里说"没有月度聚合"时,我以为那只是没写查询,
+            #     实际上是**数据压根不存在**。
+            #
+            # 那行注释写的是"local-lite: 缩短 retention、去掉持久化",本意
+            # 只针对笔记本那一档,但值写死了,cloud-full 跟着一起短。改成按
+            # 环境分档。
+            retention: {{RES:prometheus_retention}}
             resources:
               requests:
-                cpu: 100m
-                memory: 512Mi
+                cpu: {{RES:prometheus_cpu}}
+                memory: {{RES:prometheus_memory_request}}
               limits:
-                memory: 1024Mi
-            storageSpec: {}
+                memory: {{RES:prometheus_memory_limit}}
+            storageSpec: {{RES:prometheus_storage_spec}}
         grafana:
           admin:
             existingSecret: grafana-admin
