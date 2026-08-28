@@ -48,6 +48,15 @@ spec:
     requests.memory: 2Gi
     limits.memory: 3Gi
 ---
+# 2026-08-28 调大一次(6Gi → 9Gi)。这个命名空间不只跑 OpenMetadata 本体,
+# 还要跑它派生出来的采集/数据质量 Job(每个 limits.memory 1.5Gi)。常驻部分
+# (openmetadata + opensearch)实测已经占到 4864Mi,6Gi 的上限只剩 1280Mi,
+# 比一个采集 Job 要的 1536Mi 还少 —— 结果是 CronJob 到点了也建不出 Pod,
+# 事件里是 `exceeded quota: compute-quota`。
+# **这个坑这个仓库栽第三次了**(前两次:2026-08-19 MLflow 改 resources 被
+# quota 卡住、2026-08-23 采集 Job 要 4Gi 被卡住),每次的表现都一样阴险:
+# Job 显示 Running 0/1、一个 Pod 都没有,只有 describe 才看得到 FailedCreate。
+# 这次留出 9Gi = 常驻 4864Mi + 两个并发 Job 3Gi + 约 1Gi 余量。
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -56,8 +65,8 @@ metadata:
 spec:
   hard:
     requests.cpu: "2"
-    requests.memory: 4Gi
-    limits.memory: 6Gi
+    requests.memory: 6Gi
+    limits.memory: 9Gi
 ---
 apiVersion: v1
 kind: ResourceQuota

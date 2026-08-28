@@ -215,6 +215,21 @@ RESULT="$(kubectl -n "$TRA_NS" exec -i "$TRA_POD" -- python3 - < "$PY_SCRIPT" 2>
 PIPELINE_ID="$(echo "$RESULT" | grep -oE 'PIPELINE_ID=[a-f0-9-]+' | cut -d= -f2 || true)"
 [ -n "$PIPELINE_ID" ] || { log "错误:没拿到 pipeline id,上面输出里有具体报错。"; exit 1; }
 
+# OpenMetadata 自己的 k8s deployer 建 CronJob 时写死 startingDeadlineSeconds=60,
+# 在这套环境里等于**永远不会触发**:cloud-full 是抢占式实例、大部分时间关机,
+# 每个计划时刻都在关机期间过去,开机时早就超过 60 秒了,控制器直接跳过。
+# 2026-08-28 实测确认:3 个 om-cronjob 建出来 5 天,lastScheduleTime 一直是空,
+# 一个 Job 都没产生过——"配置好了"和"真的在跑"差了整整 5 天。
+# 放大到 6 小时(= 调度周期),含义变成"开机时如果上一个计划时刻在 6 小时内,
+# 就补跑一次",这样每次开机至少能跑到一轮。周期内最多错过 1 次,不会触发
+# k8s 那个 "too many missed start times (>100)" 的保护。
+log "把 OpenMetadata 建的 CronJob 的 startingDeadlineSeconds 从 60 放大到 6 小时..."
+for c in $(kubectl -n "$OM_NS" get cronjob -o name 2>/dev/null | grep "om-cronjob-" || true); do
+  kubectl -n "$OM_NS" patch "$c" --type merge \
+    -p '{"spec":{"startingDeadlineSeconds":21600}}' >/dev/null 2>&1 \
+    && log "  ${c} 已调整" || log "  ${c} 调整失败(不致命,但它可能不会自己触发)"
+done
+
 log "完成。pipeline id=${PIPELINE_ID}"
 log "接下来跑 ./scripts/35-verify-openmetadata-data-quality.sh 触发一次真实检查并核实结果"
 log "(deploy 成功不等于断言真的跑过一次——这个项目被'看起来成功了'坑过太多次)。"
