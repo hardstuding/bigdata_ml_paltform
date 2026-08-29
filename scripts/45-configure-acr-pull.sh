@@ -30,12 +30,36 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-: "${ACR_REGISTRY:?必须设置 ACR_REGISTRY(例:crpi-xxx.cn-hangzhou.personal.cr.aliyuncs.com)}"
-: "${ACR_USERNAME:?必须设置 ACR_USERNAME}"
-: "${ACR_PASSWORD:?必须设置 ACR_PASSWORD(用 read -s 读,不要写进命令行)}"
-: "${ACR_NAMESPACE:?必须设置 ACR_NAMESPACE}"
-
 SECRET_NAME="acr-pull"
+
+# **不给密码也能跑**:如果集群里已经有一份 acr-pull(之前配过),就从那里
+# 复制到缺的命名空间。
+#
+# 加这条的直接原因(2026-08-29):第一版的命名空间清单是手写的、漏了
+# superset,补的时候人已经不在跟前,而重跑脚本需要密码 —— 结果 superset
+# 的镜像拉不下来卡了半天。**"补一个命名空间"是个高频操作,不该每次都要
+# 人来输一次密码。**
+COPY_FROM=""
+if [ -z "${ACR_PASSWORD:-}" ]; then
+  # **不能用 `kubectl get secret <名字> -A`** —— kubectl 明确拒绝"跨命名空间
+  # 按名字取"(a resource cannot be retrieved by name across all namespaces),
+  # 而且它报的是错误、不是空结果,写成 `|| true` 会静默变成"找不到"。
+  # 用 field-selector 才是对的。
+  COPY_FROM="$(kubectl get secrets -A --field-selector "metadata.name=${SECRET_NAME}" \
+    -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)"
+  if [ -z "$COPY_FROM" ]; then
+    echo "!! 没有设 ACR_PASSWORD,集群里也找不到现成的 ${SECRET_NAME} 可复制。"
+    echo "   第一次配置必须给密码:"
+    echo "     zsh:  read -s \"ACR_PASSWORD?ACR password: \" && export ACR_PASSWORD"
+    echo "     bash: read -rsp \"ACR password: \" ACR_PASSWORD && export ACR_PASSWORD"
+    exit 1
+  fi
+  echo "==> 没给密码,从 ${COPY_FROM}/${SECRET_NAME} 复制现有凭据"
+else
+  : "${ACR_REGISTRY:?给了密码就必须一起给 ACR_REGISTRY}"
+  : "${ACR_USERNAME:?给了密码就必须一起给 ACR_USERNAME}"
+  : "${ACR_NAMESPACE:?给了密码就必须一起给 ACR_NAMESPACE}"
+fi
 
 # 哪些命名空间会拉自建镜像。**从仓库自己算出来,不是手写一份。**
 #
@@ -83,11 +107,17 @@ PY
 echo "==> 在 ${NAMESPACES} 里建/更新 ${SECRET_NAME}"
 for ns in $NAMESPACES; do
   kubectl get ns "$ns" >/dev/null 2>&1 || { echo "    跳过 ${ns}(命名空间不存在)"; continue; }
-  kubectl -n "$ns" create secret docker-registry "$SECRET_NAME" \
-    --docker-server="$ACR_REGISTRY" \
-    --docker-username="$ACR_USERNAME" \
-    --docker-password="$ACR_PASSWORD" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  if [ -n "$COPY_FROM" ]; then
+    kubectl -n "$COPY_FROM" get secret "$SECRET_NAME" -o json \
+      | python3 -c "import sys,json;d=json.load(sys.stdin);d['metadata']={'name':'$SECRET_NAME','namespace':'$ns'};print(json.dumps(d))" \
+      | kubectl apply -f - >/dev/null
+  else
+    kubectl -n "$ns" create secret docker-registry "$SECRET_NAME" \
+      --docker-server="$ACR_REGISTRY" \
+      --docker-username="$ACR_USERNAME" \
+      --docker-password="$ACR_PASSWORD" \
+      --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  fi
   # 挂到默认 ServiceAccount 上,这样这个命名空间里所有 Pod 自动带上,
   # 不用逐个 Deployment 改 imagePullSecrets。
   kubectl -n "$ns" patch serviceaccount default \
@@ -96,9 +126,15 @@ for ns in $NAMESPACES; do
 done
 
 echo
-echo "完成。接下来把清单里的镜像地址切到 ACR:"
-echo "  ACR_REGISTRY=${ACR_REGISTRY} ACR_NAMESPACE=${ACR_NAMESPACE} \\"
-echo "    python3 scripts/switch-image-registry.py --to acr"
+if [ -n "${ACR_REGISTRY:-}" ]; then
+  echo "完成。接下来把清单里的镜像地址切到 ACR:"
+  echo "  ACR_REGISTRY=${ACR_REGISTRY} ACR_NAMESPACE=${ACR_NAMESPACE:-<命名空间>} \\"
+  echo "    python3 scripts/switch-image-registry.py --to acr"
+else
+  # 复制模式下没有这几个变量 —— 这条路径本来就是"补一个命名空间",
+  # 清单早就切过了,不用再提示一次。
+  echo "完成(从现有凭据复制,没有改任何镜像地址)。"
+fi
 echo
 echo "注意:**已经在跑的 Pod 不会自动换镜像**——它们用的还是 ghcr.io 那个地址。"
 echo "切完清单 push,ArgoCD 同步后才会滚更。"
