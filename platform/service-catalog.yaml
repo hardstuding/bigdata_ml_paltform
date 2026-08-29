@@ -363,6 +363,8 @@ infra_only:
   platform/apps/grafana-capacity-dashboard.yaml: 看板定义,归属 kube-prometheus-stack
   platform/apps/grafana-cost-dashboard.yaml: 看板定义,归属 opencost
   platform/apps/grafana-goldenpath-dashboard.yaml: 看板定义,归属 golden-path-probes
+  platform/apps/grafana-inference-dashboard.yaml: 看板定义,归属 kserve-resources
+  kserve-inference-monitoring.yaml: PodMonitor,归属 kserve-resources(推理指标)
   airflow-db-init.yaml: 一次性建库 Job,归属 airflow
   keycloak-db-init.yaml: 一次性建库 Job,归属 keycloak
   mlflow-db-init.yaml: 一次性建库 Job,归属 mlflow

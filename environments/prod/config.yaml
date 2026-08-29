@@ -96,6 +96,7 @@ enabled_components:
   - keycloak-db-init.yaml
   - kserve-crd.yaml
   - kserve-resources.yaml
+  - kserve-inference-monitoring.yaml
   - minio.yaml
   - mlflow-db-init.yaml
   - mlflow-oauth2-proxy.yaml

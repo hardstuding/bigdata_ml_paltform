@@ -194,6 +194,12 @@ kind: InferenceService
 metadata:
   name: demo-rf-classifier
   namespace: ${NS}
+  annotations:
+    # 让 KServe 在 predictor pod 上打出 prometheus 的抓取注解。
+    # **这个注解本身不会让 Prometheus 来抓**(KServe 文档自己写明了),
+    # 它只是让 pod 带上 prometheus.io/* 注解;真正来抓的是
+    # apps/kserve-inference-monitoring/ 里那个 PodMonitor。两半都要有。
+    serving.kserve.io/enable-prometheus-scraping: "true"
 spec:
   predictor:
 ${CANARY_LINE}    serviceAccountName: kserve-minio-sa

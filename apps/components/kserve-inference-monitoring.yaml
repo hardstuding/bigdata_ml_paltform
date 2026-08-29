@@ -1,0 +1,25 @@
+# 在线推理的可观测性(C 线)。见 apps/kserve-inference-monitoring/manifests/
+# 里的说明:InferenceService 是运行时建的一次性资源,但"看得到推理的延迟
+# 和错误率"是常驻能力,放进 GitOps。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kserve-inference-monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/kserve-inference-monitoring/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

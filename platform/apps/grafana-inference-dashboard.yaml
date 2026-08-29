@@ -1,0 +1,20 @@
+# 在线推理看板(C 线「推理可观测性」)。和另外五块看板同一个模式。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana-inference-dashboard
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/grafana-inference-dashboard/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: ["CreateNamespace=true"]

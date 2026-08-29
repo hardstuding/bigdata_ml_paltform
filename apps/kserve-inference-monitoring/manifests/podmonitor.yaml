@@ -1,0 +1,43 @@
+# 抓在线推理服务的指标。
+#
+# **为什么单独一个组件**:InferenceService 本身是 `scripts/11` 运行时建的
+# 一次性 demo 资源(namespace `kserve-demo` 不在 git 里),但"能不能看到
+# 推理的延迟和错误率"是一个常驻能力,不该跟着 demo 资源一起来一起走。
+# 所以监控这一半放进 GitOps,用 namespaceSelector 去匹配那个运行时命名空间。
+#
+# **指标名不是猜的**:KServe 官方文档「Prometheus Metrics」列的 Python
+# 模型服务器指标是 `request_preprocess_seconds` / `request_predict_seconds` /
+# `request_postprocess_seconds`(都是 histogram),默认端口 8080、路径
+# /metrics。
+#
+# **两半都要有**:InferenceService 上的
+# `serving.kserve.io/enable-prometheus-scraping: "true"` 只是让 pod 带上
+# prometheus.io/* 注解,KServe 文档自己写明"它不会触发 Prometheus 来抓";
+# 真正来抓的是这个 PodMonitor。只加注解不加 PodMonitor,是一个典型的
+# "配置看起来齐了但什么都没发生"。
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kserve-inference
+  namespace: monitoring
+  labels:
+    # kube-prometheus-stack 的 podMonitorSelector 认这个标签,不打的话
+    # 对象建出来了也不会被选中(opencost 那次踩过同样的坑,见
+    # apps/components/opencost.yaml 里的注释)。
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - kserve-demo
+  selector:
+    matchLabels:
+      # KServe 给 predictor pod 打的标准标签
+      component: predictor
+  podMetricsEndpoints:
+    - port: http                 # KServe predictor 容器的 8080 端口名
+      path: /metrics
+      interval: 30s
+      # 指标里带上是哪个 InferenceService,不然多个模型的曲线混在一起
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_serving_kserve_io_inferenceservice]
+          targetLabel: inferenceservice

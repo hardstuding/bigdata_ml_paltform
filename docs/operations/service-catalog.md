@@ -103,6 +103,7 @@
 | `kafka-producer-device-events.yaml` | 造数 CronJob,归属 flink-streaming-demo |
 | `keycloak-db-init.yaml` | 一次性建库 Job,归属 keycloak |
 | `kserve-crd.yaml` | CRD,归属 kserve-resources |
+| `kserve-inference-monitoring.yaml` | PodMonitor,归属 kserve-resources(推理指标) |
 | `kueue-queues.yaml` | 队列定义,归属 kueue |
 | `mlflow-db-init.yaml` | 一次性建库 Job,归属 mlflow |
 | `mlflow-oauth2-proxy.yaml` | 认证边车,归属 mlflow |
@@ -120,6 +121,7 @@
 | `platform/apps/grafana-capacity-dashboard.yaml` | 看板定义,归属 kube-prometheus-stack |
 | `platform/apps/grafana-cost-dashboard.yaml` | 看板定义,归属 opencost |
 | `platform/apps/grafana-goldenpath-dashboard.yaml` | 看板定义,归属 golden-path-probes |
+| `platform/apps/grafana-inference-dashboard.yaml` | 看板定义,归属 kserve-resources |
 | `platform/apps/grafana-overview-dashboard.yaml` | 看板定义,归属 kube-prometheus-stack |
 | `platform/apps/prometheus-rules.yaml` | 告警规则,归属 kube-prometheus-stack |
 | `resource-quotas.yaml` | 命名空间配额,归属平台本身 |

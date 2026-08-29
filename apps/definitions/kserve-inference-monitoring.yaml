@@ -1,0 +1,32 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/kserve-inference-monitoring.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/kserve-inference-monitoring.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
+# 在线推理的可观测性(C 线)。见 apps/kserve-inference-monitoring/manifests/
+# 里的说明:InferenceService 是运行时建的一次性资源,但"看得到推理的延迟
+# 和错误率"是常驻能力,放进 GitOps。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kserve-inference-monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/kserve-inference-monitoring/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
