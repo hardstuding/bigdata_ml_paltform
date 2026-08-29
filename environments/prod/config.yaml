@@ -85,7 +85,7 @@ enabled_components:
   - dbt-demo.yaml
   - feast.yaml
   - flink-kubernetes-operator.yaml
-  - flink-streaming-demo.yaml
+  - platform-streams.yaml
   - flink-audit-sink.yaml
   - hive-metastore.yaml
   - iam-sync.yaml

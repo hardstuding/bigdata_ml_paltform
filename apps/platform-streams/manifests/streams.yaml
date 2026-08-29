@@ -1,0 +1,77 @@
+# 这个文件是生成的,不要手改。
+# 源:streams/ 下各作业的 stream.yaml + 脚本;生成器:scripts/render-streams.py
+# CI 会校验它和 streams/ 不漂移。
+apiVersion: v1
+data:
+  job.py: "\"\"\"\nKafka(device-events topic)-> Flink 流式计算 -> Iceberg——验证\"流处理引擎\"\n这条能力,见 docs/decisions/056-flink-role-design.md 和\ndocs/decisions/062-flink-streaming-pipeline.md。\n\nADR-056 明确说过 Flink 在这套架构里的定位是\"对着流数据做实时计算\",不是\n\"另一个数据搬运工具\"(纯搬运场景已经有 SeaTunnel/未来的 Kafka Connect)。\n所以这个作业不是简单的 Kafka -> Iceberg 透传:\n\n  1. 明细表 demo.device_events_stream:逐条落地(用于验证\"消费到的每一条\n     消息都真的进了 Iceberg\",行数应该能和 Kafka 里发过的消息数对上)。\n  2. 聚合表 demo.device_events_stream_agg:按 device_id 做 1 分钟滚动\n     窗口计数——这是\"数据经过时顺便算点什么\"的真实体现,是只有 Flink\n     这类流计算引擎才顺手做的事,SeaTunnel/Kafka Connect 做不到。\n\n两条 INSERT 用 StatementSet 一起提交,共用同一个 Kafka 读取,不用起两个\n作业重复消费。\n\nIceberg/S3A 配置照抄 apps/spark-iceberg-demo/ 和\napps/hive-metastore/manifests/core-site-configmap.yaml 的那一套(同一个\nHive Metastore + 同一个 MinIO warehouse,不是另配一份不一样的)——S3A\n凭据走 Hadoop 的 core-site.xml(挂载进 HADOOP_CONF_DIR,Flink 的\nHadoopUtils 会自动读取这个环境变量指向的目录去加载 core-site.xml,这是\nFlink 官方文档说明的机制,不是这个仓库发明的),不是走 Iceberg 自己的\n原生 S3FileIO——这个选择是刻意的,为了和 Spark/Hive Metastore 用同一套\nS3A 属性名和同一份连接方式,不给这个平台再引入第三种 S3 接入方式。\n\n这份文件是给人看/方便本地阅读的那份,和\napps/flink-streaming-demo/manifests/script-configmap.yaml 里的内容保持\n同步。不要直接跑这个文件——用\nscripts/30-run-flink-streaming-demo.sh 通过 FlinkDeployment 提交。\n\"\"\"\n# 注意:`value` 是 Flink SQL(Calcite)的保留字,建表 DDL 和 SELECT 里都必须\n# 用反引号包起来,否则 SQL 解析直接失败:\n#   SqlParserException: SQL parse failed. Encountered \"value\" at line N\n# 2026-08-22 第一次真实部署就撞到这个——字段名沿用的是 SeaTunnel 那条批量\n# 链路的 schema(见 apps/airflow/dags/seatunnel_device_events.py),在\n# SeaTunnel/Spark 那边 `value` 没问题,换到 Flink 就炸。**跨引擎复用 schema\n# 时,保留字集合是不一样的**,这一点值得记住。\n\nfrom pyflink.table import EnvironmentSettings, TableEnvironment\n\nKAFKA_BOOTSTRAP_SERVERS = \"platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092\"\nKAFKA_TOPIC = \"device-events-avro\"\nSCHEMA_REGISTRY_URL = \"http://karapace.schema-registry.svc.cluster.local:8081\"\nHIVE_METASTORE_URI = \"thrift://hive-metastore.data.svc.cluster.local:9083\"\nICEBERG_WAREHOUSE = \"s3a://lakehouse/warehouse\"\n\n\ndef main() -> None:\n    env_settings = EnvironmentSettings.in_streaming_mode()\n    t_env = TableEnvironment.create(env_settings)\n\n    # Iceberg sink 靠 checkpoint 触发提交(commit),没有 checkpoint,数据\n    # 永远只停留在 Flink 内部的 in-progress 文件里,Trino/Spark 永远读不到\n    # ——这是这个仓库\"部署了不等于能用\"的教训在 Flink 这里的对应版本,\n    # 必须显式打开,不能假设默认值够用(Flink 默认不开 checkpoint)。\n    t_env.get_config().set(\"execution.checkpointing.interval\", \"30 s\")\n    t_env.get_config().set(\"execution.checkpointing.mode\", \"EXACTLY_ONCE\")\n\n    t_env.execute_sql(f\"\"\"\n        CREATE TABLE kafka_device_events (\n            event_id    BIGINT,\n            device_id   STRING,\n            event_type  STRING,\n            `value`     DOUBLE,\n            event_time  TIMESTAMP(3),\n            WATERMARK FOR event_time AS event_time - INTERVAL '10' SECOND\n        ) WITH (\n            'connector' = 'kafka',\n            'topic' = '{KAFKA_TOPIC}',\n            'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP_SERVERS}',\n            'properties.group.id' = 'flink-device-events-stream',\n            'scan.startup.mode' = 'earliest-offset',\n            -- **2026-08-23 从 json 改成 avro-confluent(ADR-068)。**\n            --\n            -- 这里的 schema 定义仍然写在 SQL 里,但它的性质变了:以前它是\n            -- **唯一**的 schema 声明,生产端改了字段这边毫无感知;现在\n            -- registry 才是权威,这段声明只是\"我按这个形状去读\",而\n            -- avro-confluent 会拿消息头里的 schema id 去 registry 取实际\n            -- schema 做兼容性解析——对不上会**明确报错**,不会静默变 null。\n            --\n            -- 顺带整类消失的 bug:时间字段现在是 Avro 的 timestamp-millis\n            -- (一个 long),不再需要 `json.timestamp-format.standard`。\n            -- 2026-08-22 那次\"格式差一个 T 就静默变 null、两个算子之后才\n            -- 以 RowTime field should not be null 炸出来\"的坑,从设计上\n            -- 不存在了(ADR-062)。\n            'format' = 'avro-confluent',\n            'avro-confluent.url' = '{SCHEMA_REGISTRY_URL}'\n        )\n    \"\"\")\n\n    t_env.execute_sql(f\"\"\"\n        CREATE CATALOG iceberg_catalog WITH (\n            'type' = 'iceberg',\n            'catalog-type' = 'hive',\n            'uri' = '{HIVE_METASTORE_URI}',\n            'warehouse' = '{ICEBERG_WAREHOUSE}'\n        )\n    \"\"\")\n    # **先等 Hive Metastore 真的可用再建库。**\n    #\n    # 2026-08-23 真实踩到:云主机重启后,Flink 作业在 HMS 还没起来的时候就\n    # 执行到这一句,报\n    #   TableException: Could not execute CREATE DATABASE:\n    #   (catalogName: [iceberg_catalog], databaseName: [demo])\n    # 而这是**作业提交阶段**的失败(不是运行期 task 失败),Flink 的\n    # restart-strategy 管不着,整个 application 直接 FAILED,而且不会自己\n    # 恢复——集群重启一次,这条流式链路就永久停了,没人看就一直停着。\n    #\n    # 有上限地重试:HMS 起来通常是分钟级,10 分钟还不行说明是真出问题了,\n    # 该让作业失败并暴露出来,而不是无限等下去装作还在初始化。\n    import time as _t\n    for _attempt in range(60):\n        try:\n            t_env.execute_sql(\"CREATE DATABASE IF NOT EXISTS iceberg_catalog.demo\")\n            break\n        except Exception as _e:            # noqa: BLE001 - 这里就是要兜住所有连不上的情况\n            print(f\"[{_attempt + 1}/60] Hive Metastore 还连不上,10 秒后重试: {_e}\", flush=True)\n            _t.sleep(10)\n    else:\n        raise RuntimeError(\"等了 10 分钟 Hive Metastore 仍然不可用,放弃\")\n\n    t_env.execute_sql(\"\"\"\n        CREATE TABLE IF NOT EXISTS iceberg_catalog.demo.device_events_stream (\n            event_id    BIGINT,\n            device_id   STRING,\n            event_type  STRING,\n            `value`     DOUBLE,\n            event_time  TIMESTAMP(3)\n        )\n    \"\"\")\n\n    t_env.execute_sql(\"\"\"\n        CREATE TABLE IF NOT EXISTS iceberg_catalog.demo.device_events_stream_agg (\n            window_start TIMESTAMP(3),\n            window_end   TIMESTAMP(3),\n            device_id    STRING,\n            event_count  BIGINT\n        )\n    \"\"\")\n\n    statement_set = t_env.create_statement_set()\n\n    statement_set.add_insert_sql(\"\"\"\n        INSERT INTO iceberg_catalog.demo.device_events_stream\n        SELECT event_id, device_id, event_type, `value`, event_time\n        FROM kafka_device_events\n    \"\"\")\n\n    statement_set.add_insert_sql(\"\"\"\n        INSERT INTO iceberg_catalog.demo.device_events_stream_agg\n        SELECT window_start, window_end, device_id, COUNT(*) AS event_count\n        FROM TABLE(\n            TUMBLE(TABLE kafka_device_events, DESCRIPTOR(event_time), INTERVAL '1' MINUTE)\n        )\n        GROUP BY window_start, window_end, device_id\n    \"\"\")\n\n    statement_set.execute()\n\n\nif __name__ == \"__main__\":\n    main()\n"
+kind: ConfigMap
+metadata:
+  name: stream-device-events-stream-script
+  namespace: flink
+---
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: render-streams
+    platform-streams/name: device-events-stream
+  name: device-events-stream
+  namespace: flink
+spec:
+  flinkConfiguration:
+    execution.checkpointing.interval: 30s
+    flink.hadoop.fs.s3a.aws.credentials.provider: com.amazonaws.auth.EnvironmentVariableCredentialsProvider
+    flink.hadoop.fs.s3a.connection.ssl.enabled: 'false'
+    flink.hadoop.fs.s3a.endpoint: http://minio.minio.svc.cluster.local:9000
+    flink.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    flink.hadoop.fs.s3a.path.style.access: 'true'
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: '9249'
+    taskmanager.numberOfTaskSlots: '1'
+  flinkVersion: v1_20
+  image: ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg:3a01421f1383c9028ed8fb6754f244c7680b49b5
+  imagePullPolicy: IfNotPresent
+  job:
+    args:
+    - -pyclientexec
+    - /usr/bin/python3
+    - -py
+    - /opt/flink/usrlib/job.py
+    entryClass: org.apache.flink.client.python.PythonDriver
+    jarURI: local:///opt/flink/opt/flink-python-1.20.5.jar
+    parallelism: 1
+    upgradeMode: stateless
+  jobManager:
+    resource:
+      cpu: 0.3
+      memory: 1024m
+  podTemplate:
+    spec:
+      containers:
+      - env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              key: rootUser
+              name: minio-root
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              key: rootPassword
+              name: minio-root
+        name: flink-main-container
+        ports:
+        - containerPort: 9249
+          name: metrics
+        volumeMounts:
+        - mountPath: /opt/flink/usrlib
+          name: job-script
+      volumes:
+      - configMap:
+          name: stream-device-events-stream-script
+        name: job-script
+  serviceAccount: flink
+  taskManager:
+    resource:
+      cpu: 0.3
+      memory: 1792m

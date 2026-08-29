@@ -131,6 +131,22 @@
   </section>
 
   <section>
+    <div class="head"><h2>流作业</h2><span class="note">常驻,一直在跑</span></div>
+    <div class="panel">
+      {% if streams.error %}<p class="empty">{{ streams.error }}</p>
+      {% elif not streams.rows %}<p class="empty">还没有流作业。在 <code>streams/</code> 里加一个目录即可。</p>
+      {% else %}{% for s in streams.rows %}
+      <div class="row" title="作业状态 {{ s.job_state }} / JobManager {{ s.jm_state }}">
+        <span class="dot {{ 'ok' if s.ok else 'bad' }}"></span>
+        <span class="name">{{ s.name }}</span>
+        <span class="desc">JobManager {{ s.jm_state }}</span>
+        <span class="val">{{ s.job_state }}</span>
+      </div>
+      {% endfor %}{% endif %}
+    </div>
+  </section>
+
+  <section>
     <div class="head"><h2>我的作业</h2></div>
     <div class="panel">
       {% if jobs.error %}<p class="empty">{{ jobs.error }}</p>

@@ -123,6 +123,13 @@ TOOLS = [
         "probe": "http://spark-history-server.spark-operator.svc.cluster.local:18080/",
     },
     {
+        "category": "数据",
+        "name": "Schema Registry",
+        "description": "Kafka 消息的 schema 契约与兼容性校验(Karapace)",
+        "url": "http://schema-registry.local-lite.test",
+        "probe": "http://karapace.kafka.svc.cluster.local:8081/subjects",
+    },
+    {
         "category": "治理",
         "name": "权限申请门户",
         "description": "组权限申请 / 表访问分级审批 / 权限交接 / 审计",
@@ -354,6 +361,38 @@ GOLDEN_PATHS = {
 GOLDEN_PATH_STALE_SEC = 3600
 
 
+def streams():
+    """常驻流作业的状态。
+
+    **为什么不是在工具卡片里放一个 Flink UI 链接**:每个流作业有自己的
+    JobManager UI,没有一个"总的 Flink 入口"可以链;而且真正要回答的问题是
+    「我的流作业还活着吗」,不是「Flink 的界面在哪」。所以这里直接列
+    FlinkDeployment 的状态。
+    """
+    try:
+        api = _k8s()
+        items = api.list_namespaced_custom_object(
+            "flink.apache.org", "v1beta1", "flink", "flinkdeployments")["items"]
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"读不到流作业({type(exc).__name__})", "rows": []}
+
+    rows = []
+    for d in items:
+        st = d.get("status", {}) or {}
+        job = (st.get("jobStatus") or {}).get("state") or "—"
+        # jobManagerDeploymentStatus 说的是"容器起来了没有",jobStatus 才是
+        # "作业本身在不在跑"。两个都要看:JM 正常而 job 是 FAILED 的组合
+        # 恰恰是最容易被忽略的那种坏法。
+        jm = st.get("jobManagerDeploymentStatus") or "—"
+        rows.append({
+            "name": d["metadata"]["name"],
+            "job_state": job,
+            "jm_state": jm,
+            "ok": job == "RUNNING" and jm == "READY",
+        })
+    return {"error": None, "rows": sorted(rows, key=lambda r: r["name"])}
+
+
 def golden_paths():
     """每条黄金链路上次做成事是多久以前。取不到就整块降级,不影响别处。"""
     try:
@@ -417,6 +456,7 @@ def index():
         queues=queue_usage(),
         jobs=my_jobs(username),
         golden=golden_paths(),
+        streams=streams(),
         tool_count=len(TOOLS),
         tool_up=sum(1 for v in up.values() if v),
     )

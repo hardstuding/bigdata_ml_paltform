@@ -86,7 +86,6 @@ DIR_MAP = {
     # 不同,同样走"源文件挪进 templates/,渲染产物落回 ArgoCD 原本读的
     # 路径"这条已经验证过的路(见上面 Postgres/cert-manager-issuers 那几条
     # 的注释,这次不是新机制,是同一个机制第三/四次使用)。
-    "apps-flink-streaming-demo-manifests": REPO_ROOT / "apps" / "flink-streaming-demo" / "manifests",
     "apps-kafka-producer-manifests": REPO_ROOT / "apps" / "kafka-producer" / "manifests",
     "apps-postgres-backup-manifests": REPO_ROOT / "apps" / "postgres-backup" / "manifests",
     # 2026-08-23(ADR-064):Kueue 的队列配额三个环境差别巨大

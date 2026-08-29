@@ -1,0 +1,12 @@
+# 设备事件流:从 Kafka 读 → 按窗口聚合 → 写 Iceberg。
+#
+# 这是第一个用 streams/ 这套定义表达的流作业。它**不是新作业** —— 就是原本
+# apps/flink-streaming-demo/ 里那个手写 140 行 FlinkDeployment 的同一个作业,
+# 用来证明这套抽象能表达真实作业,而不是只能表达 hello world。
+name: device-events-stream
+script: job.py
+parallelism: 1
+checkpoint_interval: "30s"
+jobmanager_memory: "1024m"
+taskmanager_memory: "1792m"
+cpu: 0.3

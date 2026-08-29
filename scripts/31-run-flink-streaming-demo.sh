@@ -14,7 +14,7 @@
 #
 # 前置条件(**这一轮全部没有在真实集群跑过**,见
 # docs/decisions/062-flink-streaming-pipeline.md 的验证记录部分):
-#   - flink-kubernetes-operator / flink-streaming-demo / kafka-producer-
+#   - flink-kubernetes-operator / platform-streams / kafka-producer-
 #     device-events 这三个 Application 已经加进 enabled_components 并同步过
 #   - apps/flink-iceberg-image、apps/kafka-producer-image 两个镜像已经被
 #     .github/workflows/build-images.yml 构建推送过,manifest 里的
@@ -103,7 +103,7 @@ kubectl wait -n kafka --for=condition=complete "job/${JOB_NAME}" --timeout=120s 
 
 log "==> 等 Flink 的 checkpoint 间隔(30s)过去几轮,让 Iceberg sink 真正提交"
 log "    (Iceberg Flink sink 靠 checkpoint 触发 commit,没有 checkpoint 数据不会出现在表里,"
-log "     见 apps/flink-streaming-demo/manifests/script-configmap.yaml 里的说明)"
+log "     见 streams/device-events/ 和 streams/README.md)"
 sleep 90
 
 log "==> 再查一次行数,核实真的有新数据进了 Iceberg(不是只看 Flink/Job 状态)"

@@ -193,14 +193,16 @@ services:
     依赖: [kafka-cluster, hive-metastore, minio]
     排障: ADR-066
 
-  - name: flink-streaming-demo
-    用途: 设备事件流式聚合写 Iceberg,验证流处理链路
+  - name: platform-streams
+    用途: git 里的流式作业(streams/ 下写几行 yaml + PyFlink 脚本就跑起来)
     类别: 数据
     owner: platform-team
-    面向用户: false
+    面向用户: true
     请求路径上: false
     依赖: [kafka-cluster, hive-metastore, minio]
-    排障: ADR-062
+    排障: streams/README.md;生成器是 scripts/render-streams.py
+    备注: 取代了原来手写 140 行 FlinkDeployment 的 flink-streaming-demo;
+          manifest 是生成物不要手改,CI 校验它和 streams/ 不漂移
 
   - name: feast
     用途: 特征存储,离线读 Iceberg、在线走 Redis

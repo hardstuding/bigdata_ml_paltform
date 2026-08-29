@@ -64,10 +64,10 @@
 | 服务 | 用途 | 负责组 | 面向用户 | 依赖 | 出问题看哪里 |
 |---|---|---|---|---|---|
 | **airflow** | 任务调度(dbt / SeaTunnel / Feast 物化等 DAG) | platform-team | 是 | postgres、trino、minio | docs/operations/troubleshooting.md 的「各组件专属故障」 |
-| **flink-streaming-demo** | 设备事件流式聚合写 Iceberg,验证流处理链路 | platform-team | 否 | kafka-cluster、hive-metastore、minio | ADR-062 |
 | **hive-metastore** | Iceberg 表的元数据服务,Trino/Spark/Flink 共用同一份<br>版本锁 3.1.3,不能升 4.x(Iceberg 的 Hive 客户端只会发 get_table) | platform-team | 否 | postgres | apps/hive-metastore/manifests/deployment.yaml 顶部注释 |
 | **kafka-cluster** | 消息总线,承载审计事件流和设备事件流 | platform-team | 否 | — | ADR-062 |
 | **minio** | 对象存储,湖仓 warehouse / 模型产物 / Spark 事件日志 / 备份都在它上面<br>有 NetworkPolicy 白名单,新增消费方要同时加白名单(踩过三次) | platform-team | 否 | — | docs/operations/troubleshooting.md 的「存储与 S3A 层」 |
+| **platform-streams** | git 里的流式作业(streams/ 下写几行 yaml + PyFlink 脚本就跑起来)<br>取代了原来手写 140 行 FlinkDeployment 的 flink-streaming-demo; manifest 是生成物不要手改,CI 校验它和 streams/ 不漂移 | platform-team | 是 | kafka-cluster、hive-metastore、minio | streams/README.md;生成器是 scripts/render-streams.py |
 | **postgres** | 元数据库(Keycloak / Airflow / Superset / MLflow / OpenMetadata / HMS 共用)<br>CloudNativePG 管理;每天备份到 MinIO,但那不是异地备份 | platform-team | 否 | — | ADR-033(备份恢复) |
 | **seatunnel** | 数据集成(把外部数据源搬进湖仓) | platform-team | 否 | minio、hive-metastore | ADR-054 |
 | **spark-history-server** | 看已结束 Spark 作业的执行详情,日志读 s3a://spark-logs/ | platform-team | 是 | minio | ADR-036 |

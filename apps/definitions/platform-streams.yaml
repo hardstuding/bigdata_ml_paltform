@@ -1,0 +1,39 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/platform-streams.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/platform-streams.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
+# 流式作业(A 线的流侧,和 platform-jobs 对等)。
+#
+# 源是 `streams/` 下每个作业的 stream.yaml + PyFlink 脚本,
+# `scripts/render-streams.py` 渲染成这个 Application 读的 manifest。
+# 加一个流作业 = 在 streams/ 里加一个目录 + 写几行 yaml + push,
+# 不用手写 140 行 FlinkDeployment。说明见 streams/README.md。
+#
+# **它取代了原来的 apps/flink-streaming-demo/**:device-events-stream 这个
+# 作业现在由 streams/device-events/ 表达。迁移时做过逐字段比对,除了脚本
+# 文件名和 ConfigMap 名,spec 完全一致。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-streams
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/platform-streams/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: flink
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
