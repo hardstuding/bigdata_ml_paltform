@@ -67,12 +67,16 @@ def trino_connection(
     user = user or config.require(
         "PLATFORM_TRINO_USER",
         "这是 Trino 的服务账号名(比如 superset_service),由 "
-        "scripts/00-generate-secrets.sh 生成在 trino-service-account 这个 Secret 里。",
+        "scripts/00-generate-secrets.sh 生成。跑在 argo-workflows 里的平台作业"
+        "是通过 platform-job-credentials 这个 Secret 注进来的(见 "
+        "scripts/render-jobs.py 生成的 envFrom),其他地方一般直接读 "
+        "trino-service-account。看到这个报错先确认作业 Pod 上到底挂没挂 "
+        "envFrom —— 它写的是 optional: true,Secret 不存在时 Pod 照样会起来,"
+        "一直跑到这里才炸。",
     )
     password = password or config.require(
         "PLATFORM_TRINO_PASSWORD",
-        "对应 PLATFORM_TRINO_USER 那个账号的密码,同样在 "
-        "trino-service-account 这个 Secret 里。",
+        "对应 PLATFORM_TRINO_USER 那个账号的密码,和它在同一个 Secret 里。",
     )
 
     # 身份代理(impersonation):让 Trino 把这次查询当成 `acting` 这个人发起

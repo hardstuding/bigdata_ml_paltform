@@ -193,6 +193,29 @@ ACR 上 1 分 59 秒拉完。
 - 拉取凭据要挂到**每个** ServiceAccount,不只是 default(Flink/iam-sync 用自己的 SA)
 - 空的 `pyproject.toml` 不会构建失败,会静默产出一个 `0.0.0` 的包
 
+### 2026-08-29 停机前的最后一次全量核对
+
+一眼看过去很吓人:50+ 个 Error pod(六条黄金链路探针全红、OpenMetadata
+的采集 cronjob 全红)。**查下来是历史残留,不是活着的故障** —— 每条探针
+和每个采集 cronjob 的**最近一次**都是 Completed。这些 Error 集中在
+两小时前那个窗口:Trino coordinator 当时在重启循环里(startupProbe
+130s 不够,已改成 610s),它一倒,依赖它的探针和采集一起红。
+
+`kubectl get pods` 里堆着的 Error 是**过去某个时刻**的快照,不是现在的
+状态。判断"现在到底好没好",要看每个 CronJob 最近一次那个 pod,不是
+看列表里有没有红的。
+
+唯一一个 Failed 的 workflow(`daily-order-summary-manual-lqhqs`)是我自己
+手工提交时没带 envFrom,同一份脚本带上凭据的那次(`daily-order-summary-t2`)
+是 Succeeded。顺带发现 SDK 的报错信息指错了 Secret 名字(说去看
+`trino-service-account`,而平台作业实际走的是 `platform-job-credentials`),
+已改;并在报错里点明 `envFrom` 写的是 `optional: true` —— Secret 不存在
+时 Pod 照样起得来,一路跑到 SDK 才炸,这个失败模式值得写在报错里。
+
+**还没验到的**:`daily-order-summary` 的 CronWorkflow 定时是 UTC 01:30,
+`status` 是空的,说明它从来没被定时触发过 —— 云主机大部分时间是关的,
+这个时间点基本撞不上。手工提交跑通 ≠ 定时路径跑通,这条差距如实记着。
+
 ### 云主机状态
 
 **运行中**(2026-08-28 22:56 开机)。08-29 02:00 前后因为我这边被用量限制
