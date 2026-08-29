@@ -1,0 +1,12 @@
+# 每天把订单按区域汇总一次,写回 Iceberg。
+#
+# 挑这个作为第一个定时作业,是因为它是**真的有输出、能被验证**的:
+# 跑完之后 `iceberg.demo.orders_by_region_daily` 里应该多一批当天的行。
+# 一个 print("hello") 的定时作业证明不了这条链路是通的。
+name: daily-order-summary
+script: job.py
+schedule: "30 1 * * *"      # 每天 01:30 UTC,和 Airflow 那三条 DAG 错开
+timezone: UTC
+cpu: "500m"
+memory: "1Gi"
+owner_group: data-analysts   # 用分析组的配额

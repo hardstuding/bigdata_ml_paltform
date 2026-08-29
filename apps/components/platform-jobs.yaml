@@ -1,0 +1,28 @@
+# 定时作业(A 线「作业模板 + CI/CD」的后半)。
+#
+# 源是 `jobs/` 下每个作业的 job.yaml + 脚本,`scripts/render-jobs.py` 渲染成
+# 这个 Application 读的 manifest(脚本 ConfigMap + Argo CronWorkflow)。
+# 用户加一个定时作业 = 在 jobs/ 里加一个目录 + 写个 schedule + push,
+# 不用写 Airflow DAG、不用手动提交。说明见 jobs/README.md。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-jobs
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/platform-jobs/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-workflows
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

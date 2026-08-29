@@ -89,6 +89,13 @@ jobs:
       - name: 文档死链检查
         run: python3 scripts/check-doc-links.py
 
+      # jobs/ 下的作业定义 → Argo CronWorkflow 的生成物不能漂移,而且作业
+      # 定义本身要合法(name 能当 K8s 资源名、cron 是五段式、owner_group 是
+      # platform/iam/ 里真实存在的组)。owner_group 写错的后果特别隐蔽:
+      # 作业会一直排队等一个不存在的 Kueue 队列,而 Workflow 状态上看不出原因。
+      - name: 定时作业定义校验 + 生成物不漂移
+        run: python3 scripts/render-jobs.py --check
+
       # 三档都要能渲染出来。只校验 cloud-full 的话,prod/local-lite 缺一个
       # RES 键要等到真去部署那一档才会发现——而那时候人已经在等着上生产了。
       - name: 三档环境都能渲染(prod/local-lite 缺键会在这里就报出来)

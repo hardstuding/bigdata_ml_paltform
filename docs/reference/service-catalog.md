@@ -56,6 +56,7 @@
 |---|---|---|---|---|---|
 | **cert-manager** | 证书签发。三档环境共用 platform-issuer 这个名字,背后接自签还是真实 CA 由环境配置决定 | platform-team | 否 | — | ADR-060 |
 | **kueue** | 按组分配计算配额,同 cohort 内空闲可互借 | platform-team | 否 | — | ADR-064 |
+| **platform-jobs** | git 里的定时作业(jobs/ 下写个 schedule 就会定时跑,不用写 DAG)<br>manifest 是生成物,不要手改;CI 校验它和 jobs/ 不漂移 | platform-team | 是 | argo-workflows、trino、kueue | jobs/README.md;生成器是 scripts/render-jobs.py |
 | **postgres-backup** | 每天把 Postgres 全量备份传到 MinIO | platform-team | 否 | postgres、minio | ADR-033 |
 
 ## 数据

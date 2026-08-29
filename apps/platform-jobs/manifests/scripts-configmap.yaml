@@ -1,0 +1,10 @@
+# 这个文件是生成的,不要手改。
+# 源:jobs/ 下各作业的 job.yaml + 脚本;生成器:scripts/render-jobs.py
+# CI 会校验它和 jobs/ 不漂移。
+apiVersion: v1
+data:
+  daily-order-summary--job.py: "\"\"\"每天把 iceberg.demo.orders 按区域汇总,写回 orders_by_region_daily。\n\n用 platform_sdk 拿连接,不手填连接串——连接信息由平台注入(见\nplatform_sdk.config),换环境不用改这个脚本。\n\"\"\"\nimport datetime\n\nfrom platform_sdk import query\n\nTARGET = \"iceberg.demo.orders_by_region_daily\"\nRUN_DATE = datetime.date.today().isoformat()\n\n\ndef rows_of(result):\n    \"\"\"`query()` 装了 pandas 返回 DataFrame、没装返回 (列名, 行)。\n\n    **不要直接 `for r in result`** —— 在 DataFrame 上那是遍历列名,不是遍历\n    行,而且不会报错,只会安静地给出错的东西。\n    \"\"\"\n    if hasattr(result, \"itertuples\"):\n        return [tuple(t)[1:] for t in result.itertuples()]\n    return result[1]\n\n\n# 目标表不存在就先建。CREATE TABLE IF NOT EXISTS 让这个作业可以从零开始跑,\n# 不需要谁先手动建表——\"从空环境可恢复\"这条对作业同样成立。\nquery(f\"\"\"\n    CREATE TABLE IF NOT EXISTS {TARGET} (\n        run_date     date,\n        region       varchar,\n        order_count  bigint,\n        total_amount double\n    )\n\"\"\")\n\n# 先删当天的,再插入。这样重跑不会产生重复行(幂等)——定时作业迟早会被\n# 重跑一次(补数、失败重试、开机补跑),不幂等的作业到那天才会暴露问题。\nquery(f\"DELETE FROM {TARGET} WHERE run_date = DATE '{RUN_DATE}'\")\n\nquery(f\"\"\"\n    INSERT INTO {TARGET}\n    SELECT DATE '{RUN_DATE}', region, count(*), sum(amount)\n    FROM iceberg.demo.orders\n    GROUP BY region\n\"\"\")\n\ncheck = rows_of(query(\n    f\"SELECT region, order_count, total_amount FROM {TARGET} \"\n    f\"WHERE run_date = DATE '{RUN_DATE}' ORDER BY region\"))\n\nprint(f\"{RUN_DATE} 汇总完成,{len(check)} 个区域:\")\nfor region, cnt, amount in check:\n    print(f\"  {region:<8} {cnt:>4} 单  {float(amount):>10.2f}\")\n\n# 写完要核实真的写进去了。作业\"没报错\"和\"产出了东西\"是两回事——这个平台\n# 被\"看起来成功了\"坑过太多次。\nif not check:\n    raise SystemExit(\"汇总结果是空的——上游 iceberg.demo.orders 可能没有数据\")\n"
+kind: ConfigMap
+metadata:
+  name: platform-jobs-scripts
+  namespace: argo-workflows

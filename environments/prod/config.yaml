@@ -80,6 +80,7 @@ enabled_components:
   - airflow.yaml
   - argo-training-workflow-template.yaml
   - argo-workflows.yaml
+  - platform-jobs.yaml
   - cloudnative-pg-operator.yaml
   - dbt-demo.yaml
   - feast.yaml

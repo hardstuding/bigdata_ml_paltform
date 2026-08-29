@@ -259,6 +259,16 @@ services:
     依赖: []
     排障: ADR-064
 
+  - name: platform-jobs
+    用途: git 里的定时作业(jobs/ 下写个 schedule 就会定时跑,不用写 DAG)
+    类别: 平台
+    owner: platform-team
+    面向用户: true
+    请求路径上: false
+    依赖: [argo-workflows, trino, kueue]
+    排障: jobs/README.md;生成器是 scripts/render-jobs.py
+    备注: manifest 是生成物,不要手改;CI 校验它和 jobs/ 不漂移
+
   - name: iam-sync
     用途: 把 platform/iam/ 里的组织架构同步进 Keycloak
     类别: 治理
