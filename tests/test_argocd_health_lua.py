@@ -17,11 +17,11 @@ lupa = pytest.importorskip("lupa", reason="没装 lupa 就跳过(pip install lup
 
 VALUES = Path(__file__).resolve().parent.parent / "platform" / "bootstrap" / "argocd-values.yaml"
 KEY = "resource.customizations.health.batch_Job"
+POD_KEY = "resource.customizations.health.Pod"
 
 
-@pytest.fixture(scope="module")
-def run_health():
-    src = yaml.safe_load(VALUES.read_text())["configs"]["cm"][KEY]
+def _make_runner(key):
+    src = yaml.safe_load(VALUES.read_text())["configs"]["cm"][key]
     L = lupa.LuaRuntime(unpack_returned_tuples=True)
 
     def to_lua(v):
@@ -39,6 +39,16 @@ def run_health():
         return L.execute("return (function() " + src + " end)()")
 
     return run
+
+
+@pytest.fixture(scope="module")
+def run_health():
+    return _make_runner(KEY)
+
+
+@pytest.fixture(scope="module")
+def run_pod_health():
+    return _make_runner(POD_KEY)
 
 
 PROBE = {"platform/golden-path": "probe"}
@@ -79,3 +89,42 @@ def test_没有_labels_也不能崩(run_health):
 
 def test_探针_job_刚创建也是健康(run_health):
     assert run_health(_job(PROBE))["status"] == "Healthy"
+
+
+# ---- Pod 那条(2026-08-29 加)----
+# 为什么需要它:只给 Job 加 Lua 不够——ArgoCD 还会把 Job 底下的 **Pod**
+# 算进应用健康,失败 Pod 走内置判定直接 Degraded,ADR-079 想解决的
+# "常年黄灯"当时只解决了一半。这组测试锁住"探针 Pod 不变红、普通 Pod
+# 该红还得红"这个边界。
+
+
+def _pod(labels=None, phase=None, message=None):
+    st = {}
+    if phase:
+        st["phase"] = phase
+    if message:
+        st["message"] = message
+    return {"metadata": {"labels": labels} if labels else {}, "status": st}
+
+
+def test_探针pod失败不让应用变红(run_pod_health):
+    assert run_pod_health(_pod(PROBE, "Failed", "探针没通"))["status"] == "Healthy"
+
+
+def test_普通pod失败仍然变红(run_pod_health):
+    # **这条最重要**:写错了等于把 ArgoCD 判断"部署好没好"的主要依据关掉。
+    hs = run_pod_health(_pod({"app": "trino"}, "Failed", "OOMKilled"))
+    assert hs["status"] == "Degraded"
+    assert hs["message"] == "OOMKilled"
+
+
+def test_普通pod运行中是健康(run_pod_health):
+    assert run_pod_health(_pod({"app": "trino"}, "Running"))["status"] == "Healthy"
+
+
+def test_普通pod正常结束是健康(run_pod_health):
+    assert run_pod_health(_pod({"app": "db-init"}, "Succeeded"))["status"] == "Healthy"
+
+
+def test_pod没有labels和phase也不能崩(run_pod_health):
+    assert run_pod_health(_pod())["status"] == "Progressing"

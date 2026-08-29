@@ -239,6 +239,42 @@ configs:
       hs.status = "Progressing"
       hs.message = "Job 还在跑"
       return hs
+    # **Job 那条不够** —— 2026-08-29 实测:`batch/Job` 的 Lua 确实生效了,
+    # 但 ArgoCD 还会把 Job 底下的 **Pod** 一起算进应用健康,失败 Pod 走内置
+    # 的 Pod 判定直接 Degraded,`golden-path-probes` 这个 Application 照样
+    # 是黄的。也就是说 ADR-079 想解决的"探针失败不该表现成部署有问题"当时
+    # 只解决了一半,而且看不出来——因为 `.status.resources` 里只有 CronJob,
+    # 没有 Pod,查半天找不到是谁 Degraded。
+    #
+    # 同样只对带 `platform/golden-path` 标签的 Pod 特殊处理。**不要写成对
+    # 所有 Pod 生效**——那等于把 ArgoCD 判断"部署好没好"的主要依据整个关掉。
+    resource.customizations.health.Pod: |
+      hs = {}
+      if obj.metadata ~= nil and obj.metadata.labels ~= nil and obj.metadata.labels["platform/golden-path"] ~= nil then
+        hs.status = "Healthy"
+        hs.message = "黄金链路探针的 Pod:失败信息走告警和看板,不进部署状态(ADR-079)"
+        return hs
+      end
+      if obj.status ~= nil and obj.status.phase ~= nil then
+        if obj.status.phase == "Succeeded" then
+          hs.status = "Healthy"
+          hs.message = "Pod 正常结束"
+          return hs
+        end
+        if obj.status.phase == "Failed" then
+          hs.status = "Degraded"
+          hs.message = obj.status.message or "Pod 失败"
+          return hs
+        end
+        if obj.status.phase == "Running" then
+          hs.status = "Healthy"
+          hs.message = "Running"
+          return hs
+        end
+      end
+      hs.status = "Progressing"
+      hs.message = "Pod 还没到终态"
+      return hs
     resource.customizations.health.Service: |
       hs = {}
       hs.status = "Healthy"

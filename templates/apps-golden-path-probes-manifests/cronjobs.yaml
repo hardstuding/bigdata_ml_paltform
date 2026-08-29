@@ -47,6 +47,14 @@ spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
       template:
+        metadata:
+          # 标签要同时打在 Job **和它的 Pod** 上。2026-08-29 实测:只打在 Job
+          # 上时,ADR-079 那段 `batch/Job` 的健康检查 Lua 确实生效了,但
+          # ArgoCD 还会把 Job 底下的 **Pod** 算进应用健康——失败 Pod 走内置
+          # 的 Pod 判定直接 Degraded,于是 golden-path-probes 这个 Application
+          # 还是黄的,ADR-079 想解决的"常年黄灯"没真的解决。
+          labels:
+            platform/golden-path: "probe"
         spec:
           priorityClassName: batch
           restartPolicy: Never
@@ -99,6 +107,14 @@ spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
       template:
+        metadata:
+          # 标签要同时打在 Job **和它的 Pod** 上。2026-08-29 实测:只打在 Job
+          # 上时,ADR-079 那段 `batch/Job` 的健康检查 Lua 确实生效了,但
+          # ArgoCD 还会把 Job 底下的 **Pod** 算进应用健康——失败 Pod 走内置
+          # 的 Pod 判定直接 Degraded,于是 golden-path-probes 这个 Application
+          # 还是黄的,ADR-079 想解决的"常年黄灯"没真的解决。
+          labels:
+            platform/golden-path: "probe"
         spec:
           priorityClassName: batch
           restartPolicy: Never
@@ -157,6 +173,14 @@ spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
       template:
+        metadata:
+          # 标签要同时打在 Job **和它的 Pod** 上。2026-08-29 实测:只打在 Job
+          # 上时,ADR-079 那段 `batch/Job` 的健康检查 Lua 确实生效了,但
+          # ArgoCD 还会把 Job 底下的 **Pod** 算进应用健康——失败 Pod 走内置
+          # 的 Pod 判定直接 Degraded,于是 golden-path-probes 这个 Application
+          # 还是黄的,ADR-079 想解决的"常年黄灯"没真的解决。
+          labels:
+            platform/golden-path: "probe"
         spec:
           priorityClassName: batch
           restartPolicy: Never
@@ -216,6 +240,14 @@ spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
       template:
+        metadata:
+          # 标签要同时打在 Job **和它的 Pod** 上。2026-08-29 实测:只打在 Job
+          # 上时,ADR-079 那段 `batch/Job` 的健康检查 Lua 确实生效了,但
+          # ArgoCD 还会把 Job 底下的 **Pod** 算进应用健康——失败 Pod 走内置
+          # 的 Pod 判定直接 Degraded,于是 golden-path-probes 这个 Application
+          # 还是黄的,ADR-079 想解决的"常年黄灯"没真的解决。
+          labels:
+            platform/golden-path: "probe"
         spec:
           priorityClassName: batch
           restartPolicy: Never
@@ -271,6 +303,14 @@ spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
       template:
+        metadata:
+          # 标签要同时打在 Job **和它的 Pod** 上。2026-08-29 实测:只打在 Job
+          # 上时,ADR-079 那段 `batch/Job` 的健康检查 Lua 确实生效了,但
+          # ArgoCD 还会把 Job 底下的 **Pod** 算进应用健康——失败 Pod 走内置
+          # 的 Pod 判定直接 Degraded,于是 golden-path-probes 这个 Application
+          # 还是黄的,ADR-079 想解决的"常年黄灯"没真的解决。
+          labels:
+            platform/golden-path: "probe"
         spec:
           priorityClassName: batch
           restartPolicy: Never
@@ -310,6 +350,14 @@ spec:
       backoffLimit: 0
       activeDeadlineSeconds: 180
       template:
+        metadata:
+          # 标签要同时打在 Job **和它的 Pod** 上。2026-08-29 实测:只打在 Job
+          # 上时,ADR-079 那段 `batch/Job` 的健康检查 Lua 确实生效了,但
+          # ArgoCD 还会把 Job 底下的 **Pod** 算进应用健康——失败 Pod 走内置
+          # 的 Pod 判定直接 Degraded,于是 golden-path-probes 这个 Application
+          # 还是黄的,ADR-079 想解决的"常年黄灯"没真的解决。
+          labels:
+            platform/golden-path: "probe"
         spec:
           priorityClassName: batch
           restartPolicy: Never
