@@ -56,6 +56,17 @@ spec:
             email_domains = [ "*" ]
             cookie_secure = false
             skip_provider_button = true
+            # 2026-08-29:app 要按登录用户所在的组做事(门户按角色显示、
+            # 建表工具判断谁能代他人建表),legacy config 没有"把 groups 转成
+            # 请求头"的选项,只能把整个 access token 传下去让 app 自己解 ——
+            # 和 permission-request-app 同一个模式。
+            #
+            # **不要在这里往 scope 里加 groups**:groups 是挂在 Keycloak
+            # client 上的 *default* client scope(见
+            # scripts/03-configure-keycloak.sh),不请求也会带上;而请求一个
+            # client 没配的 scope,Keycloak 直接 invalid_scope,登录页都进不去
+            # (MLflow 2026-08-19 就是这么炸的)。
+            pass_access_token = true
         ingress:
           enabled: true
           className: nginx

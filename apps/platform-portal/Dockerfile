@@ -15,6 +15,10 @@ COPY src/app.py .
 # ADR-084 的 SQL Lab 深链。app.py `import sqllab`,漏拷这一行镜像会直接
 # 起不来(ModuleNotFoundError),不是"少个功能"那么轻。
 COPY src/sqllab.py .
+# 登录身份/组的解析。权威源是 shared/flask_identity.py,这里是它的副本
+# (scripts/check-duplicated-sources.py 在 CI 里保证不漂移)。**漏拷这一行
+# 镜像会直接起不来**(ModuleNotFoundError),不是"少个功能"那么轻。
+COPY src/identity.py .
 COPY src/templates/ ./templates/
 # 工具图标(Simple Icons,CC0)。**必须一起 COPY 进来** —— 只加文件不改
 # Dockerfile 的话,本地跑得好好的、镜像里那一栏全是空白,而且不报错。

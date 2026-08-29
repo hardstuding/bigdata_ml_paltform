@@ -233,6 +233,69 @@ def test_healthz(client):
     assert resp.get_json() == {"status": "ok"}
 
 
+def _token(groups):
+    """伪造一个 oauth2-proxy 会传下来的 access token(不验签,见
+    shared/flask_identity.py 里说明为什么不验)。"""
+    import base64 as b64, json as js
+    payload = b64.urlsafe_b64encode(
+        js.dumps({"preferred_username": "zhenghe", "groups": groups}).encode()
+    ).decode().rstrip("=")
+    return f"eyJhbGciOiJub25lIn0.{payload}."
+
+
+class TestOwnerOverrideNeedsPlatformTeam:
+    """代他人建表要在 platform-team,其他人不行。
+
+    表负责人是权限审批链的第一级审批人,所以"能指定别人当负责人"等于
+    "能安排审批人",不该是所有人都有的能力。
+    """
+
+    def _submit(self, client, form_owner, headers):
+        with patch.object(reg, "create_table_in_trino"), \
+             patch.object(reg, "OPENMETADATA_TOKEN", "fake-token"), \
+             patch.object(reg, "register_table_in_openmetadata", return_value="ok") as om:
+            client.post("/submit",
+                        data={"table_fqn": "demo.t9", "columns": "id BIGINT",
+                              "security_level": "1", "owner": form_owner},
+                        headers=headers)
+        return om.call_args[0][4]
+
+    def test_平台组可以指定别人(self, client):
+        owner = self._submit(client, "analyst001", {
+            "X-Forwarded-User": "zhenghe",
+            "X-Forwarded-Access-Token": _token(["platform-team"])})
+        assert owner == "analyst001"
+
+    def test_平台组不填就是自己(self, client):
+        owner = self._submit(client, "", {
+            "X-Forwarded-User": "zhenghe",
+            "X-Forwarded-Access-Token": _token(["platform-team"])})
+        assert owner == "zhenghe"
+
+    def test_不在平台组的人填了也无效(self, client):
+        owner = self._submit(client, "victim001", {
+            "X-Forwarded-User": "zhenghe",
+            "X-Forwarded-Access-Token": _token(["data-analysts"])})
+        assert owner == "zhenghe"
+
+    def test_拿不到组信息时按不能处理(self, client):
+        # 和门户那边"拿不到就显示全部"相反 —— 那边多显示几个进不去的入口
+        # 没有代价,这边放过去就是一个越权写入。同一个不确定状态,依据是
+        # "错的那一边代价多大"。
+        owner = self._submit(client, "victim001", {"X-Forwarded-User": "zhenghe"})
+        assert owner == "zhenghe"
+
+    def test_页面按角色决定那个框能不能编辑(self, client):
+        plat = client.get("/", headers={"X-Forwarded-User": "zhenghe",
+                                        "X-Forwarded-Access-Token": _token(["platform-team"])}
+                          ).get_data(as_text=True)
+        other = client.get("/", headers={"X-Forwarded-User": "zhenghe",
+                                         "X-Forwarded-Access-Token": _token(["data-analysts"])}
+                           ).get_data(as_text=True)
+        assert 'name="owner"' in plat and "disabled" not in plat.split("负责人")[1][:200]
+        assert "disabled" in other
+
+
 class TestOwnerCannotBeSpoofed:
     """负责人只能是登录者本人(2026-08-29 堵的一条真实提权路径)。
 

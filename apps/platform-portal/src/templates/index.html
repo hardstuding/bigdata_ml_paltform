@@ -111,6 +111,14 @@
     {% if username %}<div class="who"><i></i>{{ username }}</div>{% endif %}
   </div>
 
+  {% if groups_warning %}
+  {# "配置没配对"和"你不在任何组"在代码里长得一模一样,后果却完全不同。
+     不说出来的话,人只会觉得"门户上东西怎么这么少",不会想到是配置。 #}
+  <div class="panel" style="border-color: var(--warn); padding: 12px 15px; margin-bottom: 22px">
+    <span class="note warn">⚠ {{ groups_warning }}</span>
+  </div>
+  {% endif %}
+
   <div class="tiles">
     <div class="tile {{ 'ok' if golden.healthy == golden.total and golden.total else ('bad' if golden.total else '') }}"
          title="链路探针每隔几分钟执行一次真实操作,例如查一次数据、读一次目录">

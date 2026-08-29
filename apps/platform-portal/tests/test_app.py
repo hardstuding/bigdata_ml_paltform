@@ -867,3 +867,67 @@ class TestJobActions:
             r = portal.app.test_client().post("/job/job-abc/cancel",
                                               headers={"X-Forwarded-User": "alice"})
         assert r.status_code == 500 and "取消失败" in r.get_json()["error"]
+
+
+class TestRoleAwareToolList:
+    """按角色显示工具(roadmap P1.5「不再对所有角色一视同仁地暴露」)。
+
+    **这不是权限控制,是降噪** —— 真正拦得住的是每个组件自己的 SSO 和 OPA。
+    这里做的是别把 14 个入口一股脑摆在一个只需要其中三个的人面前。
+    """
+
+    def _html(self, groups, source="claim_present", user="alice"):
+        with patch.object(portal.identity, "parse_identity",
+                          return_value=(user, groups, source)), \
+             patch.object(portal, "probe_all", return_value={}), \
+             patch.object(portal, "queue_usage", return_value={"error": None, "rows": [], "pending_total": 0}), \
+             patch.object(portal, "my_jobs", return_value={"error": None, "rows": []}), \
+             patch.object(portal, "golden_paths", return_value={"error": None, "rows": [], "ok": 0, "total": 0}), \
+             patch.object(portal, "streams", return_value={"error": None, "rows": []}), \
+             patch.object(portal, "my_permissions", return_value={"available": False, "grants": [], "expiring_soon": []}), \
+             patch.object(portal, "my_approvals", return_value={"available": False, "pending": [], "overdue": []}):
+            portal.app.config["TESTING"] = True
+            return portal.app.test_client().get("/").get_data(as_text=True)
+
+    def test_分析师看不到运维和身份那两栏(self):
+        html = self._html(["data-analysts"])
+        assert "ArgoCD" not in html
+        assert "Keycloak" not in html
+
+    def test_分析师看得到数据类工具(self):
+        html = self._html(["data-analysts"])
+        assert "SQL 工作台" in html and "Superset" in html
+
+    def test_平台组看得到全部(self):
+        html = self._html(["platform-team"])
+        assert "ArgoCD" in html and "Keycloak" in html and "Superset" in html
+
+    def test_没列进规则的分类对所有人显示(self):
+        # 规则只写"限制谁能看",没写的分类默认所有人可见 —— 否则每加一个
+        # 工具都要记得去改那张表,漏了就是新工具对谁都不显示。
+        html = self._html(["algorithm-team"])
+        assert "JupyterHub" in html and "MLflow" in html
+
+    def test_拿不到组信息时显示全部_而不是显示空(self):
+        # 宁可多显示几个进不去的入口,也不能因为一个配置没配对就让所有人
+        # 看到一个空门户。
+        html = self._html([], source="claim_missing")
+        assert "ArgoCD" in html and "Superset" in html
+
+    def test_拿不到组信息时页面上说清楚是配置问题(self):
+        html = self._html([], source="claim_missing")
+        assert "配置问题不是权限问题" in html
+        assert "03-configure-keycloak.sh" in html
+
+    def test_真的不在任何组时不报警(self):
+        # groups 字段存在、内容为空 = 这个人确实不在任何组,是正常状态。
+        html = self._html([], source="claim_present")
+        assert "配置问题不是权限问题" not in html
+
+    def test_工具计数跟着可见的走_不是总数(self):
+        few = self._html(["data-analysts"])
+        all_ = self._html(["platform-team"])
+        import re
+        n_few = int(re.search(r"(\d+) 个工具", few).group(1))
+        n_all = int(re.search(r"(\d+) 个工具", all_).group(1))
+        assert n_few < n_all

@@ -49,6 +49,8 @@ import json
 import requests
 from flask import Flask, abort, redirect, render_template, request, url_for
 
+import identity
+
 import sqllab
 
 app = Flask(__name__)
@@ -235,6 +237,37 @@ _HTTP_PORT_SUFFIX = os.environ.get("PUBLIC_HTTP_PORT_SUFFIX", "")
 _HTTPS_PORT_SUFFIX = os.environ.get("PUBLIC_HTTPS_PORT_SUFFIX", "")
 
 
+# 按角色显示工具(roadmap P1.5 里「底层组件不再对所有角色一视同仁地暴露」)。
+#
+# **这不是权限控制,是降噪。** 真正拦得住的是每个组件自己的 SSO 和 OPA
+# ——一个分析师就算把 ArgoCD 的地址背下来直接访问,他也进不去。这里做的是
+# 别把 14 个入口一股脑摆在一个只需要其中三个的人面前:门户是新人进平台看到
+# 的第一个页面,那一屏决定他觉得这套东西"能用"还是"太复杂"。
+#
+# 规则只有一条:**列在这里的分类,只对列出的组显示;没列的分类对所有人显示。**
+# 不做成"每个工具一条规则",那样很快就会变成一张没人维护得动的表。
+CATEGORY_AUDIENCE = {
+    "运维": {"platform-team"},
+    "身份": {"platform-team"},
+    "治理": {"platform-team", "data-analysts"},
+}
+
+
+def visible_categories(groups):
+    """这个人该看到哪些分类。
+
+    **拿不到组信息时显示全部** —— 宁可多显示几个进不去的入口,也不能因为
+    一个配置没配对(groups claim 没传过来)就让所有人看到一个空门户。
+    这个取舍要写下来,因为它和"按组判断的分支静默走 else"是同一类风险,
+    只是这次刻意选了安全的那个方向。
+    """
+    gs = set(groups or [])
+    if not gs:
+        return None            # None = 不过滤
+    return {c for c, allowed in CATEGORY_AUDIENCE.items() if gs & allowed} | {
+        c for c in _ALL_CATEGORIES if c not in CATEGORY_AUDIENCE}
+
+
 def build_url(tool, domain=None, scheme=None, http_suffix=None, https_suffix=None):
     """按环境配置拼出一个工具的外部访问地址。
 
@@ -251,6 +284,8 @@ def build_url(tool, domain=None, scheme=None, http_suffix=None, https_suffix=Non
     # (先拼 path 再插端口会拼出 http://superset.x/sqllab/:32460 这种废话)。
     return base + tool.get("path", "")
 
+
+_ALL_CATEGORIES = {t["category"] for t in TOOLS}
 
 for _t in TOOLS:
     _t["url"] = build_url(_t)
@@ -714,10 +749,12 @@ def _human_ago(seconds: float) -> str:
 
 @app.route("/")
 def index():
-    username = request.headers.get("X-Forwarded-User", "")
-    up = probe_all(TOOLS)
+    username, groups, groups_source = identity.parse_identity(request.headers)
+    visible = visible_categories(groups)
+    shown = [t for t in TOOLS if visible is None or t["category"] in visible]
+    up = probe_all(shown)
     categories = {}
-    for tool in TOOLS:
+    for tool in shown:
         t = dict(tool)
         t["up"] = up.get(tool["name"], False)
         categories.setdefault(tool["category"], []).append(t)
@@ -732,8 +769,9 @@ def index():
         permissions=my_permissions(username),
         approvals=my_approvals(username),
         logos=LOGOS,
-        tool_count=len(TOOLS),
+        tool_count=len(shown),
         tool_up=sum(1 for v in up.values() if v),
+        groups_warning=identity.diagnose(groups_source, "platform-portal"),
     )
 
 

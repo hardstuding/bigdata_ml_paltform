@@ -10,6 +10,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
 COPY src/app.py .
+# 登录身份/组的解析。权威源是 shared/flask_identity.py,这里是它的副本
+# (scripts/check-duplicated-sources.py 在 CI 里保证不漂移)。**漏拷这一行
+# 镜像会直接起不来**(ModuleNotFoundError),不是"少个功能"那么轻。
+COPY src/identity.py .
 
 EXPOSE 8080
 CMD ["python3", "app.py"]

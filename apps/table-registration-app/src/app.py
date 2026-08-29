@@ -27,6 +27,8 @@ from pathlib import Path
 
 import requests
 import trino
+
+import identity
 from flask import Flask, abort, redirect, render_template_string, request, url_for
 from trino.auth import BasicAuthentication
 
@@ -92,8 +94,22 @@ def init_db():
     conn.close()
 
 
+# 谁可以代别人建表。表负责人是权限审批链的第一级审批人,所以"能指定别人
+# 当负责人"= 能安排审批人,不该是所有人都有的能力。
+OWNER_OVERRIDE_GROUP = os.environ.get("OWNER_OVERRIDE_GROUP", "platform-team")
+
+
 def get_current_user():
-    return request.headers.get("X-Forwarded-User", "") or request.headers.get("X-Forwarded-Email", "")
+    username, _, _ = identity.parse_identity(request.headers)
+    return username or request.headers.get("X-Forwarded-Email", "")
+
+
+def get_identity():
+    """(用户名, 组, 能不能代别人建表, 组信息有没有问题)。"""
+    username, groups, source = identity.parse_identity(request.headers)
+    username = username or request.headers.get("X-Forwarded-Email", "")
+    return (username, groups, OWNER_OVERRIDE_GROUP in (groups or []),
+            identity.diagnose(source, "table-registration-app"))
 
 
 def parse_columns(raw: str):
@@ -276,12 +292,17 @@ TEMPLATE = """
   .field { margin-bottom: 12px; }
   label { display: block; font-weight: bold; margin-bottom: 2px; }
   .hint { color: #888; font-size: 0.85em; }
+  .warn-box { background: #fff8e1; border: 1px solid #ffd54f; border-radius: 6px;
+              padding: 10px 13px; font-size: 0.9em; line-height: 1.6; }
   .ok { color: #228b22; } .err { color: #b22222; } .warn { color: #b8860b; }
   button { cursor: pointer; padding: 6px 16px; }
 </style></head>
 <body>
 <h1>建表注册工具</h1>
 <p>当前登录:<b>{{ username }}</b></p>
+{% if groups_warning %}
+<p class="warn-box">⚠ {{ groups_warning }}</p>
+{% endif %}
 {# 这里原来写着"权限 OA 审批系统 Phase 1……见 ADR-043" —— 那是给我们自己
    看的内部术语,用这个工具建表的人不需要知道 Phase 几、也不会去翻 ADR。
    换成对他有用的两句:建完之后会发生什么。 #}
@@ -301,10 +322,16 @@ TEMPLATE = """
   </div>
   <div class="field">
     <label>负责人</label>
+    {% if can_override %}
+    <input type="text" name="owner" value="{{ username }}" size="30">
+    <p class="hint">你在 {{ override_group }},可以把负责人指定成别人(代建)。
+      留空或者不改就是你自己。</p>
+    {% else %}
     <input type="text" value="{{ username }}" size="30" disabled>
     <p class="hint">负责人就是你(登录身份),不能改。表负责人是这张表访问申请的
       第一级审批人 —— 能随便填别人的话,就能给自己安排一个好说话的审批人,
-      或者干脆填自己然后批自己。要代别人建表,先联系平台组。</p>
+      或者干脆填自己然后批自己。要代别人建表,请平台组的人来建。</p>
+    {% endif %}
   </div>
   <div class="field">
     <label>安全等级</label>
@@ -337,14 +364,17 @@ TEMPLATE = """
 
 @app.route("/")
 def index():
-    username = get_current_user()
+    username, _, can_override, groups_warning = get_identity()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     my_registrations = conn.execute(
         "SELECT * FROM registrations WHERE requested_by=? ORDER BY id DESC", (username,)
     ).fetchall()
     conn.close()
-    return render_template_string(TEMPLATE, username=username, my_registrations=my_registrations)
+    return render_template_string(
+        TEMPLATE, username=username, my_registrations=my_registrations,
+        can_override=can_override, override_group=OWNER_OVERRIDE_GROUP,
+        groups_warning=groups_warning)
 
 
 @app.route("/submit", methods=["POST"])
@@ -371,7 +401,15 @@ def submit():
     # groups scope —— 加 scope 这件事在 MLflow 上炸过一次(client 没配这个
     # scope,Keycloak 直接 invalid_scope,登录页都进不去)。所以单独做、
     # 单独实机验证,见 roadmap。
-    owner = username[:200]
+    # 平台组可以代别人建表(填一个不同的负责人),其他人不行 —— 表负责人
+    # 是权限审批链的第一级审批人,"能指定别人当负责人"等于能安排审批人。
+    #
+    # **拿不到组信息时按"不能"处理**,和门户那边"拿不到就显示全部"相反:
+    # 那边多显示几个进不去的入口没有代价,这边放过去就是一个越权写入。
+    # 同一个不确定状态,两处刻意选了不同方向,依据是"错的那一边代价多大"。
+    _, _, can_override, _ = get_identity()
+    form_owner = request.form.get("owner", "").strip()[:200]
+    owner = form_owner if (can_override and form_owner) else username[:200]
     try:
         security_level = int(request.form.get("security_level", "1"))
         if security_level not in SECURITY_LEVELS:

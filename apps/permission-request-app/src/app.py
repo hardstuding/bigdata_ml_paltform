@@ -45,6 +45,8 @@ from pathlib import Path
 import requests
 from flask import Flask, abort, g, redirect, render_template_string, request, url_for
 
+import identity
+
 app = Flask(__name__)
 
 # 模板里用 {{ x|zh }} 把状态英文枚举转成中文;{{ t|localtime }} 把 UTC
@@ -239,64 +241,23 @@ def get_current_user():
     """返回 (用户名, 组列表)。
 
     副作用:把"token 里到底有没有 groups 这个 claim"记进 `g.groups_source`,
-    给 `groups_diagnosis()` 用。见那个函数的说明 —— 这不是锦上添花,是这个
-    项目踩过三次的同一个坑的检测手段。
+    给 `groups_diagnosis()` 用。解析逻辑和另外两个 Flask 应用共用一份
+    (`shared/flask_identity.py`,CI 有防漂移检查)—— 那个文件顶部写了这
+    件事为什么值得单独拆出来。
     """
-    username = request.headers.get("X-Forwarded-User", "")
-    access_token = request.headers.get("X-Forwarded-Access-Token", "")
-    groups = []
-    source = "no_token"          # 压根没拿到 access token
-    if access_token and access_token.count(".") == 2:
-        try:
-            payload_b64 = access_token.split(".")[1]
-            payload_b64 += "=" * (-len(payload_b64) % 4)
-            claims = json.loads(base64.urlsafe_b64decode(payload_b64))
-            username = claims.get("preferred_username", username)
-            if "groups" in claims:
-                groups = claims.get("groups") or []
-                source = "claim_present"     # 有这个字段,空就是真的不在任何组
-            else:
-                source = "claim_missing"     # 字段根本不存在 —— 配置问题
-        except Exception:
-            source = "token_unparseable"
+    username, groups, source = identity.parse_identity(request.headers)
     g.groups_source = source
     return username, groups
 
 
 def groups_diagnosis():
-    """把"配置没配对"和"这个人真的不在任何组"区分开。
+    """按组判断的功能能不能生效;不能的话给一句能照着做的话。
 
-    **这两件事在代码里长得一模一样(groups == []),而后果完全不同**,
-    这个项目已经因为分不开它们栽过三次:
-
-    - ADR-078:Trino 没配 group provider,传给 OPA 的 groups 永远是空的,
-      `is_platform_admin` 从来没触发过 —— 而 `opa test` 全过,因为测试的
-      input 是手写的、带着 groups。
-    - 2026-08-29 Superset:client 没挂 groups scope,只能用
-      `AUTH_USER_REGISTRATION_ROLE="Admin"` 兜底,结果任何能登录的人都是
-      管理员。
-    - 2026-08-29 这个 app 自己:`is_approver(groups)` 读的就是这个 claim,
-      而这个 client **从来就不在挂 groups scope 的名单里** —— 也就是说
-      `is_approver` 永远是 False,「组权限申请」的批准/拒绝、审计页、权限
-      交接页对所有人都是 403。**不报错,只是永远走 else。**
-
-    共同点是"少一个配置,一个按组判断的分支就永远走不到,而且没有任何
-    信号"。所以现在给出信号:token 里没有 groups 字段时,页面上直接说
-    出来,而不是让人以为自己不在任何组。
+    **"配置没配对"和"这个人真的不在任何组"在代码里长得一模一样
+    (groups == []),后果却完全不同** —— 这个项目已经因为分不开它们栽过
+    三次,清单在 shared/flask_identity.py 顶部。
     """
-    src = getattr(g, "groups_source", None)
-    if src == "claim_missing":
-        return ("这次登录拿到的令牌里没有 groups 字段,所以按组判断的功能"
-                "(审批、审计、权限交接)都不会生效。这是配置问题不是权限问题:"
-                "需要给 Keycloak 的 permission-request-app client 挂上 groups "
-                "这个 default client scope,跑一次 scripts/03-configure-keycloak.sh "
-                "即可,然后重新登录。")
-    if src == "no_token":
-        return ("这次请求里没有访问令牌,按组判断的功能不会生效。"
-                "检查 oauth2-proxy 的 pass_access_token 是不是开着。")
-    if src == "token_unparseable":
-        return "访问令牌解不开,按组判断的功能不会生效。"
-    return None
+    return identity.diagnose(getattr(g, "groups_source", None), "permission-request-app")
 
 
 def is_approver(groups):
