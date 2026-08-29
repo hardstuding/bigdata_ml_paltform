@@ -40,6 +40,8 @@ table-registration-app)同一个"不用前端框架"的路线,见 ADR-032。
 """
 import concurrent.futures
 import os
+import pathlib
+import re
 import urllib.request
 import urllib.parse
 import json
@@ -70,6 +72,7 @@ TOOLS = [
         # 这里写的 scheme 就是错的,2026-08-16 才发现——不是环境差异,是
         # 单纯写错了。
         "host": "trino",
+        "logo": "trino",
         "scheme": "https",
         "probe": "https://trino.trino.svc.cluster.local:8443/v1/info",
         "probe_verify": False,
@@ -79,6 +82,7 @@ TOOLS = [
         "name": "Airflow",
         "description": "任务调度(dbt/SeaTunnel/Feast 物化等 DAG)",
         "host": "airflow",
+        "logo": "airflow",
         "probe": "http://airflow-api-server.airflow.svc.cluster.local:8080/api/v2/monitor/health",
     },
     {
@@ -86,6 +90,7 @@ TOOLS = [
         "name": "Superset",
         "description": "BI 看板 / 出图",
         "host": "superset",
+        "logo": "superset",
         "probe": "http://superset.superset.svc.cluster.local:8088/health",
     },
     {
@@ -100,6 +105,7 @@ TOOLS = [
         "name": "JupyterHub",
         "description": "多用户 Notebook",
         "host": "jupyterhub",
+        "logo": "jupyterhub",
         "probe": "http://hub.jupyterhub.svc.cluster.local:8081/hub/health",
     },
     {
@@ -107,6 +113,7 @@ TOOLS = [
         "name": "MLflow",
         "description": "实验跟踪 / 模型注册",
         "host": "mlflow",
+        "logo": "mlflow",
         "probe": "http://mlflow.mlflow.svc.cluster.local:5000/health",
     },
     {
@@ -114,6 +121,7 @@ TOOLS = [
         "name": "Argo Workflows",
         "description": "训练流水线编排",
         "host": "argo-workflows",
+        "logo": "argo-workflows",
         "probe": "http://argo-workflows-server.argo-workflows.svc.cluster.local:2746/",
     },
     {
@@ -121,6 +129,7 @@ TOOLS = [
         "name": "Spark History Server",
         "description": "Spark 作业历史 / 日志",
         "host": "spark-history",
+        "logo": "spark-history",
         "probe": "http://spark-history-server.spark-operator.svc.cluster.local:18080/",
     },
     {
@@ -128,6 +137,7 @@ TOOLS = [
         "name": "Schema Registry",
         "description": "Kafka 消息的 schema 契约与兼容性校验(Karapace)",
         "host": "schema-registry",
+        "logo": "schema-registry",
         "probe": "http://karapace.kafka.svc.cluster.local:8081/subjects",
     },
     {
@@ -149,6 +159,7 @@ TOOLS = [
         "name": "ArgoCD",
         "description": "GitOps 持续部署,谁在跑什么、状态是否正常",
         "host": "argocd",
+        "logo": "argocd",
         "probe": "http://argocd-server.argocd.svc.cluster.local/",
         "probe_verify": False,
     },
@@ -157,6 +168,7 @@ TOOLS = [
         "name": "Grafana",
         "description": "监控看板 / 指标",
         "host": "grafana",
+        "logo": "grafana",
         "probe": "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local/api/health",
     },
     {
@@ -164,6 +176,7 @@ TOOLS = [
         "name": "Keycloak",
         "description": "统一身份 / SSO,这里的账号密码所有工具通用",
         "host": "keycloak",
+        "logo": "keycloak",
         "probe": "http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform",
     },
 ]
@@ -218,6 +231,33 @@ def build_url(tool, domain=None, scheme=None, http_suffix=None, https_suffix=Non
 
 for _t in TOOLS:
     _t["url"] = build_url(_t)
+
+
+# ---- 工具图标 ----
+# 启动时一次性读进内存。**内联进页面而不是发 HTTP 请求取**:门户可能跑在
+# 没有外网的环境里,而且多 11 个请求换 11 个小图标不划算。
+#
+# 这些 SVG 是 vendored 在镜像里的静态文件(Simple Icons,CC0),不是用户
+# 输入,所以模板里用 `|safe` 直接内联是安全的 —— 如果哪天改成从别处动态
+# 取,这个前提就不成立了,要重新考虑。
+_LOGO_DIR = pathlib.Path(__file__).resolve().parent / "logos"
+
+
+def _load_logos():
+    out = {}
+    if not _LOGO_DIR.exists():
+        return out
+    for f in _LOGO_DIR.glob("*.svg"):
+        svg = f.read_text()
+        # 去掉固定的宽高(如果有),让 CSS 控制大小;fill 交给 currentColor,
+        # 这样深色模式下自动变亮,不用准备两套图。
+        svg = re.sub(r'\s(width|height|fill)="[^"]*"', "", svg, count=3)
+        svg = svg.replace("<svg ", '<svg class="logo" fill="currentColor" ', 1)
+        out[f.stem] = svg
+    return out
+
+
+LOGOS = _load_logos()
 
 
 def probe(tool):
@@ -484,6 +524,7 @@ def index():
         jobs=my_jobs(username),
         golden=golden_paths(),
         streams=streams(),
+        logos=LOGOS,
         tool_count=len(TOOLS),
         tool_up=sum(1 for v in up.values() if v),
     )

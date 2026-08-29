@@ -459,3 +459,42 @@ class TestUrlsComeFromConfig:
             html = client.get("/").get_data(as_text=True)
         for tool in portal.TOOLS:
             assert tool["url"] in html, f"{tool['name']} 的链接没出现在页面上"
+
+
+class TestLogos:
+    """图标要么真的内联进页面,要么明确回退成首字母 —— 不能悄悄空着。
+
+    2026-08-29 加图标时的具体风险:文件加进 src/logos/ 但忘了在 Dockerfile
+    里 COPY,本地跑得好好的、镜像里那一栏全是空白,**而且不报错**。
+    """
+
+    def _html(self, client):
+        with patch.object(portal, "probe", return_value=True), \
+             patch.object(portal, "golden_paths", return_value={"error": None, "rows": [], "healthy": 0, "total": 0}), \
+             patch.object(portal, "queue_usage", return_value={"error": None, "rows": [], "pending_total": 0}), \
+             patch.object(portal, "my_jobs", return_value={"error": None, "rows": []}), \
+             patch.object(portal, "streams", return_value={"error": None, "rows": []}):
+            return client.get("/").get_data(as_text=True)
+
+    def test_有图标的工具真的内联了_svg(self, client):
+        html = self._html(client)
+        with_logo = [t for t in portal.TOOLS if t.get("logo") and portal.LOGOS.get(t["logo"])]
+        assert with_logo, "一个图标都没加载到(src/logos/ 空了?Dockerfile 没 COPY?)"
+        assert html.count('<svg class="logo"') >= len(with_logo)
+
+    def test_没有图标的工具回退成首字母(self, client):
+        html = self._html(client)
+        for t in portal.TOOLS:
+            if not (t.get("logo") and portal.LOGOS.get(t["logo"])):
+                assert f'<span class="mono">{t["name"][0]}</span>' in html, \
+                    f"{t['name']} 既没有图标也没有回退首字母,那一格是空的"
+
+    def test_图标用_currentColor_不写死颜色(self):
+        """写死颜色的话深色模式下会糊成一团。"""
+        for name, svg in portal.LOGOS.items():
+            assert 'fill="currentColor"' in svg, f"{name} 没有跟随主题"
+
+    def test_dockerfile_里_copy_了_logos_目录(self):
+        """**这条防的是"加了文件但镜像里没有"**:本地全绿、线上空白、不报错。"""
+        dockerfile = (Path(portal.__file__).resolve().parent.parent / "Dockerfile").read_text()
+        assert "COPY src/logos/" in dockerfile, "Dockerfile 里没有 COPY logos 目录"

@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r req
 # 一起拷进去——只拷 app.py 的话镜像跑起来会 TemplateNotFound。
 COPY src/app.py .
 COPY src/templates/ ./templates/
+# 工具图标(Simple Icons,CC0)。**必须一起 COPY 进来** —— 只加文件不改
+# Dockerfile 的话,本地跑得好好的、镜像里那一栏全是空白,而且不报错。
+COPY src/logos/ ./logos/
 
 EXPOSE 8080
 CMD ["python3", "app.py"]
