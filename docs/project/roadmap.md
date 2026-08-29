@@ -629,11 +629,11 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
 
 ## P3:打磨已有角色能力(不需要新组件,是体验问题)
 
-- **告警送不到人**:Alertmanager 已开、规则生效、抓到过真实问题,但
-  **没有配任何外部通知渠道**,现在只能"打开界面查"。邮件/企微/Slack 的
-  配置模板已预留在 `platform/apps/kube-prometheus-stack.yaml` 注释里,
-  需要真实凭据才能激活(**这一步需要 zhenghe 提供,不是 Claude 能自己
-  造的**)。
+- **告警送不到人** —— **机制那一半已验证([ADR-081](../decisions/081-alert-delivery-verified-with-echo-sink.md))**:
+  告警真的被 POST 出去过,终点是集群内的 alert-echo-sink,能回看 payload。
+  **还差的只是真实渠道地址**(企微/飞书/邮件),换渠道 = 改
+  `monitoring/alertmanager-webhook` 这一个 Secret 的 url。
+  按 zhenghe 明确要求,真实渠道等上生产再接。
 - **排障知识 Runbook 化**——2026-08-20 补了第一步:按症状类别分组、带
   锚点链接的真实索引(之前 `## 索引` 这个标题底下是空的)。**还没做的**:
   每条正文条目本身的"现象→原因→处置"结构不够统一(大部分条目已经有
@@ -641,13 +641,12 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
   Runbook 化需要重新过一遍每条、统一格式,这次没做——838 行内容较大,
   一次性重写风险不小(容易在改写措辞时不小心丢失细节),留到有真实
   动机(比如真的按索引查找时发现某条不好用)时再逐条打磨,不批量重写。
-- **Superset 汉化**:zhenghe 2026-08-16 提出,自己说了"不急"。Superset
-  原生带中文语言包(`LANGUAGES`/`babel`),预期加几行 configOverrides
-  就够,真做时先确认 6.1.0 的中文翻译完整度。
-- **dbt 接 Airflow 编排 + OpenMetadata 摄入**:ADR-053 的最小骨架能跑
-  `dbt build`,但没接 Cosmos(需要改 Airflow scheduler/dagProcessor 的
-  Python 运行时)、没接 OpenMetadata dbt 连接器,等于"能手动跑 dbt",
-  不是分析师的生产工具。
+- ~~**Superset 汉化**~~ **已完成(2026-08-28,[ADR-077](../decisions/077-superset-chinese-ui.md))**:实机验证 4054 条翻译生效。
+- ~~**dbt 接 Airflow 编排 + OpenMetadata 摄入**~~ **已完成**:接 Airflow
+  2026-08-21 就做了(`dbt_demo` DAG,刻意没用 Cosmos,理由见 DAG 顶部注释);
+  OpenMetadata 的 dbt 血缘摄入 2026-08-29 做完并实机验证
+  ([ADR-082](../decisions/082-dbt-lineage-ingestion.md)):血缘接口查得到
+  `orders -> stg_orders -> daily_order_totals` 两条真实的边。
 - **公网域名 + TLS 接入**:zhenghe 2026-08-16 明确的方向——"域名走配置化
   生效,配置 test 起来就是可临时访问的;未来配置 prod,就强制需要配置
   一个域名"。`test` 类环境允许没有真实域名(继续 NodePort + `/etc/hosts`);
