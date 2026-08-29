@@ -447,6 +447,36 @@ ensure_trino_service_account platform_sdk_demo_service
 ensure_ns platform-sdk-demo
 copy_secret trino platform-sdk-demo trino-service-account
 
+# ---- platform-job-credentials:提交上去的作业连 Trino 用的凭据 ----
+#
+# **2026-08-29 发现这个 Secret 从来就没存在过。** `platform_sdk.submit_job()`
+# 生成的 Workflow 里一直有 `envFrom: secretRef: platform-job-credentials
+# (optional: true)`,`jobs/` 那条新的定时作业路径也引用它。因为标了
+# optional,Secret 不存在时 pod **照常起来**,然后作业一调
+# `platform_sdk.query()` 就抛
+# `MissingCredential: 环境变量 PLATFORM_TRINO_USER 没有设置`。
+#
+# 为什么能藏这么久:ADR-058 验证 submit_job 时跑的是
+# `print("hello from notebook-labeled pod")`,不碰 Trino;而
+# `examples/hello-job` 这些**要查 Trino** 的模板,CI 只校验结构、没有真的
+# 提交执行过。也就是说"从 notebook/CI 提交一个查数作业"这条路径一直是断的。
+#
+# 用 platform_sdk_demo_service 这个账号(它已经有 demo 表的 grant),
+# 建在 argo-workflows 命名空间——作业 pod 起在那里。
+echo "==> 建作业运行时的 Trino 凭据(argo-workflows/platform-job-credentials)"
+ensure_trino_service_account platform_sdk_demo_service
+ensure_ns argo-workflows
+if kubectl -n argo-workflows get secret platform-job-credentials >/dev/null 2>&1; then
+  echo "已存在,跳过: argo-workflows/platform-job-credentials"
+else
+  JOB_TRINO_PW="$(kubectl -n trino get secret trino-service-account \
+    -o jsonpath='{.data.password-platform_sdk_demo_service}' | base64 -d)"
+  kubectl -n argo-workflows create secret generic platform-job-credentials \
+    --from-literal=PLATFORM_TRINO_USER=platform_sdk_demo_service \
+    --from-literal=PLATFORM_TRINO_PASSWORD="$JOB_TRINO_PW" \
+    && echo "已创建: argo-workflows/platform-job-credentials"
+fi
+
 # 黄金链路探针(ADR-079)用的 Trino 账号。**刻意不加进 OPA 的
 # service_accounts 豁免名单**:让探针走和真实用户一模一样的授权路径
 # (table-access-grants.csv 里给它发了两张 demo 表的 grant),这样它顺带
