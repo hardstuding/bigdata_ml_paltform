@@ -5,16 +5,25 @@
 # 推理的延迟和错误率"是一个常驻能力,不该跟着 demo 资源一起来一起走。
 # 所以监控这一半放进 GitOps,用 namespaceSelector 去匹配那个运行时命名空间。
 #
-# **指标名不是猜的**:KServe 官方文档「Prometheus Metrics」列的 Python
-# 模型服务器指标是 `request_preprocess_seconds` / `request_predict_seconds` /
-# `request_postprocess_seconds`(都是 histogram),默认端口 8080、路径
-# /metrics。
+# **端口和指标名是在集群上实测出来的,不是照文档写的** —— 这里踩了一次:
+# KServe 官方文档「Prometheus Metrics」讲的是它自己的 Python 模型服务器
+# (`request_predict_seconds` 等,端口 8080)。**但我们的推理服务用的是
+# `modelFormat: mlflow`,跑起来是 MLServer**,它暴露的是另一套东西:
+#
+#   端口 8082(不是 8080),/metrics
+#   model_infer_request_success_total{model,version}
+#   model_infer_request_failure_total{model,version}
+#   model_infer_request_duration_{count,sum,bucket}{model,version}
+#   rest_server_request_duration_seconds_*{path,method,status_code}
+#
+# 第一版按文档写了 8080 + KServe 的指标名,实测 curl 一遍才发现全错。
+# 换 runtime(比如 sklearn/xgboost 走 KServe 自己的 server)时这份要重新
+# 核对,**不要假设文档说的就是你集群里跑的那个**。
 #
 # **两半都要有**:InferenceService 上的
 # `serving.kserve.io/enable-prometheus-scraping: "true"` 只是让 pod 带上
 # prometheus.io/* 注解,KServe 文档自己写明"它不会触发 Prometheus 来抓";
-# 真正来抓的是这个 PodMonitor。只加注解不加 PodMonitor,是一个典型的
-# "配置看起来齐了但什么都没发生"。
+# 真正来抓的是这个 PodMonitor。
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -31,13 +40,17 @@ spec:
       - kserve-demo
   selector:
     matchLabels:
-      # KServe 给 predictor pod 打的标准标签
+      # KServe 给 predictor pod 打的标准标签(实测确认过)
       component: predictor
   podMetricsEndpoints:
-    - port: http                 # KServe predictor 容器的 8080 端口名
+    # **用 targetPort 而不是 port**:KServe 建出来的 predictor 容器
+    # 一个命名端口都没有(实测 `.spec.containers[].ports` 是 null),
+    # 写 `port: http` 会永远匹配不到。
+    - targetPort: 8082
       path: /metrics
       interval: 30s
-      # 指标里带上是哪个 InferenceService,不然多个模型的曲线混在一起
       relabelings:
+        # 指标自带 model 标签,但把 InferenceService 名字也带上,方便和
+        # 黄金链路看板、KServe 的其它对象对得上。
         - sourceLabels: [__meta_kubernetes_pod_label_serving_kserve_io_inferenceservice]
           targetLabel: inferenceservice

@@ -1,16 +1,14 @@
 # 在线推理看板(C 线「推理可观测性」)。走 kube-prometheus-stack 的 Grafana
-# sidecar 自动发现(带 grafana_dashboard 标签的 ConfigMap),和另外五块看板
-# 同一个机制。
+# sidecar 自动发现(带 grafana_dashboard 标签的 ConfigMap)。
 #
-# **指标从哪来**:apps/kserve-inference-monitoring/ 里的 PodMonitor 抓
-# kserve-demo 命名空间里 predictor pod 的 :8080/metrics。指标名是 KServe
-# 官方文档列的 Python 模型服务器指标(request_preprocess_seconds /
-# request_predict_seconds / request_postprocess_seconds,都是 histogram),
-# 不是猜的。
+# **指标名是在集群上 curl 出来的,不是照文档写的**。这里踩了一次:KServe
+# 官方文档讲的是它自己的 Python 模型服务器(request_predict_seconds,端口
+# 8080),而我们的推理服务是 modelFormat: mlflow,跑起来是 **MLServer**,
+# 暴露的是另一套(model_infer_request_*、rest_server_request_duration_seconds_*,
+# 端口 8082)。第一版整套写错,curl 一遍才发现。
+# 换 runtime 时这份要重新核对。
 #
-# **为什么专门留了一个「有没有在抓」的面板**:这个仓库被"看起来配好了"
-# 坑过太多次。看板全是空的时候,第一个要回答的问题是"是没流量,还是根本
-# 没抓到",而不是去猜 PromQL 写错没有。
+# 抓取那一半见 apps/kserve-inference-monitoring/manifests/podmonitor.yaml。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,9 +31,9 @@ data:
       "panels": [
         {
           "id": 1,
-          "title": "推理请求速率(QPS)",
+          "title": "推理请求速率",
           "type": "timeseries",
-          "description": "request_predict_seconds 的 _count 求速率。没有曲线通常不是没流量,是 PodMonitor 没抓到——先看下面那个「有没有在抓」面板。",
+          "description": "MLServer 的 model_infer_request_{success,failure}_total。成功和失败画在一起——只看总量看不出错误率在涨。",
           "gridPos": {
             "x": 0,
             "y": 0,
@@ -54,17 +52,22 @@ data:
           },
           "targets": [
             {
-              "expr": "sum by (inferenceservice) (rate(request_predict_seconds_count[5m]))",
-              "legendFormat": "{{inferenceservice}}",
+              "expr": "sum by (model) (rate(model_infer_request_success_total[5m]))",
+              "legendFormat": "成功 {{model}}",
               "refId": "A"
+            },
+            {
+              "expr": "sum by (model) (rate(model_infer_request_failure_total[5m]))",
+              "legendFormat": "失败 {{model}}",
+              "refId": "B"
             }
           ]
         },
         {
           "id": 2,
-          "title": "推理延迟 P50 / P95 / P99",
+          "title": "推理错误率",
           "type": "timeseries",
-          "description": "只画 P95。平均值会把长尾抹平,而线上真正被投诉的就是长尾。",
+          "description": "clamp_min 是为了零流量时不出现 0/0 的 NaN 断线——断线和'错误率 0'在图上看起来很像,但含义完全相反。",
           "gridPos": {
             "x": 12,
             "y": 0,
@@ -73,7 +76,7 @@ data:
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "s",
+              "unit": "percentunit",
               "custom": {
                 "lineWidth": 2,
                 "fillOpacity": 8
@@ -83,27 +86,17 @@ data:
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.95, sum by (le, inferenceservice) (rate(request_predict_seconds_bucket[5m])))",
-              "legendFormat": "P95 {{inferenceservice}}",
+              "expr": "sum by (model) (rate(model_infer_request_failure_total[5m]))\n/ clamp_min(sum by (model) (rate(model_infer_request_success_total[5m]))\n           + sum by (model) (rate(model_infer_request_failure_total[5m])), 0.0001)",
+              "legendFormat": "{{model}}",
               "refId": "A"
-            },
-            {
-              "expr": "histogram_quantile(0.5, sum by (le, inferenceservice) (rate(request_predict_seconds_bucket[5m])))",
-              "legendFormat": "P50 {{inferenceservice}}",
-              "refId": "B"
-            },
-            {
-              "expr": "histogram_quantile(0.99, sum by (le, inferenceservice) (rate(request_predict_seconds_bucket[5m])))",
-              "legendFormat": "P99 {{inferenceservice}}",
-              "refId": "C"
             }
           ]
         },
         {
           "id": 3,
-          "title": "预处理 / 预测 / 后处理 各占多少时间",
+          "title": "推理延迟 P50 / P95 / P99",
           "type": "timeseries",
-          "description": "慢在哪一段很关键:预处理慢是特征工程的问题,预测慢才是模型或资源的问题。",
+          "description": "只有平均值是不够的:线上真正被投诉的是长尾。",
           "gridPos": {
             "x": 0,
             "y": 7,
@@ -122,32 +115,61 @@ data:
           },
           "targets": [
             {
-              "expr": "sum by (inferenceservice) (rate(request_preprocess_seconds_sum[5m])) / sum by (inferenceservice) (rate(request_preprocess_seconds_count[5m]))",
-              "legendFormat": "预处理 {{inferenceservice}}",
+              "expr": "histogram_quantile(0.5, sum by (le, model) (rate(model_infer_request_duration_bucket[5m])))",
+              "legendFormat": "P50 {{model}}",
               "refId": "A"
             },
             {
-              "expr": "sum by (inferenceservice) (rate(request_predict_seconds_sum[5m])) / sum by (inferenceservice) (rate(request_predict_seconds_count[5m]))",
-              "legendFormat": "预测 {{inferenceservice}}",
+              "expr": "histogram_quantile(0.95, sum by (le, model) (rate(model_infer_request_duration_bucket[5m])))",
+              "legendFormat": "P95 {{model}}",
               "refId": "B"
             },
             {
-              "expr": "sum by (inferenceservice) (rate(request_postprocess_seconds_sum[5m])) / sum by (inferenceservice) (rate(request_postprocess_seconds_count[5m]))",
-              "legendFormat": "后处理 {{inferenceservice}}",
+              "expr": "histogram_quantile(0.99, sum by (le, model) (rate(model_infer_request_duration_bucket[5m])))",
+              "legendFormat": "P99 {{model}}",
               "refId": "C"
             }
           ]
         },
         {
           "id": 4,
-          "title": "有没有在抓(scrape 目标数)",
+          "title": "HTTP 层:按状态码的请求速率",
           "type": "timeseries",
-          "description": "**这个面板是给'看板全是空的'那一刻用的**:0 说明 PodMonitor 没生效(标签没对上/命名空间没匹配/推理服务没起来),不是没有流量。这个仓库被'看起来配好了'坑过太多次。",
+          "description": "model_infer_* 是模型这一层的;这个是 HTTP 这一层的。两层对不上时,差额就是还没进到模型就被拒掉的请求(鉴权、请求体格式)。",
           "gridPos": {
             "x": 12,
             "y": 7,
             "w": 12,
             "h": 7
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "expr": "sum by (status_code) (rate(rest_server_request_duration_seconds_count{path=~\".*infer.*\"}[5m]))",
+              "legendFormat": "{{status_code}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "有没有在抓(scrape 目标数)",
+          "type": "timeseries",
+          "description": "**这个面板是给「看板全是空的」那一刻用的**:0 说明 PodMonitor 没生效(标签没对上 / 命名空间没匹配 / 端口写错 / 推理服务没起来),不是没有流量。第一版就把端口写成了 8080(照 KServe 文档),而实际跑的 MLServer 在 8082。",
+          "gridPos": {
+            "x": 0,
+            "y": 14,
+            "w": 24,
+            "h": 5
           },
           "fieldConfig": {
             "defaults": {
@@ -161,8 +183,8 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(up{job=~\".*kserve.*\"})",
-              "legendFormat": "up 的目标数",
+              "expr": "count(up{job=\"kserve-inference\"} == 1)",
+              "legendFormat": "抓到的目标数",
               "refId": "A"
             }
           ]
