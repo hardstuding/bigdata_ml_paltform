@@ -301,6 +301,11 @@ if kubectl -n table-registration-app get pod -l app=table-registration-app >/dev
   # 还没有 trino.iceberg.demo.orders 的话,只会建出一堆指向不存在实体的
   # 孤儿对象——脚本自己会检查并报错,但顺序对了就不该走到那一步。
   run_optional "scripts/34-configure-openmetadata-data-quality.sh" ./scripts/34-configure-openmetadata-data-quality.sh
+  # dbt 血缘采集(ADR-082)。也必须排在 29 后面(挂在同一个 trino
+  # DatabaseService 上)。它自己会先检查 s3://lakehouse/dbt-artifacts/ 下
+  # 有没有 manifest.json——全新集群上 dbt_demo DAG 还没跑过,那里是空的,
+  # 脚本会说清楚原因并退出,run_optional 不会因此中断整个部署。
+  run_optional "scripts/43-configure-openmetadata-dbt-ingestion.sh" ./scripts/43-configure-openmetadata-dbt-ingestion.sh
 else
   log "--> table-registration-app 还没起来,跳过"
 fi
