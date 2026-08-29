@@ -149,6 +149,28 @@ hive-metastore 自建镜像。
    直接抛异常,scripts/14 重跑一次就好——但它是什么时候丢的没查清)。
    三条现在都定时跑成功。
 
+### 2026-08-29 外部评审(Codex)第一批:已全部修完
+
+四条确定性缺陷,**逐条对着代码核实过再修**,每条都有能证伪的测试:
+
+| # | 问题 | 修法 | 证据 |
+|---|---|---|---|
+| ① | 门户「我的作业」字段错配(后端 `phase/started` vs 模板 `j.status/j.at`) | 改字段名 + 新增**渲染级**测试跨过模板边界 | 把模板改回旧字段名,新测试立刻变红 |
+| ② | 外部地址写死 `local-lite.test` | 门户 deployment 纳入模板体系;另外 6 个组件 27 行硬编码换占位符 | `render cloud-full` 产物**逐字节不变**;新增 CI 检查 prod 产物 |
+| ③ | 审批假成功(`ok` 被接收但从不使用) | 失败落 `approved_pending_apply` + 重试端点 + 通知说真话 | 6 条新测试;把 bug 改回去有两条变红 |
+| ④ | `bootstrap-all.sh` 无条件"全部完成" | 按**结果**(必需组件是否 Synced/Healthy)判定,出机器可读报告,不完整时非零退出 | 用桩模拟组件不健康,退出码 1;齐全时 0 |
+
+**② 的真实范围比评审说的大**:不只是门户,Superset / Airflow / MLflow /
+Spark History 的 **SSO 配置**里也写死了 `keycloak.local-lite.test` —— prod
+部署之后这几个组件登录全是坏的,而 ArgoCD 会是绿的、Pod 会是健康的。
+
+顺带修掉两条:权限门户帮助页写着「不会真的拦截 Trino 查询、没批准也一样能查」
+(**纯错误,在教用户绕过权限**);文档示例 `submit_job("train.py")` 照着写必然
+报错(新增 `check-doc-examples.py`,用 `inspect.signature` 真的 bind 一次)。
+
+**剩下三批**转成带验收条件的 backlog,见
+[`roadmap.md`](roadmap.md) 的 P1.5。
+
 ### 云主机状态
 
 **运行中**(2026-08-28 22:56 开机)。08-29 02:00 前后因为我这边被用量限制

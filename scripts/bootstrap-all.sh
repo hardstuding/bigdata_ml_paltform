@@ -51,6 +51,21 @@ step() {
   log "===== 第 ${STEP} 步:$1 ====="
 }
 
+# ---- 部署结果记账 ----
+# **2026-08-29 之前这个脚本末尾无条件打印"===== 全部完成 ====="、退出码 0**,
+# 不管中间有多少 optional 步骤失败。后果:半数步骤失败也报成功,人以为装好了、
+# CI/自动化更是完全判断不出来 —— 这正是这个仓库一直在批评的那类"看起来成功"。
+#
+# 现在每一步的结果都记下来,末尾出一份报告,并且**必需能力不完整时返回非零**。
+RESULT_REQUIRED_OK=0
+RESULT_OPTIONAL_OK=0
+RESULT_SKIPPED=""
+RESULT_FAILED=""
+REPORT_JSON="logs/bootstrap-report.json"
+
+record_skip() { RESULT_SKIPPED="${RESULT_SKIPPED}${1}|${2}"$'\n'; }
+record_fail() { RESULT_FAILED="${RESULT_FAILED}${1}|${2}"$'\n'; }
+
 # 核心步骤失败就停——后面的步骤依赖它,继续跑没有意义。
 run_required() {
   local desc="$1"; shift
@@ -66,9 +81,20 @@ run_required() {
 run_optional() {
   local desc="$1"; shift
   log "--> $desc(尽力而为,组件没拉起来会跳过)"
-  if ! "$@" >>"$LOG_FILE" 2>&1; then
-    log "!! 跳过:$desc 失败了,可能是对应组件还是 park 状态。完整输出见 ${LOG_FILE},不影响后面的步骤。"
+  if "$@" >>"$LOG_FILE" 2>&1; then
+    RESULT_OPTIONAL_OK=$((RESULT_OPTIONAL_OK + 1))
+  else
+    # **"失败"和"跳过"要分开记。** 之前统一叫"跳过",于是"这个组件本来就
+    # 没启用"和"这一步真的报错了"在输出里长得一模一样,人只能靠翻日志区分。
+    log "!! 失败:$desc(完整输出见 ${LOG_FILE},不影响后面的步骤)"
+    record_fail "$desc" "执行失败,见 ${LOG_FILE}"
   fi
+}
+
+# 明确的"这一步不适用/组件没启用",和"执行失败"是两回事。
+skip_step() {
+  log "--> 跳过:$1($2)"
+  record_skip "$1" "$2"
 }
 
 wait_healthy() {
@@ -346,7 +372,75 @@ else
   log "--> mlflow 还没起来,跳过(起来之后手动补跑 scripts/09)"
 fi
 
+# ---- 部署报告 ----
+#
+# **"必需能力"是按环境定义的,不是按"跑了多少步"。** 一个 prod 部署即使
+# demo 数据脚本失败也应该算成功(prod 不该依赖 demo 数据);而核心链路
+# (Trino 能查、Keycloak 能登)缺一个就必须是失败。所以这里查的是**结果**
+# ——ArgoCD 上那几个必需组件是不是 Synced/Healthy,不是"脚本有没有报错"。
+step "检查必需能力,出部署报告"
+
+REQUIRED_APPS="keycloak trino postgres minio hive-metastore platform-portal"
+MISSING=""
+for app in $REQUIRED_APPS; do
+  state="$(kubectl -n argocd get application "$app" \
+    -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null || echo "NotFound/NotFound")"
+  case "$state" in
+    Synced/Healthy) ;;
+    *) MISSING="${MISSING}${app}(${state}) " ;;
+  esac
+done
+
+# demo 类的东西单独看,**不进必需清单**:prod 上没有 demo 数据/demo 模型
+# 是正常的,不该因此判失败。
+DEMO_NOTE="demo 数据和 demo 模型属于可选项,prod 上没有它们是正常的"
+
+n_failed=$(printf '%s' "$RESULT_FAILED" | grep -c . || true)
+n_skipped=$(printf '%s' "$RESULT_SKIPPED" | grep -c . || true)
+
+mkdir -p logs
+{
+  printf '{\n'
+  printf '  "finished_at": "%s",\n' "$(date -u +%FT%TZ)"
+  printf '  "target_env": "%s",\n' "${TARGET_ENV:-cloud-full}"
+  printf '  "required_apps_missing": "%s",\n' "$MISSING"
+  printf '  "optional_ok": %s,\n' "$RESULT_OPTIONAL_OK"
+  printf '  "failed_count": %s,\n' "$n_failed"
+  printf '  "skipped_count": %s,\n' "$n_skipped"
+  printf '  "ok": %s\n' "$([ -z "$MISSING" ] && echo true || echo false)"
+  printf '}\n'
+} > "$REPORT_JSON"
+
 log ""
-log "===== 全部完成 ====="
-log "用 kubectl get applications -n argocd 确认所有组件是不是 Synced/Healthy。"
-log "卡住了先查 docs/operations/troubleshooting.md,完整执行日志在 ${LOG_FILE}。"
+log "===== 部署报告 ====="
+log "目标环境:${TARGET_ENV:-cloud-full}"
+log "可选步骤成功:${RESULT_OPTIONAL_OK} 个"
+if [ "$n_failed" -gt 0 ]; then
+  log "失败的步骤(${n_failed} 个):"
+  printf '%s' "$RESULT_FAILED" | while IFS='|' read -r d r; do [ -n "$d" ] && log "  - ${d}:${r}"; done
+fi
+if [ "$n_skipped" -gt 0 ]; then
+  log "主动跳过(${n_skipped} 个):"
+  printf '%s' "$RESULT_SKIPPED" | while IFS='|' read -r d r; do [ -n "$d" ] && log "  - ${d}:${r}"; done
+fi
+log "${DEMO_NOTE}"
+log "机器可读的报告:${REPORT_JSON}"
+log "完整执行日志:${LOG_FILE}"
+
+if [ -n "$MISSING" ]; then
+  log ""
+  log "!! 必需能力不完整,这次部署**不算成功**:${MISSING}"
+  log "   逐个查:kubectl -n argocd get application <名字> -o yaml"
+  log "   排障入口:docs/operations/troubleshooting.md(顶部有症状索引)"
+  log "   修好之后重跑本脚本即可,所有步骤都是幂等的:"
+  log "     TARGET_ENV=${TARGET_ENV:-cloud-full} ./scripts/bootstrap-all.sh"
+  exit 1
+fi
+
+log ""
+log "===== 必需能力齐全,部署成功 ====="
+if [ "$n_failed" -gt 0 ]; then
+  log "注意:上面有 ${n_failed} 个可选步骤失败了,不影响核心链路,但**要看一眼**"
+  log "     —— 它们多半对应某个 demo 或非核心组件。"
+fi
+log "下一步:打开门户,或按 docs/getting-started.md 跑一遍完整链路。"
