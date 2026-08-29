@@ -1,7 +1,7 @@
 # ADR-082:让 dbt 的产物真的被消费 —— 血缘接进 OpenMetadata
 
 日期:2026-08-29
-状态:**已实现,待实机验证**(验证脚本 `scripts/44-verify-openmetadata-dbt-lineage.sh`)
+状态:**已实现并实机验证通过**(2026-08-29 02:23,cloud-full)
 
 ## 起因
 
@@ -67,6 +67,41 @@ iceberg.demo.orders --(source)--> stg_orders --(ref)--> daily_order_totals
 上游节点里必须同时出现 `stg_orders` 和 `orders`,少一个就报 PARTIAL 并
 非零退出。理由和这个仓库一贯的那条一样:deploy 返回 200 不等于采集跑过,
 Job Completed 不等于血缘真的建起来了。
+
+## 实机跑一遍才发现的三件事
+
+1. **MinIO 的 NetworkPolicy 里没有 `openmetadata`**。采集 Job 跑起来了,然后报
+   `Failed to list objects in S3 bucket 'lakehouse': Could not connect to the
+   endpoint URL` / `ConnectionRefusedError: [Errno 111]`。这和 08-28 发现的
+   `kserve-demo` 是**同一个盲区**:这条消费关系是运行时通过 API 建的
+   (scripts/43 建管道 → OpenMetadata 自己生成采集 Job),仓库 manifest 里
+   没有任何一处写着"openmetadata 要读 MinIO",所以
+   `check-networkpolicy-consumers.py` 扫不到,当时报的是"没有发现漏加白名单
+   的消费者"。已放行,并把它登记进检查器的 `EXTRA_CONSUMERS`。
+
+2. **顺序有硬依赖:元数据采集必须先跑。** dbt 采集是往**已存在的表实体**上
+   挂血缘边的。第一次跑时 dbt 采集报 `Success 100%`,而血缘接口对
+   `daily_order_totals` 返回 404 —— 因为元数据采集还没把 dbt 新建的这两张表
+   扫进目录,边无处可挂。`scripts/44` 现在会先跑一次元数据采集。
+   **这也说明"Success 100%"完全不足以当验收标准**:它说的是"我处理完了我
+   看到的东西",而它看到的是 0 个可挂载的目标。
+
+3. **不要轮询这些 Job 的 pod `.status.phase`。** `kubectl get pods` 显示
+   `Completed`(容器已正常退出)时,`.status.phase` 仍然是 `Running`,用
+   phase 判定会一直等到超时。轮询 Job 的 `.status.succeeded`。
+
+## 实机验证结果(2026-08-29 02:23,cloud-full)
+
+`scripts/44` 输出:
+
+```
+上游节点 3 个,上游边 2 条
+  trino.iceberg.demo.stg_orders  ->  trino.iceberg.demo.daily_order_totals
+  trino.iceberg.demo.orders      ->  trino.iceberg.demo.stg_orders
+OK dbt 血缘链完整:orders -> stg_orders -> daily_order_totals
+```
+
+这是从**血缘接口**查出来的真实边,不是"采集 Job 成功"。
 
 ## 还没解决的
 

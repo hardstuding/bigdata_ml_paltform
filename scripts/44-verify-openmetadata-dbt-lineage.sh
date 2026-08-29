@@ -29,7 +29,29 @@ kubectl -n "$OM_NS" get cronjob "$CRON" >/dev/null 2>&1 || {
   exit 1
 }
 
-log "==> 手工触发一次采集(不等下一个整点)"
+# **顺序有硬依赖**(2026-08-29 实测撞到):dbt 采集是往**已经存在的表实体**
+# 上挂血缘边的,表不在目录里就无处可挂——第一次跑时 dbt 采集报
+# `Success 100%`,而血缘接口对 daily_order_totals 返回 404,因为元数据采集
+# 还没把 dbt 新建的这两张表(stg_orders / daily_order_totals)扫进来。
+# 所以这里先跑一次元数据采集,再跑 dbt 采集。
+log "==> 先跑一次元数据采集(dbt 新建的表要先进目录,血缘才有地方挂)"
+MD_JOB="md-sync-$(date +%H%M%S)"
+kubectl -n "$OM_NS" create job --from=cronjob/om-cronjob-trino-metadata "$MD_JOB" >/dev/null
+# 轮询 **Job 的 .status.succeeded**,不要轮询 pod 的 .status.phase ——
+# 2026-08-29 实测:OpenMetadata 这些采集 pod 在 `kubectl get pods` 里已经
+# 显示 `Completed`(容器正常退出),而 `.status.phase` 仍然是 `Running`,
+# 用 phase 判定会一直等到超时。Job 那边最终会正确地翻成 succeeded=1。
+for i in $(seq 1 60); do
+  st="$(kubectl -n "$OM_NS" get job "$MD_JOB" -o jsonpath='{.status.succeeded}/{.status.failed}' 2>/dev/null || echo "/")"
+  case "$st" in
+    1/*) log "    元数据采集完成"; break ;;
+    */[1-9]*) log "!! 元数据采集失败:kubectl -n ${OM_NS} logs job/${MD_JOB}"; exit 1 ;;
+    *) [ "$i" = "60" ] && { log "!! 元数据采集 10 分钟没跑完"; exit 1; }
+       sleep 10 ;;
+  esac
+done
+
+log "==> 手工触发一次 dbt 采集(不等下一个整点)"
 kubectl -n "$OM_NS" create job --from=cronjob/"$CRON" "$JOB" >/dev/null
 log "    Job: ${JOB}"
 
