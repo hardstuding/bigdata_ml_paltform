@@ -36,9 +36,9 @@
 还没做:使用指南按角色和任务拆分、Runbook 每条统一成
 触发条件/影响/前置检查/操作/验证/回滚。
 
-## 下次开机第一件要做的事
+## 下次开机要验的三件事(都写好了判据,不用现想)
 
-**验 SQL Lab 的 impersonation**,这是 ADR-084 唯一没验的一环:
+**1. SQL Lab 的 impersonation** —— ADR-084 唯一没验的一环:
 
 ```
 analyst001 登录 → SQL Lab → SELECT current_user
@@ -47,7 +47,20 @@ analyst001 → 查一张他没有 grant 的表
   期望:被拒
 ```
 
-验过了才能把 capability-matrix 里「SQL 工作台」那格从 🟡/未验证 改掉——
+**2. 门户的角色工作台**(需要先跑一次 `scripts/00-generate-secrets.sh`
+把 token 复制到 platform-portal 命名空间):
+
+```
+alice 登录门户 → 首页应出现「我的表权限」,快到期的排最前、标黄
+审批人登录     → 额外出现「待我审批」,显示已等多久
+两块都空着     → 多半是 token 没对上(各生成了一份而不是复制)
+                 而这个失败是静默的,不会报错
+```
+
+**3. `internal-packages` 的定时发布路径** —— 手工触发验过,CronJob 按点
+触发从没观察到过。
+
+验过了才能把 capability-matrix 里对应那格改掉 ——
 `scripts/check-capability-matrix.py` 会拦住"没验就标 ✅"。
 
 ## 需要 zhenghe 配合的
