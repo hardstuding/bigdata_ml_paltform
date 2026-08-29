@@ -127,3 +127,17 @@ def test_pyproject_语法错也不会连累别人(tmp_path, monkeypatch):
     mod.main()
     assert "simple/good-pkg/index.html" in stored
     assert not any("syntax-bad" in k for k in stored)
+
+
+def test_同时写了带尾斜杠的键(tmp_path, monkeypatch):
+    """**pip 按 PEP 503 请求的是 `<索引>/<包名>/`(带尾斜杠),而 S3 不会把
+    目录 URL 解析成 index.html。** 只写 index.html 的话 pip 报
+    "Could not find a version that satisfies the requirement" —— 而它其实
+    读到了索引地址,最容易误判成"索引根本没生成"。2026-08-29 实测踩到。"""
+    make_pkg(tmp_path, "demo-utils")
+    mod, stored = load_module(monkeypatch, tmp_path)
+    mod.main()
+    assert "simple/" in stored, "根索引缺带尾斜杠的键,pip 读不到"
+    assert "simple/demo-utils/" in stored, "包索引缺带尾斜杠的键,pip 装不到"
+    # 两份内容必须一样,否则浏览器看到的和 pip 看到的不是一回事
+    assert stored["simple/demo-utils/"] == stored["simple/demo-utils/index.html"]

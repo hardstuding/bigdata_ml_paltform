@@ -110,14 +110,23 @@ def main() -> None:
             print(f"  已发布 {name}/{w.name}")
         page = ("<!DOCTYPE html><html><head><title>Links for %s</title></head><body>\n"
                 "<h1>Links for %s</h1>\n%s\n</body></html>\n" % (name, name, "\n".join(links)))
-        s3.put_object(Bucket=BUCKET, Key=f"simple/{name}/index.html",
-                      Body=page.encode(), ContentType="text/html")
+        # **同一份内容写两个键。**
+        # pip 按 PEP 503 请求的是 `<索引>/<包名>/`(带尾斜杠),而 **S3 不会
+        # 把目录 URL 解析成 index.html** —— 那是静态网站托管的行为,普通
+        # S3/MinIO 端点没有。所以必须额外写一个**键名以斜杠结尾**的对象,
+        # pip 才拿得到。2026-08-29 实测:只写 index.html 的话 pip 报
+        # "Could not find a version that satisfies the requirement",
+        # 而它其实读到了索引地址 —— 最容易误判成"索引没生成"。
+        #
+        # index.html 那份保留,是给人用浏览器翻的。
+        for key in (f"simple/{name}/index.html", f"simple/{name}/"):
+            s3.put_object(Bucket=BUCKET, Key=key, Body=page.encode(), ContentType="text/html")
 
     root_links = "\n".join(f'    <a href="{n}/">{n}</a><br/>' for n in sorted(packages))
     root = ("<!DOCTYPE html><html><head><title>Internal packages</title></head><body>\n"
             "<h1>Internal packages</h1>\n%s\n</body></html>\n" % root_links)
-    s3.put_object(Bucket=BUCKET, Key="simple/index.html",
-                  Body=root.encode(), ContentType="text/html")
+    for key in ("simple/index.html", "simple/"):
+        s3.put_object(Bucket=BUCKET, Key=key, Body=root.encode(), ContentType="text/html")
 
     print(f"发布完成:{len(packages)} 个包。索引 {ENDPOINT}/{BUCKET}/simple/")
 
