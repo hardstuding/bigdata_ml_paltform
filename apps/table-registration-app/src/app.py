@@ -56,7 +56,11 @@ SECURITY_LEVELS = [1, 2, 3]
 IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Trino 常见类型的白名单(可选精度/刻度),不是全量覆盖,够 demo/日常建表用。
 TYPE_RE = re.compile(
-    r"^(VARCHAR|CHAR|BIGINT|INTEGER|INT|SMALLINT|TINYINT|DOUBLE|REAL|BOOLEAN|DATE|TIMESTAMP)"
+    # 2026-08-29 补 DECIMAL:**表单里给的示例本身就是 `amount DECIMAL(10,2)`**,
+    # 而它会被这条白名单拒掉 —— 照着示例填的人第一次提交就会被打回。
+    # 顺带补 TIMESTAMP WITH TIME ZONE(Iceberg 里存时间戳的推荐类型)。
+    r"^(VARCHAR|CHAR|BIGINT|INTEGER|INT|SMALLINT|TINYINT|DOUBLE|REAL|DECIMAL|BOOLEAN|DATE"
+    r"|TIMESTAMP(\(\d+\))?(\s+WITH\s+TIME\s+ZONE)?)"
     r"(\(\d+(,\s*\d+)?\))?$",
     re.IGNORECASE,
 )
@@ -113,25 +117,93 @@ def get_identity():
 
 
 def parse_columns(raw: str):
-    """每行 `列名 类型`,比如 `order_id BIGINT`。抛 ValueError 说明校验失败的
-    具体原因(直接显示给用户,不是笼统的 400)。"""
+    """每行 `列名 类型 [# 字段说明]`,比如 `order_id BIGINT # 订单号`。
+
+    **字段说明是可选的,但值得填**:一张表在数据目录里能不能被别人用起来,
+    多半取决于列名之外还有没有一句人话 —— `amount` 到底是含税还是不含税、
+    `status` 有哪几个取值,这些只有建表的人知道,而他不写下来的话,后面
+    每个用这张表的人都要来问一遍。
+
+    返回 [(列名, 类型, 说明或 None), ...]。**旧的两段式格式仍然有效**,
+    不写 `#` 就是没有说明。
+
+    抛 ValueError 说明校验失败的具体原因(直接显示给用户,不是笼统的 400)。
+    """
     columns = []
     for line_no, line in enumerate(raw.strip().splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
+        comment = None
+        if "#" in line:
+            line, comment = line.split("#", 1)
+            line, comment = line.strip(), comment.strip() or None
         parts = line.split(None, 1)
         if len(parts) != 2:
-            raise ValueError(f"第 {line_no} 行格式不对(应该是`列名 类型`):{line}")
+            raise ValueError(f"第 {line_no} 行格式不对(应该是`列名 类型`,"
+                             f"可以再跟 `# 说明`):{line}")
         name, dtype = parts[0], parts[1].strip().upper()
         if not IDENT_RE.match(name):
             raise ValueError(f"第 {line_no} 行列名不合法:{name}")
         if not TYPE_RE.match(dtype):
             raise ValueError(f"第 {line_no} 行类型不在支持列表里:{dtype}")
-        columns.append((name, dtype))
+        columns.append((name, dtype, comment))
     if not columns:
         raise ValueError("至少要有一列")
+    names = [c[0].lower() for c in columns]
+    dup = {n for n in names if names.count(n) > 1}
+    if dup:
+        # Trino 建表时会报错,但报错信息里不会告诉你是哪一行,而且那时
+        # 表单内容已经丢了 —— 在这里挡住,人还能直接改。
+        raise ValueError(f"列名重复:{', '.join(sorted(dup))}")
     return columns
+
+
+# Iceberg 分区表达式:直接写列名,或者对时间列用 year()/month()/day()/hour()。
+# **不接受任意表达式** —— 这个字段最后是要拼进 DDL 的,白名单比转义可靠。
+PARTITION_RE = re.compile(
+    r"^(?:(year|month|day|hour|bucket|truncate)\(\s*([a-zA-Z_][a-zA-Z0-9_]*)"
+    r"(?:\s*,\s*\d+)?\s*\)|([a-zA-Z_][a-zA-Z0-9_]*))$",
+    re.IGNORECASE,
+)
+
+
+def parse_partitioning(raw: str, columns):
+    """逗号分隔的分区表达式。返回 [] 表示不分区。
+
+    校验每个表达式引用的列**真的存在** —— Trino 那边当然也会报错,但那时
+    人已经跳到一个错误页、表单内容没了,而这里能直接告诉他哪个列名写错了。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    known = {c[0].lower() for c in columns}
+    out = []
+    # **不能直接 raw.split(",")** —— `bucket(region, 8)` 里面本身就有逗号,
+    # 一切就切断了。按括号深度切。
+    parts, depth, buf = [], 0, ""
+    for ch in raw:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(buf)
+            buf = ""
+        else:
+            buf += ch
+    parts.append(buf)
+    for expr in [e.strip() for e in parts if e.strip()]:
+        m = PARTITION_RE.match(expr)
+        if not m:
+            raise ValueError(
+                f"分区表达式不合法:{expr}。只支持列名,或者 "
+                f"year(列)/month(列)/day(列)/hour(列)/bucket(列, N)/truncate(列, N)")
+        col = (m.group(2) or m.group(3)).lower()
+        if col not in known:
+            raise ValueError(f"分区用到的列 {col} 不在字段列表里")
+        out.append(expr)
+    return out
 
 
 def parse_table_fqn(fqn: str):
@@ -148,7 +220,33 @@ def parse_table_fqn(fqn: str):
     return catalog, schema, table
 
 
-def create_table_in_trino(catalog: str, schema: str, table: str, columns):
+def _sql_str(value: str) -> str:
+    """单引号字符串字面量。**只用于说明文字这类没有白名单可用的地方** ——
+    列名/类型/分区表达式全都走白名单校验,不靠转义。"""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def build_ddl(catalog: str, schema: str, table: str, columns, partitioning=None):
+    """拼出这次要执行的 CREATE TABLE。
+
+    **抽成单独函数是为了让"提交前预览"和"真正执行"用的是同一份代码** ——
+    预览页显示一段 SQL、实际跑另一段,是比没有预览更糟的事。
+    """
+    col_defs = []
+    for name, dtype, comment in columns:
+        piece = f"{name} {dtype}"
+        if comment:
+            piece += f" COMMENT {_sql_str(comment)}"
+        col_defs.append(piece)
+    ddl = (f"CREATE TABLE IF NOT EXISTS {catalog}.{schema}.{table} (\n  "
+           + ",\n  ".join(col_defs) + "\n)")
+    if partitioning:
+        arr = ", ".join(_sql_str(e) for e in partitioning)
+        ddl += f"\nWITH (partitioning = ARRAY[{arr}])"
+    return ddl
+
+
+def create_table_in_trino(catalog: str, schema: str, table: str, columns, partitioning=None):
     if not TRINO_PASSWORD:
         raise RuntimeError("TRINO_PASSWORD 没配置,table_registration_service 这个服务账号密码没读到")
     conn = trino.dbapi.connect(
@@ -160,16 +258,19 @@ def create_table_in_trino(catalog: str, schema: str, table: str, columns):
     cur = conn.cursor()
     cur.execute(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
     cur.fetchall()
-    col_defs = ", ".join(f"{name} {dtype}" for name, dtype in columns)
-    cur.execute(f"CREATE TABLE IF NOT EXISTS {catalog}.{schema}.{table} ({col_defs})")
+    cur.execute(build_ddl(catalog, schema, table, columns, partitioning))
     cur.fetchall()
     conn.close()
+
+
+def _om_headers():
+    return {"Authorization": f"Bearer {OPENMETADATA_TOKEN}"}
 
 
 def om_request(method: str, path: str, json_body=None):
     resp = requests.request(
         method, f"{OPENMETADATA_URL}{path}",
-        headers={"Authorization": f"Bearer {OPENMETADATA_TOKEN}"},
+        headers=_om_headers(),
         json=json_body, timeout=15,
     )
     resp.raise_for_status()
@@ -234,6 +335,99 @@ def ensure_om_hierarchy_and_tags():
     ensure_table_custom_properties()
 
 
+# 建表时顺手挂上的数据质量断言(roadmap P1.5「建表注册工具」验收项之一)。
+#
+# **只提供三条,而且都是"不满足几乎必然是事故"的那种**,不做成一个能自由
+# 组合的规则引擎:断言的价值在于有人看、有人管。一开始就给二十种选项,
+# 结果是每张表挂一堆没人维护的检查,红了也没人理 —— 而"学会忽略红灯"比
+# 没有灯更糟(ADR-070 里那条挂错表的新鲜度断言就是这么来的)。
+#
+# API 形状不是猜的,和 scripts/34-configure-openmetadata-data-quality.sh
+# 用的是同一套(那份是在真集群上试出来的,包括"body 里不能带 testSuite
+# 字段,套件从 entityLink 推断"这类只能实测发现的细节)。
+QUALITY_RULES = {
+    "row_count_not_empty": (
+        "行数不为零",
+        "上游断供、分区路径写错、过滤条件写反,现象都是「任务成功但表是空的」"),
+    "not_null": (
+        "选中的列不能为空",
+        "Flink 的 ignore-parse-errors 会把解析失败静默变成 null,这是实测过的失效模式"),
+    "unique": (
+        "选中的列不能重复",
+        "主键重复 = 下游所有聚合数字翻倍,而且不会报错"),
+}
+
+
+def _column_list(raw, columns):
+    """逗号分隔的列名 → 列表,并且**只保留真实存在的列**。
+
+    写错一个列名,OpenMetadata 会建出一条 entityLink 指向不存在列的断言 ——
+    它不会报错,只会永远执行失败。而一条永远红的检查比没有检查更糟:人会
+    学会忽略它,然后真出问题时也一起忽略了(ADR-070 里那条挂错表的新鲜度
+    断言就是这么来的)。
+    """
+    known = {c[0].lower(): c[0] for c in columns}
+    out = []
+    for name in [x.strip() for x in (raw or "").split(",") if x.strip()]:
+        real = known.get(name.lower())
+        if real and real not in out:
+            out.append(real)
+    return out
+
+
+def create_quality_tests(catalog, schema, table, rules, key_columns, notnull_columns):
+    """给这张表建断言。返回一句给人看的话(建了几条 / 为什么没建)。
+
+    **失败不抛出去**:表已经建好了、目录也登记了,不该因为断言没建成就让
+    整个提交显示失败 —— 那会让人以为要重新建表。说清楚哪几条没建成就够了。
+    """
+    if not rules:
+        return ""
+    table_fqn = f"trino.{catalog}.{schema}.{table}"
+    suite_fqn = f"{table_fqn}.testSuite"
+    try:
+        resp = requests.get(f"{OPENMETADATA_URL}/api/v1/dataQuality/testSuites/name/{suite_fqn}",
+                            headers=_om_headers(), timeout=30)
+        if resp.status_code != 200:
+            # 1.13.3+ 的路径是 /basic 不是 /executable(实测 /executable 返回
+            # 405),字段叫 basicEntityReference。
+            om_request("POST", "/api/v1/dataQuality/testSuites/basic",
+                       {"name": suite_fqn, "basicEntityReference": table_fqn})
+    except Exception as exc:   # noqa: BLE001
+        return f"(数据质量断言没建成:{exc})"
+
+    cases = []
+    if "row_count_not_empty" in rules:
+        cases.append((f"{table}_row_count_not_empty", "tableRowCountToBeBetween",
+                      f"<#E::table::{table_fqn}>",
+                      [{"name": "minValue", "value": "1"},
+                       {"name": "maxValue", "value": "100000000"}]))
+    for col in notnull_columns if "not_null" in rules else []:
+        cases.append((f"{table}_{col}_not_null", "columnValuesToBeNotNull",
+                      f"<#E::table::{table_fqn}::columns::{col}>", []))
+    for col in key_columns if "unique" in rules else []:
+        cases.append((f"{table}_{col}_unique", "columnValuesToBeUnique",
+                      f"<#E::table::{table_fqn}::columns::{col}>", []))
+
+    ok, failed = 0, []
+    for name, definition, entity_link, params in cases:
+        body = {"name": name, "entityLink": entity_link,
+                "testDefinition": definition, "parameterValues": params}
+        try:
+            r = requests.post(f"{OPENMETADATA_URL}/api/v1/dataQuality/testCases",
+                              headers=_om_headers(), json=body, timeout=30)
+            if r.status_code in (200, 201, 409):   # 409 = 已存在,幂等
+                ok += 1
+            else:
+                failed.append(f"{name}({r.status_code})")
+        except Exception as exc:   # noqa: BLE001
+            failed.append(f"{name}({type(exc).__name__})")
+    msg = f"已挂 {ok} 条数据质量断言"
+    if failed:
+        msg += f";没建成:{', '.join(failed)}"
+    return msg
+
+
 def register_table_in_openmetadata(catalog: str, schema: str, table: str, columns, owner: str, security_level: int):
     ensure_om_hierarchy_and_tags()
     om_request("PUT", "/api/v1/databaseSchemas", {"name": schema, "database": f"trino.{catalog}"})
@@ -247,7 +441,7 @@ def register_table_in_openmetadata(catalog: str, schema: str, table: str, column
         pass  # owner 还没在 OpenMetadata 里出现过(比如从没登录过 OM UI),先不挂 owner
 
     om_columns = []
-    for name, dtype in columns:
+    for name, dtype, comment in columns:
         base = dtype.split("(")[0]
         om_type = OM_TYPE_MAP.get(base, "VARCHAR")
         col = {"name": name, "dataType": om_type}
@@ -259,6 +453,10 @@ def register_table_in_openmetadata(catalog: str, schema: str, table: str, column
             # 列定义,不追求精确。
             m = re.search(r"\((\d+)", dtype)
             col["dataLength"] = int(m.group(1)) if m else 255
+        if comment:
+            # 字段说明写进目录 —— 一张表能不能被别人用起来,多半就取决于
+            # 列名之外还有没有这一句人话。
+            col["description"] = comment
         om_columns.append(col)
     body = {
         "name": table,
@@ -292,6 +490,10 @@ TEMPLATE = """
   .field { margin-bottom: 12px; }
   label { display: block; font-weight: bold; margin-bottom: 2px; }
   .hint { color: #888; font-size: 0.85em; }
+  .ck { display: block; font-weight: normal; margin: 4px 0; }
+  .ck .hint { margin-left: 6px; }
+  .preview { background: #f6f7f9; border: 1px solid #ddd; border-radius: 6px;
+             padding: 12px 14px; white-space: pre-wrap; font-size: 0.9em; margin-top: 8px; }
   .warn-box { background: #fff8e1; border: 1px solid #ffd54f; border-radius: 6px;
               padding: 10px 13px; font-size: 0.9em; line-height: 1.6; }
   .ok { color: #228b22; } .err { color: #b22222; } .warn { color: #b8860b; }
@@ -317,8 +519,32 @@ TEMPLATE = """
     <input type="text" name="table_fqn" placeholder="demo.my_table" size="50" required>
   </div>
   <div class="field">
-    <label>列定义(每行一列:`列名 类型`)</label>
-    <textarea name="columns" placeholder="order_id BIGINT&#10;customer_name VARCHAR&#10;amount DECIMAL(10,2)" required></textarea>
+    <label>列定义(每行一列:<code>列名 类型</code>,可以再跟 <code># 字段说明</code>)</label>
+    <textarea name="columns" placeholder="order_id BIGINT # 订单号&#10;event_time TIMESTAMP # 下单时间(UTC)&#10;amount DECIMAL(10,2) # 含税金额" required></textarea>
+    <p class="hint">字段说明会写进数据目录。一张表能不能被别人用起来,多半就
+      取决于列名之外还有没有这一句人话 —— <code>amount</code> 到底含不含税、
+      <code>status</code> 有哪几个取值,只有你知道。</p>
+  </div>
+  <div class="field">
+    <label>分区(可选,逗号分隔)</label>
+    <input type="text" name="partitioning" placeholder="day(event_time), region" size="50">
+    <p class="hint">支持列名,或者对时间列用 <code>year()/month()/day()/hour()</code>,
+      以及 <code>bucket(列, N)</code>/<code>truncate(列, N)</code>。
+      按时间分区几乎总是对的:不分区的表,查最近一天也要扫全表。</p>
+  </div>
+  <div class="field">
+    <label>数据质量断言(可选)</label>
+    <label class="ck"><input type="checkbox" name="quality_rules" value="row_count_not_empty"> 行数不为零
+      <span class="hint">上游断供、分区路径写错、过滤条件写反,现象都是「任务成功但表是空的」</span></label>
+    <label class="ck"><input type="checkbox" name="quality_rules" value="unique"> 主键不重复
+      <span class="hint">主键重复 = 下游所有聚合数字翻倍,而且不会报错</span></label>
+    <input type="text" name="key_columns" placeholder="主键列名,逗号分隔" size="40">
+    <label class="ck"><input type="checkbox" name="quality_rules" value="not_null"> 关键列不为空
+      <span class="hint">解析失败被静默变成 null 是这个平台实测过的失效模式</span></label>
+    <input type="text" name="notnull_columns" placeholder="不允许为空的列名,逗号分隔" size="40">
+    <p class="hint">只给这三条,不做成能自由组合的规则引擎:断言的价值在于
+      有人看、有人管。一开始就给二十种选项,结果是每张表挂一堆没人维护的
+      检查,红了也没人理 —— 而学会忽略红灯比没有灯更糟。</p>
   </div>
   <div class="field">
     <label>负责人</label>
@@ -341,8 +567,28 @@ TEMPLATE = """
       <option value="3">3 级(高敏感)</option>
     </select>
   </div>
+  <div class="field">
+    <button type="button" id="preview-btn">预览要执行的 SQL</button>
+    <pre id="preview" class="preview" hidden></pre>
+  </div>
   <button type="submit">提交并建表</button>
 </form>
+
+<script>
+// 预览:把表单内容 POST 给 /preview,后端用**和真正建表同一份 build_ddl**
+// 拼出 SQL 返回。刻意不在前端自己拼一遍 —— 预览页显示一段 SQL、实际跑另
+// 一段,比没有预览更糟。
+document.getElementById('preview-btn').addEventListener('click', function () {
+  var form = this.closest('form');
+  var box = document.getElementById('preview');
+  box.hidden = false;
+  box.textContent = '生成中…';
+  fetch('{{ url_for("preview") }}', {method: 'POST', body: new FormData(form)})
+    .then(function (r) { return r.json(); })
+    .then(function (j) { box.textContent = j.error ? ('✗ ' + j.error) : j.ddl; })
+    .catch(function (e) { box.textContent = '预览失败:' + e; });
+});
+</script>
 
 <h2>我的建表记录</h2>
 <table>
@@ -377,6 +623,27 @@ def index():
         groups_warning=groups_warning)
 
 
+@app.route("/preview", methods=["POST"])
+def preview():
+    """提交前预览。
+
+    **用的是和真正建表同一份 `build_ddl`** —— 预览显示一段 SQL、实际跑另一段,
+    比没有预览更糟。这个端点只拼字符串,不碰 Trino 也不碰 OpenMetadata。
+
+    校验错误当成正常返回(200 + error 字段)而不是 400:这是"边填边看"的
+    交互,填到一半格式不对是常态,不该在浏览器控制台里留一串红色。
+    """
+    if not get_current_user():
+        abort(401)
+    try:
+        catalog, schema, table = parse_table_fqn(request.form.get("table_fqn", ""))
+        columns = parse_columns(request.form.get("columns", ""))
+        partitioning = parse_partitioning(request.form.get("partitioning", ""), columns)
+    except ValueError as e:
+        return {"error": str(e)}
+    return {"ddl": build_ddl(catalog, schema, table, columns, partitioning)}
+
+
 @app.route("/submit", methods=["POST"])
 def submit():
     username = get_current_user()
@@ -396,12 +663,7 @@ def submit():
     # 里),两层都要有:那边防的是"不管 owner 怎么来的",这边防的是"一开始
     # 就不该能乱填"。
     #
-    # 代他人建表这个需求是真的(平台组帮业务方建),但它需要判断"你是不是
-    # 平台组",而那要 oauth2-proxy 传 access token + Keycloak client 加
-    # groups scope —— 加 scope 这件事在 MLflow 上炸过一次(client 没配这个
-    # scope,Keycloak 直接 invalid_scope,登录页都进不去)。所以单独做、
-    # 单独实机验证,见 roadmap。
-    # 平台组可以代别人建表(填一个不同的负责人),其他人不行 —— 表负责人
+    # 2026-08-29 晚:平台组可以代别人建表(填一个不同的负责人),其他人不行 —— 表负责人
     # 是权限审批链的第一级审批人,"能指定别人当负责人"等于能安排审批人。
     #
     # **拿不到组信息时按"不能"处理**,和门户那边"拿不到就显示全部"相反:
@@ -418,9 +680,11 @@ def submit():
         security_level = 1
 
     trino_status, om_status, note = "pending", "pending", ""
+    partitioning = []
     try:
         catalog, schema, table = parse_table_fqn(table_fqn)
         columns = parse_columns(request.form.get("columns", ""))
+        partitioning = parse_partitioning(request.form.get("partitioning", ""), columns)
     except ValueError as e:
         trino_status, om_status, note = "rejected", "skipped", str(e)
         catalog = schema = table = None
@@ -428,7 +692,7 @@ def submit():
 
     if catalog:
         try:
-            create_table_in_trino(catalog, schema, table, columns)
+            create_table_in_trino(catalog, schema, table, columns, partitioning)
             trino_status = "ok"
         except Exception as e:
             trino_status = "failed"
@@ -442,6 +706,15 @@ def submit():
                 try:
                     note = register_table_in_openmetadata(catalog, schema, table, columns, owner, security_level)
                     om_status = "ok"
+                    # 断言建失败不影响这次提交的成败 —— 表已经建好、目录也
+                    # 登记了,因为断言没挂上就显示"失败",会让人以为要重建表。
+                    quality = create_quality_tests(
+                        catalog, schema, table,
+                        set(request.form.getlist("quality_rules")),
+                        _column_list(request.form.get("key_columns"), columns),
+                        _column_list(request.form.get("notnull_columns"), columns))
+                    if quality:
+                        note = f"{note};{quality}"
                 except Exception as e:
                     om_status = "failed"
                     note = f"OpenMetadata 回写失败(表本身已经建好了):{e}"

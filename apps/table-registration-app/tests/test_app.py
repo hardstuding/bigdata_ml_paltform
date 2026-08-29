@@ -42,14 +42,14 @@ def client():
 
 class TestParseColumns:
     def test_valid_single_column(self):
-        assert reg.parse_columns("order_id BIGINT") == [("order_id", "BIGINT")]
+        assert reg.parse_columns("order_id BIGINT") == [("order_id", "BIGINT", None)]
 
     def test_valid_multiple_columns(self):
         result = reg.parse_columns("order_id BIGINT\nname VARCHAR(100)\namount DOUBLE")
         assert result == [
-            ("order_id", "BIGINT"),
-            ("name", "VARCHAR(100)"),
-            ("amount", "DOUBLE"),
+            ("order_id", "BIGINT", None),
+            ("name", "VARCHAR(100)", None),
+            ("amount", "DOUBLE", None),
         ]
 
     def test_skips_blank_lines(self):
@@ -59,7 +59,7 @@ class TestParseColumns:
     def test_type_is_uppercased(self):
         """用户输小写类型也应该能过,内部统一转大写再给 Trino。"""
         result = reg.parse_columns("id bigint")
-        assert result == [("id", "BIGINT")]
+        assert result == [("id", "BIGINT", None)]
 
     def test_rejects_missing_type(self):
         with pytest.raises(ValueError, match="格式不对"):
@@ -93,9 +93,10 @@ class TestParseColumns:
             reg.parse_columns("   \n  \n")
 
     def test_accepts_type_with_precision(self):
-        # 项目支持的类型白名单里没有 DECIMAL,用 VARCHAR 确认精度语法本身能过
-        result = reg.parse_columns("price VARCHAR(10, 2)")
-        assert result == [("price", "VARCHAR(10, 2)")]
+        # 2026-08-29 起 DECIMAL 在白名单里了(此前不在,而表单示例给的正是
+        # `amount DECIMAL(10,2)` —— 照着示例填的人第一次提交就会被打回)。
+        assert reg.parse_columns("price DECIMAL(10,2)") == [("price", "DECIMAL(10,2)", None)]
+        assert reg.parse_columns("name VARCHAR(100)") == [("name", "VARCHAR(100)", None)]
 
     def test_error_message_includes_line_number(self):
         with pytest.raises(ValueError, match="第 2 行"):
@@ -174,7 +175,7 @@ class TestSubmitRoute:
                 headers={"X-Forwarded-User": "zhenghe"},
             )
         assert resp.status_code == 302
-        mock_create.assert_called_once_with("iceberg", "demo", "orders", [("id", "BIGINT"), ("name", "VARCHAR(50)")])
+        mock_create.assert_called_once_with("iceberg", "demo", "orders", [("id", "BIGINT", None), ("name", "VARCHAR(50)", None)], [])
         row = sqlite3.connect(reg.DB_PATH).execute(
             "SELECT trino_status, openmetadata_status FROM registrations ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -208,7 +209,7 @@ class TestSubmitRoute:
         # 2026-08-29:这条断言之前写的是 "someone" —— 也就是**在断言那个漏洞**。
         # 表单里的 owner 现在完全不看,负责人一律是登录者本人,原因见
         # app.py 里 submit() 那段注释(表负责人是审批链的第一级审批人)。
-        mock_om.assert_called_once_with("iceberg", "demo", "orders", [("id", "BIGINT")], "zhenghe", 2)
+        mock_om.assert_called_once_with("iceberg", "demo", "orders", [("id", "BIGINT", None)], "zhenghe", 2)
         row = sqlite3.connect(reg.DB_PATH).execute(
             "SELECT trino_status, openmetadata_status, security_level, owner FROM registrations ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -446,3 +447,141 @@ class TestReconcileOpenMetadata:
         body = client.get("/internal/reconcile-status", headers=self._hdr()).get_json()
         assert body["pending"] == 2
         assert {t["table"] for t in body["tables"]} == {"demo.x", "demo.y"}
+
+
+class TestColumnComments:
+    def test_三段式带说明(self):
+        assert reg.parse_columns("order_id BIGINT # 订单号") == [("order_id", "BIGINT", "订单号")]
+
+    def test_旧的两段式仍然有效(self):
+        # 不写 # 就是没有说明 —— 这个格式在仓库里已经有人用了,不能破坏。
+        assert reg.parse_columns("order_id BIGINT") == [("order_id", "BIGINT", None)]
+
+    def test_空说明当成没有(self):
+        assert reg.parse_columns("id BIGINT #   ") == [("id", "BIGINT", None)]
+
+    def test_说明里的井号只吃第一个(self):
+        assert reg.parse_columns("id BIGINT # a # b") == [("id", "BIGINT", "a # b")]
+
+    def test_列名重复被挡住(self):
+        # Trino 也会报错,但报错里不说是哪一行,而且那时表单内容已经丢了。
+        with pytest.raises(ValueError, match="列名重复"):
+            reg.parse_columns("a BIGINT\nA INT")
+
+
+class TestPartitioning:
+    def _cols(self):
+        return reg.parse_columns("ts TIMESTAMP\nregion VARCHAR\namount DECIMAL(10,2)")
+
+    def test_空的就是不分区(self):
+        assert reg.parse_partitioning("", self._cols()) == []
+
+    def test_列名和时间函数都支持(self):
+        assert reg.parse_partitioning("day(ts), region", self._cols()) == ["day(ts)", "region"]
+
+    def test_bucket_和_truncate_带参数(self):
+        # 这条抓到过一个真 bug:先按逗号切的话,`bucket(region, 8)` 里面
+        # 本身就有逗号,会被切成 `bucket(region` 和 `8)`。
+        assert reg.parse_partitioning("bucket(region, 8)", self._cols()) == ["bucket(region, 8)"]
+
+    def test_多个表达式里混着带参数的(self):
+        assert reg.parse_partitioning("day(ts), bucket(region, 8), amount",
+                                      self._cols()) == ["day(ts)", "bucket(region, 8)", "amount"]
+
+    def test_任意表达式被挡住(self):
+        # 这个字段最后要拼进 DDL,白名单比转义可靠。
+        for bad in ("drop table x", "ts); DROP TABLE y --", "nonexistent(ts)"):
+            with pytest.raises(ValueError):
+                reg.parse_partitioning(bad, self._cols())
+
+    def test_引用不存在的列被挡住(self):
+        with pytest.raises(ValueError, match="不在字段列表里"):
+            reg.parse_partitioning("day(no_such_col)", self._cols())
+
+
+class TestBuildDdl:
+    def test_带说明和分区(self):
+        cols = reg.parse_columns("id BIGINT # 主键\nts TIMESTAMP")
+        ddl = reg.build_ddl("iceberg", "demo", "orders", cols, ["day(ts)"])
+        assert "COMMENT '主键'" in ddl
+        assert "partitioning = ARRAY['day(ts)']" in ddl
+        assert ddl.startswith("CREATE TABLE IF NOT EXISTS iceberg.demo.orders")
+
+    def test_不分区就不带_with(self):
+        cols = reg.parse_columns("id BIGINT")
+        assert "partitioning" not in reg.build_ddl("iceberg", "demo", "t", cols, [])
+
+    def test_说明里的单引号被转义(self):
+        cols = reg.parse_columns("id BIGINT # it's fine")
+        assert "COMMENT 'it''s fine'" in reg.build_ddl("iceberg", "demo", "t", cols)
+
+
+class TestPreview:
+    def test_预览和真正建表用同一份_ddl(self, client):
+        # 预览显示一段 SQL、实际跑另一段,比没有预览更糟。
+        data = {"table_fqn": "demo.orders", "columns": "id BIGINT # 主键\nts TIMESTAMP",
+                "partitioning": "day(ts)"}
+        shown = client.post("/preview", data=data,
+                            headers={"X-Forwarded-User": "zhenghe"}).get_json()["ddl"]
+
+        with patch.object(reg, "trino") as t, \
+             patch.object(reg, "TRINO_PASSWORD", "pw"):
+            cols = reg.parse_columns(data["columns"])
+            reg.create_table_in_trino("iceberg", "demo", "orders", cols,
+                                      reg.parse_partitioning("day(ts)", cols))
+            executed = [c.args[0] for c in t.dbapi.connect.return_value.cursor.return_value.execute.call_args_list]
+        assert shown in executed
+
+    def test_格式错误返回_200_加_error_不是_400(self, client):
+        # 边填边看,填到一半格式不对是常态,不该在控制台留一串红色。
+        r = client.post("/preview", data={"table_fqn": "demo.t", "columns": "坏行"},
+                        headers={"X-Forwarded-User": "zhenghe"})
+        assert r.status_code == 200 and "error" in r.get_json()
+
+    def test_没登录不给预览(self, client):
+        assert client.post("/preview", data={}).status_code == 401
+
+
+class TestQualityRules:
+    def test_只保留真实存在的列(self):
+        cols = reg.parse_columns("order_id BIGINT\nname VARCHAR")
+        # 写错列名的话,OpenMetadata 会建出一条指向不存在列的断言 —— 它不会
+        # 报错,只会永远失败,而一条永远红的检查比没有检查更糟。
+        assert reg._column_list("order_id, nope, NAME, order_id", cols) == ["order_id", "name"]
+
+    def test_没勾任何规则就不调_openmetadata(self):
+        with patch.object(reg, "requests") as rq:
+            assert reg.create_quality_tests("iceberg", "demo", "t", set(), [], []) == ""
+            rq.post.assert_not_called()
+
+    def test_建断言失败不抛出去(self):
+        # 表已经建好、目录也登记了,不该因为断言没挂上就显示"失败" ——
+        # 那会让人以为要重新建表。
+        with patch.object(reg, "requests") as rq:
+            rq.get.side_effect = RuntimeError("boom")
+            msg = reg.create_quality_tests("iceberg", "demo", "t",
+                                           {"row_count_not_empty"}, [], [])
+        assert "没建成" in msg
+
+    def test_已存在的断言算成功(self):
+        # 409 = 幂等重跑,不是错误。
+        with patch.object(reg, "requests") as rq, \
+             patch.object(reg, "om_request"):
+            rq.get.return_value.status_code = 200
+            rq.post.return_value.status_code = 409
+            msg = reg.create_quality_tests("iceberg", "demo", "t",
+                                           {"row_count_not_empty"}, [], [])
+        assert "已挂 1 条" in msg and "没建成" not in msg
+
+    def test_entity_link_指向具体的列(self):
+        sent = []
+        with patch.object(reg, "requests") as rq, patch.object(reg, "om_request"):
+            rq.get.return_value.status_code = 200
+            rq.post.side_effect = lambda *a, **k: (sent.append(k["json"]),
+                                                   MagicMock(status_code=201))[1]
+            reg.create_quality_tests("iceberg", "demo", "orders", {"unique"},
+                                     ["order_id"], [])
+        assert sent[0]["entityLink"] == "<#E::table::trino.iceberg.demo.orders::columns::order_id>"
+        assert sent[0]["testDefinition"] == "columnValuesToBeUnique"
+        # body 里不能带 testSuite —— 带上 1.13.3 一律 400,套件从 entityLink 推断
+        assert "testSuite" not in sent[0]
