@@ -66,7 +66,50 @@ gh secret set ACR_PASSWORD --repo hardstuding/bigdata_ml_paltform
 
 每条会提示你输入值,**输入内容不会出现在 shell 历史里**。
 
-## 配完之后还差一步(还没做)
+## 配完之后:让集群从 ACR 拉
+
+两步,**都不需要把密码写进任何文件或命令行**。
+
+### 1. 集群侧的拉取凭据
+
+```bash
+read -s -p "ACR 密码: " ACR_PASSWORD && export ACR_PASSWORD && echo
+export ACR_REGISTRY=crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com
+export ACR_USERNAME=<阿里云账号名>
+export ACR_NAMESPACE=<命名空间>
+./scripts/45-configure-acr-pull.sh
+unset ACR_PASSWORD
+```
+
+`read -s` 不回显、也不进 shell 历史。脚本把凭据建成 `acr-pull` Secret 并挂到
+各命名空间的默认 ServiceAccount 上,这样 Pod 自动带上,不用逐个 Deployment
+改 `imagePullSecrets`。
+
+**凭据只发给会拉自建镜像的那些命名空间,不是所有命名空间** —— imagePullSecret
+是凭据,撒得越广泄露面越大。加新组件时那份名单要跟着加。
+
+### 2. 把清单里的镜像地址切过去
+
+```bash
+ACR_REGISTRY=... ACR_NAMESPACE=... python3 scripts/switch-image-registry.py --to acr
+python3 scripts/render-environment-config.py cloud-full
+git commit -am "镜像地址切到 ACR" && git push
+```
+
+只动**自建镜像**(镜像名取自 CI workflow 的 matrix,不是手写一份 —— 手写
+的下场是加了新镜像忘了同步,表现成单个组件 ImagePullBackOff)。第三方镜像
+(apache/spark、trino 等)一律不碰,它们不在我们的 registry 里。
+
+切换是可逆的:`--to ghcr` 换回去,内容完全还原(验证过)。**开源使用者和
+境外环境应该留在 GHCR**,ACR 是这套部署的境内加速,不是项目的默认。
+
+`--show` 随时看现在指向哪。
+
+> **已经在跑的 Pod 不会自动换镜像**,要等 ArgoCD 同步后滚更。
+
+## 已知的取舍
+
+### 跨地域
 
 推到 ACR 只解决了"镜像在境内有一份",**集群里的清单还是引用
 `ghcr.io/...`**,不会自动改成从 ACR 拉。要让 cloud-full/prod 用 ACR、
