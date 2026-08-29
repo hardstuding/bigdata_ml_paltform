@@ -94,6 +94,12 @@ def ensure_helm_repo(repo_url: str) -> str:
     name = "validate-" + re.sub(r"[^a-zA-Z0-9]+", "-", repo_url).strip("-")[-40:]
     if name not in _repo_added:
         subprocess.run(["helm", "repo", "add", name, repo_url], capture_output=True, check=False)
+        # **必须显式 update。** `helm repo add` 对一个已经加过的同名仓库是
+        # no-op,不会刷新索引缓存 —— 本地缓存一旧,任何比缓存新的 chart 版本
+        # 都会被报成 "not found",而那是假失败。CI 上 runner 是全新的、缓存
+        # 是空的,所以一直是绿的,这个问题只在本机复现:2026-08-29 实测
+        # openmetadata 2.0.0 明明在仓库里,这里却报找不到。
+        subprocess.run(["helm", "repo", "update", name], capture_output=True, check=False)
         _repo_added.add(name)
     return name
 
