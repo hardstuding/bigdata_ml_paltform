@@ -38,6 +38,7 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1298,11 +1299,16 @@ def reclaim_expired():
     """给 CronJob 调的内部端点(ADR-050),不走 oauth2-proxy/人类登录,同一个
     X-Internal-Token 共享密钥模式(和 /internal/escalation-check 一样)。
     扫 table-access-grants.csv,把 expires_at 已经过去的行摘掉、commit+push,
-    对每个被回收的人发一条企微通知。这个文件本身现在没有任何执行引擎在读
-    (见模块顶部范围边界说明),回收动作只影响这份"决策留痕"记录本身,不
-    产生"撤销 Trino 实际权限"这种效果——Trino OPA 真正接上这份数据之前,
-    回收的意义是"记录准确、下次接上执行引擎时不会带着一堆过期授权",不是
-    立刻生效的访问控制变更。"""
+    对每个被回收的人发一条企微通知。
+
+    **回收是真的会生效的**:`opa-grants-sync` 每 5 分钟把这个 csv 推给 OPA
+    (ADR-051),所以摘掉一行之后,那个人**最多 5 分钟内**就真的查不到那张
+    表了。这段注释原本写着"没有任何执行引擎在读、不产生撤销 Trino 实际权限
+    的效果",那是 ADR-051 之前的状态,**2026-08-29 更正** —— 和模块顶部
+    那段是同一个过期描述,当时漏改了这一处。
+
+    这个差别很重要:它决定了回收是一个**影响线上访问的操作**,不是一次
+    记录整理。"""
     if not INTERNAL_TOKEN or request.headers.get("X-Internal-Token") != INTERNAL_TOKEN:
         abort(403)
     if not GIT_TOKEN:
@@ -1363,6 +1369,165 @@ def reclaim_expired():
         return {"reclaimed": 0, "error": "git 操作超时"}, 500
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# 只读 API(给门户的角色工作台用,roadmap P1.5)
+#
+# **为什么是服务端到服务端的接口,不是让门户直接读这个 SQLite**:数据库文件
+# 在这个应用自己的 PVC 上,门户碰不到;而且"谁能看到什么"这个判断必须由
+# 拥有数据的一方做 —— 门户只负责展示。
+#
+# **鉴权**:和 /internal/* 那几个端点同一个共享密钥模式(X-Internal-Token),
+# 因为调用方是门户后端而不是人,走不了 oauth2-proxy。**调用方必须显式带上
+# `user` 参数说明"我在替谁问"** —— 接口不会返回全量数据,只返回那个人自己
+# 该看到的部分。这条是刻意的:一个不带用户就返回所有人权限的接口,等于给
+# 门户开了一个越权读取的口子。
+# ---------------------------------------------------------------------------
+
+
+def _require_internal_token():
+    if not INTERNAL_TOKEN or request.headers.get("X-Internal-Token") != INTERNAL_TOKEN:
+        abort(403)
+
+
+# git clone 一次要几秒,而 /api/my-permissions 是门户首页每次刷新都会调的。
+# 60 秒的进程内缓存足够:授权变更本来就要等 opa-grants-sync 那 5 分钟才真正
+# 生效,首页上晚一分钟看到没有任何实际差别。
+_GRANTS_CACHE = {"rows": None, "at": 0.0}
+_GRANTS_CACHE_TTL = 60
+
+
+def _read_grants_rows():
+    """读 grants.csv。**优先读本地副本**(挂进来的话),读不到再退回 git。
+
+    读不到就返回空列表,不抛错:门户上少一块内容,好过整页 500。
+    """
+    local = Path(os.environ.get("GRANTS_CSV_PATH", "/data/table-access-grants.csv"))
+    if local.exists():
+        with open(local, newline="") as f:
+            return list(csv.DictReader(f))
+    if not GIT_TOKEN:
+        return []
+    now = time.time()
+    if _GRANTS_CACHE["rows"] is not None and now - _GRANTS_CACHE["at"] < _GRANTS_CACHE_TTL:
+        return _GRANTS_CACHE["rows"]
+    tmpdir = tempfile.mkdtemp()
+    try:
+        auth_url = REPO_URL.replace("https://", f"https://{GIT_TOKEN}@")
+        subprocess.run(["git", "clone", "--depth", "1", auth_url, tmpdir],
+                       check=True, capture_output=True, text=True, timeout=60)
+        csv_path = Path(tmpdir) / "platform" / "iam" / "table-access-grants.csv"
+        if not csv_path.exists():
+            return []
+        with open(csv_path, newline="") as f:
+            rows = list(csv.DictReader(f))
+        _GRANTS_CACHE.update(rows=rows, at=now)
+        return rows
+    except Exception:
+        # 缓存里有旧数据就先用旧的 —— 一次 git 抖动不该让首页上"我的权限"
+        # 整块消失。
+        return _GRANTS_CACHE["rows"] or []
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@app.route("/api/my-permissions")
+def api_my_permissions():
+    """某个人现在有哪些表权限,以及哪些快到期了。
+
+    到期这件事对用户是**看不见的**:授权默认 180 天,过期会被自动回收
+    (ADR-050),而 OPA 5 分钟内就跟着生效 —— 也就是说人会在毫无预警的
+    情况下突然查不到数据。把"还有几天到期"摆到首页,就是为了这个。
+    """
+    _require_internal_token()
+    user = request.args.get("user", "").strip()
+    if not user:
+        return {"error": "必须带 user 参数"}, 400
+    try:
+        soon_days = int(request.args.get("soon_days", "30"))
+    except ValueError:
+        soon_days = 30
+
+    now = datetime.now(timezone.utc)
+    grants = []
+    for row in _read_grants_rows():
+        if (row.get("username") or "").strip() != user:
+            continue
+        expires_at = (row.get("expires_at") or "").strip()
+        days_left = None
+        if expires_at:
+            try:
+                days_left = (datetime.fromisoformat(expires_at) - now).days
+            except ValueError:
+                days_left = None
+        grants.append({
+            "table": (row.get("table_fqn") or "").strip(),
+            "security_level": (row.get("security_level") or "").strip(),
+            "expires_at": expires_at,
+            "days_left": days_left,
+            "expiring_soon": days_left is not None and 0 <= days_left <= soon_days,
+        })
+    grants.sort(key=lambda g: (g["days_left"] is None, g["days_left"]))
+    return {
+        "user": user,
+        "grants": grants,
+        "expiring_soon": [g for g in grants if g["expiring_soon"]],
+    }
+
+
+@app.route("/api/my-approvals")
+def api_my_approvals():
+    """等着某个人审批的事项,以及每一条已经等了多久。
+
+    「等了多久」不是装饰:ADR-045 的超时升级机制会把长期没人管的步骤往上
+    升级,而被升级之前那段时间,申请人是干等着的。审批人自己看得到"这条
+    等了 3 天",比等系统替他升级要好。
+    """
+    _require_internal_token()
+    user = request.args.get("user", "").strip()
+    if not user:
+        return {"error": "必须带 user 参数"}, 400
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT s.id AS step_id, s.request_id, s.approver_role, s.activated_at,
+               r.username AS applicant, r.table_fqn, r.security_level, r.reason
+        FROM approval_steps s
+        JOIN table_access_requests r ON r.id = s.request_id
+        WHERE s.approver_username = ? AND s.status = 'pending'
+          AND r.status = 'pending'
+        ORDER BY s.id
+        """,
+        (user,),
+    ).fetchall()
+    conn.close()
+
+    now = datetime.now(timezone.utc)
+    pending = []
+    for r in rows:
+        waiting_hours = None
+        if r["activated_at"]:
+            try:
+                waiting_hours = int(
+                    (now - datetime.fromisoformat(r["activated_at"])).total_seconds() // 3600)
+            except ValueError:
+                waiting_hours = None
+        pending.append({
+            "step_id": r["step_id"],
+            "request_id": r["request_id"],
+            "applicant": r["applicant"],
+            "table": r["table_fqn"],
+            "security_level": r["security_level"],
+            "reason": r["reason"],
+            "role": APPROVAL_ROLE_LABELS.get(r["approver_role"], r["approver_role"]),
+            "waiting_hours": waiting_hours,
+            "overdue": waiting_hours is not None and waiting_hours >= 48,
+        })
+    return {"user": user, "pending": pending,
+            "overdue": [p for p in pending if p["overdue"]]}
 
 
 @app.route("/audit")

@@ -55,6 +55,9 @@
   .head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 11px; }
   .head h2 { font-size: 13px; font-weight: 620; color: var(--ink-2); letter-spacing: .04em; margin: 0; text-transform: uppercase; }
   .head .note { font-size: 12px; color: var(--ink-3); }
+  /* 角色工作台:快到期的权限 / 超时的审批要一眼能看见 */
+  .head .note.warn { color: var(--warn); font-weight: 600; }
+  tr.warn-row td { background: color-mix(in srgb, var(--warn) 10%, transparent); }
 
   .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
   .row { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-top: 1px solid var(--line); }
@@ -158,6 +161,60 @@
       {% endfor %}{% endif %}
     </div>
   </section>
+
+  {# 角色工作台:普通用户看"我的权限",审批人额外看到"待我审批"。
+     permission-request-app 不可用时整块不显示 —— 首页少一块,好过整页 500。 #}
+  {% if permissions.available and permissions.grants %}
+  <section>
+    <div class="head"><h2>我的表权限</h2>
+      {% if permissions.expiring_soon %}
+      <span class="note warn">{{ permissions.expiring_soon|length }} 项即将到期</span>
+      {% else %}<span class="note">共 {{ permissions.grants|length }} 项</span>{% endif %}
+    </div>
+    <div class="panel">
+      {# 到期这件事对用户是看不见的:过期自动回收,OPA 5 分钟内生效,人会在
+         毫无预警的情况下突然查不到数据、还以为是平台坏了。所以快到期的排在
+         最前面,并且单独标出来。 #}
+      <div class="scroll"><table>
+        <tr><th>表</th><th>等级</th><th>到期</th></tr>
+        {% for g in permissions.grants %}
+        <tr class="{{ 'warn-row' if g.expiring_soon else '' }}">
+          <td><code>{{ g.table }}</code></td>
+          <td>{{ g.security_level }}</td>
+          <td>{% if g.days_left is none %}长期
+              {% elif g.expiring_soon %}还剩 {{ g.days_left }} 天
+              {% else %}{{ g.expires_at[:10] }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if approvals.available and approvals.pending %}
+  <section>
+    <div class="head"><h2>待我审批</h2>
+      {% if approvals.overdue %}
+      <span class="note warn">{{ approvals.overdue|length }} 项已超时</span>
+      {% else %}<span class="note">{{ approvals.pending|length }} 项</span>{% endif %}
+    </div>
+    <div class="panel">
+      <div class="scroll"><table>
+        <tr><th>申请人</th><th>表</th><th>我的角色</th><th>已等</th></tr>
+        {% for a in approvals.pending %}
+        <tr class="{{ 'warn-row' if a.overdue else '' }}">
+          <td>{{ a.applicant }}</td>
+          <td><code>{{ a.table }}</code></td>
+          <td>{{ a.role }}</td>
+          <td>{% if a.waiting_hours is none %}—
+              {% elif a.waiting_hours >= 24 %}{{ (a.waiting_hours // 24) }} 天
+              {% else %}{{ a.waiting_hours }} 小时{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+    </div>
+  </section>
+  {% endif %}
 
   <section>
     <div class="head"><h2>我的作业</h2></div>

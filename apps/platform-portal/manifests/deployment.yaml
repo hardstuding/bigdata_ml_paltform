@@ -53,6 +53,16 @@ spec:
               value: ":32460"
             - name: PUBLIC_HTTPS_PORT_SUFFIX
               value: ":32535"
+            # 角色工作台(我的表权限 / 待我审批)要调 permission-request-app
+            # 的只读接口,共用它那份内部 token。**optional: true 是有意的**:
+            # 没有这个 Secret 时门户照常起,首页少这两块而已 —— 一个附属服务
+            # 的凭据不该让整个门户起不来。
+            - name: PERMISSION_APP_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-internal
+                  key: token
+                  optional: true
           ports:
             - containerPort: 8080
               name: http

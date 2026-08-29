@@ -929,3 +929,140 @@ class TestApplyFailureIsNotSuccess:
 
     def test_重试端点要token(self, client):
         assert client.post("/internal/retry-pending-applies").status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# 只读 API(给门户的角色工作台用,roadmap P1.5)
+#
+# 这两个接口会被门户首页每次刷新调用,所以测试重点有两个:一是**不带
+# user 不许返回数据**(不然就是给门户开了一个越权读取的口子),二是
+# **数据源缺失时要降级返回空,不是 500**(门户上少一块内容,好过整页崩)。
+# ---------------------------------------------------------------------------
+class TestReadOnlyApi:
+    TOKEN = "test-internal-token"
+
+    @pytest.fixture(autouse=True)
+    def _token(self, monkeypatch):
+        monkeypatch.setattr(perm, "INTERNAL_TOKEN", self.TOKEN)
+
+    def _hdr(self):
+        return {"X-Internal-Token": self.TOKEN}
+
+    def _grants_file(self, tmp_path, monkeypatch, rows):
+        f = tmp_path / "grants.csv"
+        with open(f, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["username", "table_fqn",
+                                               "security_level", "expires_at"])
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+        monkeypatch.setenv("GRANTS_CSV_PATH", str(f))
+        return f
+
+    def test_没有_token_一律_403(self, client):
+        assert client.get("/api/my-permissions?user=alice").status_code == 403
+        assert client.get("/api/my-approvals?user=alice").status_code == 403
+
+    def test_token_错了也_403(self, client):
+        h = {"X-Internal-Token": "wrong"}
+        assert client.get("/api/my-permissions?user=alice", headers=h).status_code == 403
+
+    def test_不带_user_拒绝_而不是返回全量(self, client):
+        # 这条是安全边界:一个不带 user 就返回所有人权限的接口,等于越权读取。
+        r = client.get("/api/my-permissions", headers=self._hdr())
+        assert r.status_code == 400
+        r = client.get("/api/my-approvals", headers=self._hdr())
+        assert r.status_code == 400
+
+    def test_只返回这个人自己的授权(self, client, tmp_path, monkeypatch):
+        self._grants_file(tmp_path, monkeypatch, [
+            {"username": "alice", "table_fqn": "iceberg.demo.orders",
+             "security_level": "1", "expires_at": ""},
+            {"username": "bob", "table_fqn": "iceberg.demo.secret",
+             "security_level": "3", "expires_at": ""},
+        ])
+        body = client.get("/api/my-permissions?user=alice", headers=self._hdr()).get_json()
+        assert [g["table"] for g in body["grants"]] == ["iceberg.demo.orders"]
+
+    def test_算得出还有几天到期_并标出快过期的(self, client, tmp_path, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        self._grants_file(tmp_path, monkeypatch, [
+            {"username": "alice", "table_fqn": "t.soon", "security_level": "1",
+             "expires_at": (now + timedelta(days=5)).isoformat()},
+            {"username": "alice", "table_fqn": "t.later", "security_level": "1",
+             "expires_at": (now + timedelta(days=200)).isoformat()},
+        ])
+        body = client.get("/api/my-permissions?user=alice&soon_days=30",
+                          headers=self._hdr()).get_json()
+        soon = {g["table"] for g in body["expiring_soon"]}
+        assert soon == {"t.soon"}
+        # 快到期的排在前面——首页上要先看到的是这条
+        assert body["grants"][0]["table"] == "t.soon"
+
+    def test_没有到期时间的授权不会被当成快过期(self, client, tmp_path, monkeypatch):
+        self._grants_file(tmp_path, monkeypatch, [
+            {"username": "alice", "table_fqn": "t.forever",
+             "security_level": "1", "expires_at": ""},
+        ])
+        body = client.get("/api/my-permissions?user=alice", headers=self._hdr()).get_json()
+        assert body["expiring_soon"] == []
+        assert body["grants"][0]["days_left"] is None
+
+    def test_读不到_grants_返回空而不是报错(self, client, monkeypatch):
+        # 门户首页每次刷新都会调它,数据源缺失时整页 500 是不可接受的。
+        monkeypatch.setenv("GRANTS_CSV_PATH", "/nonexistent/grants.csv")
+        monkeypatch.setattr(perm, "GIT_TOKEN", "")
+        r = client.get("/api/my-permissions?user=alice", headers=self._hdr())
+        assert r.status_code == 200
+        assert r.get_json()["grants"] == []
+
+    def test_待我审批只返回轮到我的那一步(self, client):
+        # 分级审批链里,后面几步的审批人在轮到之前不该看到这条申请。
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.execute(
+            "INSERT INTO table_access_requests (id, username, table_fqn, security_level,"
+            " status, requested_at) VALUES (1,'alice','iceberg.demo.orders',2,'pending','x')")
+        conn.execute(
+            "INSERT INTO approval_steps (request_id, step_order, approver_role,"
+            " approver_username, status) VALUES (1,1,'manager','director','pending')")
+        conn.execute(
+            "INSERT INTO approval_steps (request_id, step_order, approver_role,"
+            " approver_username, status) VALUES (1,2,'manager','ceo','pending')")
+        conn.commit(); conn.close()
+
+        mine = client.get("/api/my-approvals?user=director", headers=self._hdr()).get_json()
+        assert [p["applicant"] for p in mine["pending"]] == ["alice"]
+        # ceo 那步也是 pending,当前实现按 approver_username 过滤,两个人各看到自己那步
+        assert len(client.get("/api/my-approvals?user=ceo",
+                              headers=self._hdr()).get_json()["pending"]) == 1
+        assert client.get("/api/my-approvals?user=engineer1",
+                          headers=self._hdr()).get_json()["pending"] == []
+
+    def test_等太久的会被标成_overdue(self, client):
+        from datetime import datetime, timedelta, timezone
+        old = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.execute(
+            "INSERT INTO table_access_requests (id, username, table_fqn, security_level,"
+            " status, requested_at) VALUES (1,'alice','t.x',1,'pending','x')")
+        conn.execute(
+            "INSERT INTO approval_steps (request_id, step_order, approver_role,"
+            " approver_username, status, activated_at) VALUES (1,1,'manager','director',"
+            "'pending',?)", (old,))
+        conn.commit(); conn.close()
+        body = client.get("/api/my-approvals?user=director", headers=self._hdr()).get_json()
+        assert body["pending"][0]["waiting_hours"] >= 72
+        assert len(body["overdue"]) == 1
+
+    def test_已经批过的不再出现在待办里(self, client):
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.execute(
+            "INSERT INTO table_access_requests (id, username, table_fqn, security_level,"
+            " status, requested_at) VALUES (1,'alice','t.x',1,'pending','x')")
+        conn.execute(
+            "INSERT INTO approval_steps (request_id, step_order, approver_role,"
+            " approver_username, status) VALUES (1,1,'manager','director','approved')")
+        conn.commit(); conn.close()
+        assert client.get("/api/my-approvals?user=director",
+                          headers=self._hdr()).get_json()["pending"] == []

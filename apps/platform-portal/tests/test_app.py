@@ -576,3 +576,120 @@ class TestDockerfileShipsEverything:
         # 一个道理:本地全绿、镜像里炸。
         df = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text()
         assert "COPY src/sqllab.py" in df
+
+
+class TestRoleWorkbench:
+    """角色工作台第一块:我的表权限 / 待我审批(roadmap P1.5)。
+
+    **这些测试断言的是渲染出来的 HTML,不是函数返回值。** 2026-08-29 踩过
+    一次:后端返回 `phase`/`started`、模板读 `status`/`at`,Jinja 对未定义
+    变量渲染成空字符串、不报错,30 个测试全绿而页面上那一栏一直是空白。
+    只测函数返回值挡不住这类 bug。
+    """
+
+    def _render(self, permissions=None, approvals=None, username="alice"):
+        with patch.object(portal, "my_permissions",
+                          return_value=permissions or {"available": False, "grants": [],
+                                                       "expiring_soon": []}), \
+             patch.object(portal, "my_approvals",
+                          return_value=approvals or {"available": False, "pending": [],
+                                                     "overdue": []}), \
+             patch.object(portal, "probe_all", return_value={}), \
+             patch.object(portal, "queue_usage", return_value={"error": None, "rows": [],
+                                                               "pending_total": 0}), \
+             patch.object(portal, "my_jobs", return_value={"error": None, "rows": []}), \
+             patch.object(portal, "golden_paths", return_value={"error": None, "rows": [],
+                                                                "ok": 0, "total": 0}), \
+             patch.object(portal, "streams", return_value={"error": None, "rows": []}):
+            portal.app.config["TESTING"] = True
+            resp = portal.app.test_client().get("/", headers={"X-Forwarded-User": username})
+        return resp.get_data(as_text=True)
+
+    def test_权限数据渲染进页面_不是空白(self):
+        html = self._render(permissions={
+            "available": True,
+            "grants": [{"table": "iceberg.demo.orders", "security_level": "2",
+                        "expires_at": "2026-12-01T00:00:00+00:00", "days_left": 94,
+                        "expiring_soon": False}],
+            "expiring_soon": [],
+        })
+        assert "我的表权限" in html
+        assert "iceberg.demo.orders" in html      # 表名真的出现在 HTML 里
+        assert "2026-12-01" in html               # 到期日期也是
+
+    def test_快到期的会被标出来(self):
+        html = self._render(permissions={
+            "available": True,
+            "grants": [{"table": "t.soon", "security_level": "1", "expires_at": "",
+                        "days_left": 5, "expiring_soon": True}],
+            "expiring_soon": [{"table": "t.soon"}],
+        })
+        assert "1 项即将到期" in html
+        assert "还剩 5 天" in html
+        assert "warn-row" in html
+
+    def test_长期授权显示为长期_不显示_none(self):
+        # days_left 是 None 时直接渲染会印出 "None",很难看也让人以为是 bug
+        html = self._render(permissions={
+            "available": True,
+            "grants": [{"table": "t.forever", "security_level": "1", "expires_at": "",
+                        "days_left": None, "expiring_soon": False}],
+            "expiring_soon": [],
+        })
+        assert "长期" in html
+        assert "None" not in html
+
+    def test_不是审批人就没有待我审批这一栏(self):
+        html = self._render()
+        assert "待我审批" not in html
+
+    def test_审批人看得到待办和已等多久(self):
+        html = self._render(approvals={
+            "available": True,
+            "pending": [{"applicant": "bob", "table": "iceberg.demo.secret",
+                         "role": "直属上级", "waiting_hours": 72, "overdue": True,
+                         "step_id": 1, "request_id": 1, "security_level": 3,
+                         "reason": "r"}],
+            "overdue": [{"step_id": 1}],
+        })
+        assert "待我审批" in html
+        assert "bob" in html
+        assert "iceberg.demo.secret" in html
+        assert "3 天" in html          # 72 小时要显示成天,不是 "72 小时"
+        assert "1 项已超时" in html
+
+    def test_权限服务挂了整块不显示_而不是整页报错(self):
+        # permission-request-app 不可用是常态(local-lite 上就没有 token)
+        html = self._render()
+        assert "我的表权限" not in html
+        assert "平台" in html          # 页面本身照常渲染
+
+
+class TestPermApiClient:
+    def test_没配_token_直接返回_none_不发请求(self):
+        with patch.object(portal, "PERM_APP_TOKEN", ""):
+            with patch.object(portal.urllib.request, "urlopen") as m:
+                assert portal._perm_api("/api/my-permissions", "alice") is None
+                m.assert_not_called()
+
+    def test_上游报错时降级成不可用_不抛异常(self):
+        with patch.object(portal, "PERM_APP_TOKEN", "t"), \
+             patch.object(portal.urllib.request, "urlopen",
+                          side_effect=OSError("connection refused")):
+            assert portal.my_permissions("alice")["available"] is False
+            assert portal.my_approvals("alice")["available"] is False
+
+    def test_带上内部_token_并且用户名做了_url_编码(self):
+        import io
+        captured = {}
+
+        def fake(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["token"] = req.get_header("X-internal-token")
+            return io.BytesIO(b'{"grants": [], "expiring_soon": []}')
+
+        with patch.object(portal, "PERM_APP_TOKEN", "tok"), \
+             patch.object(portal.urllib.request, "urlopen", fake):
+            portal.my_permissions("li ming")
+        assert captured["token"] == "tok"
+        assert "li%20ming" in captured["url"]

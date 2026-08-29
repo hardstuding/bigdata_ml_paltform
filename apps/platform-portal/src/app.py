@@ -391,6 +391,62 @@ def queue_usage():
     return {"error": None, "rows": rows, "pending_total": pending_total}
 
 
+# 角色工作台的第一块(roadmap P1.5「门户升级成角色工作台」):首页不再对
+# 所有人显示同样的东西 —— 普通用户看到"我的权限 / 快到期",审批人额外看到
+# "待我审批 / 超时的"。
+#
+# 数据来自 permission-request-app 的只读接口,不是门户自己去读 grants.csv:
+# "谁能看到什么"这个判断要由拥有数据的那一方做,门户只负责展示。
+PERM_APP_INTERNAL = os.environ.get(
+    "PERMISSION_APP_INTERNAL_URL",
+    "http://permission-request-app.permission-request-app.svc.cluster.local:8080",
+)
+PERM_APP_TOKEN = os.environ.get("PERMISSION_APP_INTERNAL_TOKEN", "")
+
+
+def _perm_api(path, username, timeout=3):
+    """调 permission-request-app 的只读接口。
+
+    **任何失败都返回 None,由调用方决定怎么降级** —— 首页上少一块内容,
+    好过因为一个附属服务不可用就整页打不开。超时给到 3 秒也是这个理由:
+    这是首页的同步渲染路径,不能被它拖住。
+    """
+    if not PERM_APP_TOKEN or not username:
+        return None
+    try:
+        req = urllib.request.Request(
+            f"{PERM_APP_INTERNAL}{path}?user={urllib.parse.quote(username)}",
+            headers={"X-Internal-Token": PERM_APP_TOKEN},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.load(resp)
+    except Exception:
+        return None
+
+
+def my_permissions(username):
+    """我现在有哪些表权限,哪些快到期了。
+
+    **"快到期"这一栏是这块最有价值的部分。** 授权默认 180 天,过期自动
+    回收(ADR-050),而 OPA 5 分钟内跟着生效 —— 也就是说人会在毫无预警的
+    情况下突然查不到数据,还会以为是平台坏了。摆在首页就是为了这个。
+    """
+    data = _perm_api("/api/my-permissions", username)
+    if data is None:
+        return {"available": False, "grants": [], "expiring_soon": []}
+    return {"available": True, "grants": data.get("grants", []),
+            "expiring_soon": data.get("expiring_soon", [])}
+
+
+def my_approvals(username):
+    """等我审批的事项。不是审批人就是空的,这一栏不显示。"""
+    data = _perm_api("/api/my-approvals", username)
+    if data is None:
+        return {"available": False, "pending": [], "overdue": []}
+    return {"available": True, "pending": data.get("pending", []),
+            "overdue": data.get("overdue", [])}
+
+
 def my_jobs(username, limit=8):
     """当前用户最近提交的作业。
 
@@ -553,6 +609,8 @@ def index():
         jobs=my_jobs(username),
         golden=golden_paths(),
         streams=streams(),
+        permissions=my_permissions(username),
+        approvals=my_approvals(username),
         logos=LOGOS,
         tool_count=len(TOOLS),
         tool_up=sum(1 for v in up.values() if v),

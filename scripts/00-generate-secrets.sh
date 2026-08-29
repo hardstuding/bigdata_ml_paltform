@@ -381,6 +381,12 @@ fi
 # GIT_TOKEN/OPENMETADATA_TOKEN 不是一类。
 ensure_secret permission-request-app permission-request-app-internal token=RANDOM
 
+# 门户的角色工作台(我的表权限 / 待我审批)要调 permission-request-app 的
+# 只读接口,用**同一份** token —— 所以是复制,不是各生成一份(各生成一份
+# 的话门户拿到的 token 和服务端校验的对不上,而表现是"首页那两块永远空着"、
+# 不报任何错,又是一个静默失败)。
+copy_secret permission-request-app platform-portal permission-request-app-internal
+
 # 建表注册工具,同一个 oauth2-proxy 模式(见 ADR-043)。
 if kubectl -n table-registration-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
   echo "已存在,跳过: table-registration-app/oauth2-proxy-secret"
