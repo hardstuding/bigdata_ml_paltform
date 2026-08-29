@@ -115,6 +115,37 @@ Application,且 `syncPolicy.automated.selfHeal: true`。
 ——这个项目被"看起来成功了"坑过太多次(ArgoCD Synced 不等于生效、
 Pod Running 不等于健康、Job Complete 不等于业务逻辑跑对)。
 
+## 等后台任务:不要用 `pgrep -f` 判断"跑完没有"
+
+这个坑在 2026-08 撞了 **5 次**,每次都浪费几十分钟到几小时:
+
+```bash
+until ! pgrep -f "docker build" >/dev/null; do sleep 15; done   # 永远不退出
+```
+
+`pgrep -f` 匹配的是**完整命令行**,而这条 `until` 循环自己的命令行里就含有
+`docker build` 这个字符串 —— 它匹配到自己,循环永不结束。真实后果:
+构建早就完成了,而等待循环还在那儿转,一转几小时;更糟的是它会让人以为
+"任务还在跑",从而不去查真实状态。
+
+**改成判断产物,不是判断进程**:
+
+```bash
+until docker images | grep -q "local/platform-runtime"; do sleep 15; done
+until [ -f /path/to/output.done ]; do sleep 10; done
+kubectl wait --for=condition=Ready pod/xxx --timeout=600s
+```
+
+产物判据还有一个额外好处:进程没了但**失败了**的情况,进程判据会误判成
+"完成",产物判据不会。
+
+如果实在只能看进程,排除自己:`pgrep -f "docker build" | grep -v $$`,
+或者用一个不会出现在自己命令行里的模式。
+
+**另外**:SSH 到会被关机的机器上跑等待循环,机器一停这个 SSH 会挂住不返回,
+本地就留下一个永远不结束的后台任务。等云主机上的长任务,用产物判据 +
+本地超时,不要把等待放在对端。
+
 ## 不能没头没尾地停
 
 结束一段工作前,过一遍 `docs/project/current-work.md` 底部那份检查清单。达到
