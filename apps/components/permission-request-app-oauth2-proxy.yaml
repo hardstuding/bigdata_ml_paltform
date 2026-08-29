@@ -14,6 +14,17 @@
 # 选项:app 自己要读 token 里的 groups claim 判断谁是审批人,legacy config
 # 格式没有单独一个"把 groups 转成请求头"的选项,只能把整个 access token
 # 传下去,app 自己解。
+#
+# **2026-08-29 补的关键一句**:传下去的 token 里**有没有 groups 这个 claim,
+# 由 Keycloak 那边决定,不由这里决定**。这个 client 此前不在
+# scripts/03-configure-keycloak.sh 挂 groups scope 的名单里,所以 groups
+# 永远是空的、`is_approver` 永远是 False、组权限申请的批准/审计/交接页对
+# **所有人**都是 403 —— 而这里的 pass_access_token 是开着的,看上去一切正常。
+# 名单已经补上,但要**跑一次那个脚本并重新登录**才生效。
+#
+# 注意挂的是 **default** client scope,不是 optional,所以这里的 scope 里
+# **不要**去加 `groups`:请求一个 client 没配的 scope,Keycloak 直接
+# `invalid_scope`,登录页都进不去(MLflow 2026-08-19 就是这么炸的)。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

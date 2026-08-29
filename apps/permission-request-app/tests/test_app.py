@@ -1319,3 +1319,65 @@ class TestNoSelfApproval:
         names = [u for _, _, u in steps]
         assert "engineer1" not in names
         assert "manager1" in names and "director" in names
+
+
+class TestGroupsDiagnosis:
+    """把"配置没配对"和"这个人真的不在任何组"区分开。
+
+    这两件事在代码里长得一模一样(`groups == []`),后果完全不同,而这个
+    项目已经因为分不开它们栽过三次(ADR-078 的 Trino group provider、
+    Superset 的 groups scope、以及这个 app 自己的 is_approver)。
+    共同点都是"少一个配置,按组判断的分支就永远走不到,而且没有任何信号"。
+    """
+
+    def _token(self, claims):
+        import base64 as b64, json as js
+        payload = b64.urlsafe_b64encode(js.dumps(claims).encode()).decode().rstrip("=")
+        return f"eyJhbGciOiJub25lIn0.{payload}."
+
+    def _diag(self, client, headers):
+        with perm.app.test_request_context(headers=headers):
+            perm.get_current_user()
+            return perm.groups_diagnosis()
+
+    def test_没有_groups_字段时给出明确提示(self):
+        d = self._diag(None, {"X-Forwarded-User": "alice",
+                              "X-Forwarded-Access-Token": self._token({"preferred_username": "alice"})})
+        assert d is not None and "没有 groups 字段" in d
+        assert "配置问题不是权限问题" in d
+
+    def test_有_groups_字段但是空的_不报警(self):
+        # 这是"这个人真的不在任何组",是正常状态,不该吓唬人。
+        d = self._diag(None, {"X-Forwarded-User": "alice",
+                              "X-Forwarded-Access-Token": self._token(
+                                  {"preferred_username": "alice", "groups": []})})
+        assert d is None
+
+    def test_有组时不报警(self):
+        d = self._diag(None, {"X-Forwarded-User": "alice",
+                              "X-Forwarded-Access-Token": self._token(
+                                  {"preferred_username": "alice", "groups": ["platform-team"]})})
+        assert d is None
+
+    def test_压根没有令牌时提示查_pass_access_token(self):
+        d = self._diag(None, {"X-Forwarded-User": "alice"})
+        assert d is not None and "pass_access_token" in d
+
+    def test_令牌解不开时也有提示(self):
+        d = self._diag(None, {"X-Forwarded-User": "alice",
+                              "X-Forwarded-Access-Token": "not.a.jwt"})
+        assert d is not None and "解不开" in d
+
+    def test_提示会渲染到页面上(self, client):
+        html = client.get("/", headers=auth("alice")).get_data(as_text=True)
+        # auth() 不带 access token,属于 no_token 那种
+        assert "pass_access_token" in html
+
+    def test_groups_里真的有组时_is_approver_成立(self):
+        # 顺带锁住:这条链路本身是对的,坏的只是"组信息有没有被传过来"。
+        with perm.app.test_request_context(headers={
+                "X-Forwarded-User": "admin",
+                "X-Forwarded-Access-Token": self._token(
+                    {"preferred_username": "admin", "groups": ["platform-team"]})}):
+            _, groups = perm.get_current_user()
+            assert perm.is_approver(groups) is True

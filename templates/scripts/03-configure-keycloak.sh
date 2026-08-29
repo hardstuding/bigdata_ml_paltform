@@ -440,7 +440,21 @@ fi
 # 所以只能用 AUTH_USER_REGISTRATION_ROLE="Admin" 兜底 —— **结果是任何能
 # 登录的人在 Superset 里都是管理员**,能改数据源连接串、能看所有人的看板。
 # 数据层有 OPA 挡着(ADR-074 的 impersonation),但产品层的权限是全开的。
-for gc in grafana jupyterhub mlflow spark-history-server argo-workflows superset; do
+# 2026-08-29 再补 permission-request-app:它的 app.py 里 `is_approver(groups)`
+# 读的就是 token 里的 groups claim,而它**从来就不在这个名单里** —— 也就是说
+# groups 永远是空的,`is_approver` 永远是 False,于是「组权限申请」这条流程的
+# 批准/拒绝、审计页、权限交接页**对所有人都是 403**。这是和上面 superset、
+# 和 ADR-078(Trino 的 is_platform_admin 一直是摆设)**完全同一个模式**的
+# 第三次:代码里有一个按组判断的分支,而那个组信息压根没被传过来,不报错、
+# 只是永远走 else。
+#
+# 一并补 platform-portal / table-registration-app:两者都要按组做事(门户要
+# 按角色显示不同内容,建表工具要判断谁能代他人建表)。**挂的是 default
+# client scope,不是 optional**,所以 oauth2-proxy 那边不需要在请求里加
+# `groups` —— 这一点很重要:请求一个 client 没配的 scope,Keycloak 会直接
+# `invalid_scope` 拒绝,登录页都进不去(MLflow 2026-08-19 就是这么炸的)。
+for gc in grafana jupyterhub mlflow spark-history-server argo-workflows superset \
+          permission-request-app platform-portal table-registration-app; do
   gcid=$(kcadm get clients -r platform -q clientId="$gc" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -z "$gcid" ]; then
     echo "client ${gc} 还不存在,跳过挂 groups scope"
