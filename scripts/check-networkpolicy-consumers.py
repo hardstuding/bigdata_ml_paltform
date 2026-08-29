@@ -130,6 +130,15 @@ def consumer_namespaces(path: Path, dns: str) -> set[str]:
 EXTRA_CONSUMERS = {
     "kserve-demo": ("minio.minio.svc.cluster.local",
                     "scripts/11-deploy-demo-inference-service.sh 运行时 kubectl 创建"),
+    # openmetadata 这个命名空间本身在 git 里,但"它要读 MinIO"这条消费关系
+    # 不在:dbt 血缘管道是 scripts/43 调 OpenMetadata API 建的,采集 Job 由
+    # OpenMetadata 自己生成,仓库里没有任何一处 manifest 写着这件事。
+    # 2026-08-29 实测撞到:采集 Job 报
+    # `Failed to list objects in S3 bucket 'lakehouse': Could not connect to
+    # the endpoint URL`,而这个检查器当时报的是"没有发现漏加白名单的消费者"。
+    "openmetadata": ("minio.minio.svc.cluster.local",
+                     "scripts/43-configure-openmetadata-dbt-ingestion.sh 建的 dbt 采集管道,"
+                     "由 OpenMetadata 自己生成 CronJob 去读 s3://lakehouse/dbt-artifacts/"),
 }
 
 

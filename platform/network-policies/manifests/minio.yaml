@@ -131,6 +131,22 @@ spec:
               kubernetes.io/metadata.name: flink
         - namespaceSelector:
             matchLabels:
+              # openmetadata(2026-08-29 补,ADR-082)。dbt 血缘采集任务要从
+              # MinIO 读 s3://lakehouse/dbt-artifacts/ 下的
+              # manifest.json/catalog.json。不放行的话采集 Job 会跑起来、
+              # 然后报 `Failed to list objects in S3 bucket 'lakehouse':
+              # Could not connect to the endpoint URL` —— 实测确认过。
+              #
+              # **又是运行时建的消费关系,静态检查器扫不到**:这条 dbt
+              # 管道是 `scripts/43` 调 OpenMetadata API 建出来的,采集 Job
+              # 由 OpenMetadata 自己在 openmetadata 命名空间里生成,仓库的
+              # manifest 里没有任何一处写着"openmetadata 要读 MinIO"。和
+              # kserve-demo 那次(上面那条)是同一个盲区,所以这次一并把
+              # openmetadata 登记进 check-networkpolicy-consumers.py 的
+              # 手工白名单,让检查器至少知道有这么一个消费者。
+              kubernetes.io/metadata.name: openmetadata
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: minio
       ports:
         - protocol: TCP
