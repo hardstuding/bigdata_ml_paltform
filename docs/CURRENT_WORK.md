@@ -119,6 +119,36 @@ hive-metastore 自建镜像。
 5. **ADR-079 那段健康检查 Lua 挂错了对象**(更正见 ADR-079 末尾)。试过
    两条修法都撤回了,维持现状——那个黄灯下一次探针跑通就自愈。
 
+### 2026-08-29 白天这一轮
+
+1. **规格分档从 2 个样本铺开**(ADR-059 的后半):5 个 oauth2-proxy + chp
+   (都在请求路径上,prod 给 2 副本)、JupyterHub singleuser、OpenMetadata
+   本体和采集。三档键 96 → 117。新增 `check-resource-profiles.py`:写死的
+   必须显式登记豁免并写明理由,让「漏了」和「想清楚了不做」能区分开。
+2. **统一服务目录**(D 线最后一格,roles.md 里一直标着「完全没做」):
+   `platform/service-catalog.yaml` 34 个服务 + 38 项支撑资源,生成
+   [`docs/operations/service-catalog.md`](operations/service-catalog.md)。
+   **关键是 `check-service-catalog.py`** —— 新组件没登记归属、owner 写了
+   不存在的组、依赖指向不存在的服务、生成的 md 漂移,四种情况 CI 都红。
+   写完当场抓到三个真问题(其中一个是我漏了 `platform/apps/` 整整一层)。
+3. **在线推理可观测性**(C 线):之前一个指标都没有。PodMonitor + 6 个
+   panel 的看板,每条查询都在真集群上验过返回了数。**这块踩得最多**:
+   指标不是 KServe 文档说的那套(我们的 runtime 是 MLServer,端口 8082
+   不是 8080);`model_infer_request_duration` 是 summary 不是 histogram,
+   分位数只能从 `rest_server_request_duration_seconds` 取;PodMonitor 的
+   端口写法试了四种才对(容器一个命名端口都没有);init 容器还会把同一个
+   地址抓两遍。
+4. **改 DAG 一直是不生效的**:DAG 用 subPath 挂 ConfigMap,而 subPath 挂载
+   的 ConfigMap **Kubernetes 永远不会更新**。改了 DAG、push、ArgoCD
+   Synced/Healthy、ConfigMap 里也是新内容,而跑着的 Airflow 读到的是旧代码。
+   修法:DAG 内容哈希写进 podAnnotations,一改就自动滚更。
+5. **三条 DAG 从手动触发改成定时**(dbt / feast / seatunnel,错开一小时)。
+   一改就连带暴露两个「从来不跑所以没人发现」的问题:airflow 命名空间配额
+   不够(**这个坑第四次了**,超配额不是排队是任务直接失败)、
+   **Airflow 里一个 Variable 都没有**(`Variable.get("minio_access_key")`
+   直接抛异常,scripts/14 重跑一次就好——但它是什么时候丢的没查清)。
+   三条现在都定时跑成功。
+
 ### 云主机状态
 
 **运行中**(2026-08-28 22:56 开机)。08-29 02:00 前后因为我这边被用量限制
