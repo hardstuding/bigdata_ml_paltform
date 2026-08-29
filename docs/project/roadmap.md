@@ -679,14 +679,23 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
 [`current-work.md`](current-work.md)。下面是**剩下三批**,每条带验收条件
 ——不写"后续优化"这种没法验收的说法。
 
-### 分析师的浏览器 SQL 入口
+### 分析师的浏览器 SQL 入口 —— 方案已定(ADR-084),**待实机验证**
 
 **问题**:现在把 Trino Web UI 当 SQL 工作台介绍,而它只是个查询监控界面。
 **验收**:分析师能在浏览器里编辑 SQL、执行、看历史、下载结果、看到可读的
 错误说明,并能从数据目录里的一张表一键跳到查询。
-**先决**:要先记录候选方案(复用 Superset SQL Lab / 引入现成客户端 / 自建)
-和各自的复用边界与退出方案,再动手。
-**依赖**:无。
+
+**2026-08-29 进展**:候选方案和退出方案记进 [ADR-084](../decisions/084-analyst-sql-workbench.md)
+——选**复用 Superset SQL Lab**,不引入新组件(SSO、角色、impersonation 这四层
+里最难的三层已经是通的)。门户已改:Trino 那张卡不再自称能写 SQL,新增
+「SQL 工作台」卡,新增 `/query/<catalog>/<schema>/<table>` 给数据目录当落脚点。
+
+**还差三件事,一件都没做完就不能标绿**:
+1. **SQL Lab 里的 Trino 连接没单独验过 impersonation**(看板路径验过,SQL Lab
+   走同一个 database 连接,但"应该一样"不算验证)。下次开机验:`analyst001`
+   登录 → SQL Lab → `SELECT current_user` 要是他本人,查没 grant 的表要被拒。
+2. permalink 深链的服务账号还没配(现在是降级成空的 SQL Lab,有测试锁住)。
+3. OpenMetadata 表详情页上的跳转按钮没做。
 
 ### 门户升级成角色工作台
 

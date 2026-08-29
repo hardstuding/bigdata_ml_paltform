@@ -498,3 +498,81 @@ class TestLogos:
         """**这条防的是"加了文件但镜像里没有"**:本地全绿、线上空白、不报错。"""
         dockerfile = (Path(portal.__file__).resolve().parent.parent / "Dockerfile").read_text()
         assert "COPY src/logos/" in dockerfile, "Dockerfile 里没有 COPY logos 目录"
+
+
+class TestSqlWorkbenchEntry:
+    """ADR-084:门户曾经把 Trino Web UI 当 SQL 工作台介绍,那是错的。
+
+    Trino 的界面没有 SQL 编辑器,进去写不了 SQL。下面几条锁住的不是措辞
+    好不好听,是"门户上写的东西和它实际是什么相符"——分析师是照着这句
+    话点进去的。
+    """
+
+    def _tool(self, name):
+        return next(t for t in portal.TOOLS if t["name"] == name)
+
+    def test_有一个真正的_sql_工作台入口(self):
+        t = self._tool("SQL 工作台")
+        assert t["host"] == "superset"
+        assert t["path"] == "/sqllab/"
+
+    @pytest.mark.parametrize("谎话", ["交互式 SQL", "SQL 编辑", "写 SQL"])
+    def test_trino_不再自称能写_sql(self, 谎话):
+        assert 谎话 not in self._tool("Trino")["description"]
+
+    def test_带_path_的工具_端口后缀插在_path_前面(self):
+        # 拼反了会得到 http://superset.x/sqllab/:32460 这种打不开的地址,
+        # 而且在 local-lite(没有端口后缀)上根本测不出来——只有 cloud-full
+        # 这种 NodePort 环境才会暴露,正是 2026-08-16 那次"点哪个链接都
+        # 404"的翻版。
+        url = portal.build_url(self._tool("SQL 工作台"), domain="example.test",
+                               scheme="http", http_suffix=":32460", https_suffix="")
+        assert url == "http://superset.example.test:32460/sqllab/"
+
+    def test_不带_path_的工具不受影响(self):
+        url = portal.build_url(self._tool("Airflow"), domain="example.test",
+                               scheme="http", http_suffix=":32460", https_suffix="")
+        assert url == "http://airflow.example.test:32460"
+
+
+class TestQueryTableRedirect:
+    """/query/<catalog>/<schema>/<table> —— 数据目录一键跳查询的落脚点。"""
+
+    def test_深链造不出来时降级到空的_sql_lab_而不是报错(self):
+        # 凭据没配是常态(local-lite 上就没配),这条路径必须是 302 不是 500。
+        with patch.object(portal.sqllab, "table_query_link",
+                          side_effect=portal.sqllab.SqlLabLinkUnavailable("没配")):
+            resp = portal.app.test_client().get("/query/iceberg/demo/orders")
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/sqllab/")
+
+    def test_深链可用时跳到_permalink(self):
+        with patch.object(portal.sqllab, "table_query_link",
+                          return_value="/sqllab/p/abc/"):
+            resp = portal.app.test_client().get("/query/iceberg/demo/orders")
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/sqllab/p/abc/")
+
+    def test_跳转地址跟随环境配置_不写死域名(self):
+        # 门户上每个链接都必须来自环境配置,2026-08-16 那次"点哪个链接都
+        # 404"就是写死域名导致的。
+        with patch.object(portal.sqllab, "table_query_link",
+                          return_value="/sqllab/p/abc/"):
+            resp = portal.app.test_client().get("/query/iceberg/demo/orders")
+        loc = resp.headers["Location"]
+        assert loc.startswith(portal._SQLLAB_BASE)
+        assert "superset" in loc
+
+    def test_表名原样传给深链构造_不被路由吃掉(self):
+        with patch.object(portal.sqllab, "table_query_link",
+                          return_value="/sqllab/p/abc/") as m:
+            portal.app.test_client().get("/query/iceberg/demo/daily_order_totals")
+        assert m.call_args[0] == ("iceberg", "demo", "daily_order_totals")
+
+
+class TestDockerfileShipsEverything:
+    def test_sqllab_模块被拷进镜像(self):
+        # app.py 顶上 `import sqllab`,漏拷这行镜像起不来。和 logos 那条
+        # 一个道理:本地全绿、镜像里炸。
+        df = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text()
+        assert "COPY src/sqllab.py" in df

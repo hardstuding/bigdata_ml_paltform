@@ -12,6 +12,9 @@ RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r req
 # 2026-08-23:HTML 从 Python 字符串里搬进 templates/(ADR-067),这里要跟着
 # 一起拷进去——只拷 app.py 的话镜像跑起来会 TemplateNotFound。
 COPY src/app.py .
+# ADR-084 的 SQL Lab 深链。app.py `import sqllab`,漏拷这一行镜像会直接
+# 起不来(ModuleNotFoundError),不是"少个功能"那么轻。
+COPY src/sqllab.py .
 COPY src/templates/ ./templates/
 # 工具图标(Simple Icons,CC0)。**必须一起 COPY 进来** —— 只加文件不改
 # Dockerfile 的话,本地跑得好好的、镜像里那一栏全是空白,而且不报错。

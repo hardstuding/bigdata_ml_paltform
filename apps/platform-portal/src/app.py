@@ -47,7 +47,9 @@ import urllib.parse
 import json
 
 import requests
-from flask import Flask, render_template, request
+from flask import Flask, redirect, render_template, request
+
+import sqllab
 
 app = Flask(__name__)
 
@@ -66,8 +68,25 @@ QUEUE_LABELS = {
 TOOLS = [
     {
         "category": "数据",
+        "name": "SQL 工作台",
+        # 分析师写 SQL 的地方。是 Superset 自带的 SQL Lab(ADR-084),
+        # 不是另一个组件——所以 host 和 Superset 同一个,只是路径不同。
+        # 能不能进由 Keycloak 的组决定:有 sql_lab 角色才看得到这个模块
+        # (data-analysts / algorithm-team 有,其他人没有)。
+        "description": "写 SQL、跑查询、看历史、导出结果(Superset SQL Lab)",
+        "host": "superset",
+        "path": "/sqllab/",
+        "logo": "superset",
+        "probe": "http://superset.superset.svc.cluster.local:8088/health",
+    },
+    {
+        "category": "数据",
         "name": "Trino",
-        "description": "交互式 SQL / 联邦查询,连 Iceberg 湖仓",
+        # 2026-08-29(ADR-084):这里原来写的是「交互式 SQL」,是错的——
+        # Trino 的 Web UI **没有 SQL 编辑器**,进去是写不了 SQL 的,它只能
+        # 看正在跑的查询和执行计划。分析师照着这句话点进来会一脸懵。
+        # 外部评审点出来的就是这个。要写 SQL 去上面那张「SQL 工作台」。
+        "description": "查询引擎本身:看查询在跑什么、执行计划、耗时",
         # Trino 走 HTTPS(apps/trino-tls/ 手写的 Ingress,不是 http),之前
         # 这里写的 scheme 就是错的,2026-08-16 才发现——不是环境差异,是
         # 单纯写错了。
@@ -226,11 +245,21 @@ def build_url(tool, domain=None, scheme=None, http_suffix=None, https_suffix=Non
     sch = tool.get("scheme") or (scheme if scheme is not None else _DEFAULT_SCHEME)
     http_suffix = http_suffix if http_suffix is not None else _HTTP_PORT_SUFFIX
     https_suffix = https_suffix if https_suffix is not None else _HTTPS_PORT_SUFFIX
-    return apply_port_suffix(f"{sch}://{tool['host']}.{domain}", http_suffix, https_suffix)
+    base = apply_port_suffix(f"{sch}://{tool['host']}.{domain}",
+                             http_suffix, https_suffix)
+    # 端口后缀必须插在 host 后面、path 前面,所以 path 只能在这一步拼上去
+    # (先拼 path 再插端口会拼出 http://superset.x/sqllab/:32460 这种废话)。
+    return base + tool.get("path", "")
 
 
 for _t in TOOLS:
     _t["url"] = build_url(_t)
+
+# /query/... 跳转要拼绝对地址,复用「SQL 工作台」那张卡算出来的 host 部分
+# (去掉 /sqllab/ 这个 path)——不另外读一遍环境变量,免得两处配置漂移。
+_SQLLAB_BASE = next(
+    t["url"][: -len(t["path"])] for t in TOOLS if t["name"] == "SQL 工作台"
+)
 
 
 # ---- 工具图标 ----
@@ -528,6 +557,24 @@ def index():
         tool_count=len(TOOLS),
         tool_up=sum(1 for v in up.values() if v),
     )
+
+
+# 「从数据目录里的一张表一键跳到查询」的落脚点(ADR-084)。
+#
+# 数据目录(OpenMetadata)那边只需要拼一个 portal/query/<catalog>/<schema>/<table>
+# 就行,**不用知道 Superset 的任何细节** —— permalink 怎么造、字段是驼峰还是
+# 下划线、以后换不换 SQL 工作台,都关在门户这一层里。这是 ADR-084 里
+# "退出方案"能成立的原因。
+@app.route("/query/<catalog>/<schema>/<table>")
+def query_table(catalog, schema, table):
+    try:
+        path = sqllab.table_query_link(catalog, schema, table)
+    except sqllab.SqlLabLinkUnavailable as exc:
+        # 降级:深链造不出来就把人送进空的 SQL Lab,别给一个报错页。
+        # 少一个预填的编辑器是小事,门户上出现 500 是大事。
+        app.logger.warning("SQL Lab 深链降级:%s", exc)
+        path = "/sqllab/"
+    return redirect(_SQLLAB_BASE + path)
 
 
 @app.route("/healthz")
