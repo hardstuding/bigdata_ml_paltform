@@ -42,15 +42,22 @@ RUN printf '%s\n' \
     'trusted-host = minio.minio.svc.cluster.local' \
     > /etc/pip.conf
 
+# 2026-08-29:第三方依赖搬进 requirements.txt。
+#
+# **不只是为了整洁** —— `scripts/render-jobs.py` 现在会拿 `jobs/*/job.yaml`
+# 里声明的 `requires` 和这份清单对照:声明了镜像里没有的包,**CI 直接红**,
+# 而不是等作业半夜跑到 import 那一行才 ModuleNotFoundError。要让这个校验
+# 可信,清单就必须是一份机器读得懂的东西,不能是 Dockerfile 里一串续行。
+#
+# 加新依赖 = 改这份文件 + 重建镜像。**不要在作业里运行时 pip install** ——
+# 那是这个项目明确记过的反模式(每次 pod 重启重装一遍,遇到网络限速直接
+# 卡死探针预算,2026-08-16 真实故障:SIGKILL,5 分 44 秒整)。
+COPY apps/platform-image/requirements.txt /tmp/requirements.txt
 COPY platform-sdk /tmp/platform-sdk
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
         /tmp/platform-sdk[submit] \
-        mlflow-skinny==3.14.0 \
-        scikit-learn==1.5.2 \
-        pandas==2.2.3 \
-        trino==0.338.0 \
-        jupyterlab-git \
-    && rm -rf /tmp/platform-sdk
+        -r /tmp/requirements.txt \
+    && rm -rf /tmp/platform-sdk /tmp/requirements.txt
 
 # NB_USER 是 jupyter/docker-stacks 系列镜像(k8s-singleuser-sample 由此
 # 派生)的标准 ENV,基础镜像里已经设好,这里不用硬编码成 jovyan。

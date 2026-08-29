@@ -18,22 +18,30 @@ spec:
   successfulJobsHistoryLimit: 3
   timezone: UTC
   workflowSpec:
+    arguments:
+      parameters:
+      - name: run_date
+        value: ''
     entrypoint: main
     serviceAccountName: argo-workflow
     templates:
     - container:
         command:
         - python3
-        - /scripts/daily-order-summary--job.py
+        - /scripts/job.py
         env:
         - name: MLFLOW_S3_ENDPOINT_URL
           value: http://minio.minio.svc.cluster.local:9000
         - name: MLFLOW_TRACKING_URI
           value: http://mlflow.mlflow.svc.cluster.local:5000
+        - name: PARAM_RUN_DATE
+          value: '{{workflow.parameters.run_date}}'
         - name: PLATFORM_TRINO_HOST
           value: trino.trino.svc.cluster.local
         - name: PLATFORM_TRINO_PORT
           value: '8443'
+        - name: PYTHONPATH
+          value: /scripts
         envFrom:
         - secretRef:
             name: platform-job-credentials
@@ -56,5 +64,10 @@ spec:
       name: main
       volumes:
       - configMap:
+          items:
+          - key: daily-order-summary--job.py
+            path: job.py
+          - key: daily-order-summary--jobkit.py
+            path: jobkit.py
           name: platform-jobs-scripts
         name: scripts

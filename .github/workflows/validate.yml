@@ -68,6 +68,12 @@ jobs:
           pip install --quiet lupa pyyaml pytest
           python3 -m pytest tests/test_argocd_health_lua.py -q
 
+      # render-jobs 的校验逻辑:依赖是不是在镜像里、owner_group 和提交人所属
+      # 的组对不对得上、参数名/环境名合不合法。这些都是"不挡住的话要等作业
+      # 半夜真跑起来才暴露"的问题。
+      - name: render-jobs 校验逻辑
+        run: python3 -m pytest tests/test_render_jobs.py -q
+
       - name: 镜像版本锁定校验(不允许 latest 这类浮动 tag,见 ADR-010)
         run: python3 scripts/check-image-tags.py
 
@@ -136,7 +142,7 @@ jobs:
       # platform/iam/ 里真实存在的组)。owner_group 写错的后果特别隐蔽:
       # 作业会一直排队等一个不存在的 Kueue 队列,而 Workflow 状态上看不出原因。
       - name: 定时作业定义校验 + 生成物不漂移
-        run: python3 scripts/render-jobs.py --check
+        run: python3 scripts/render-jobs.py cloud-full --check
 
       # 流作业同理。checkpoint_interval 写错的表现特别隐蔽:JobManager 起不来,
       # 而从 FlinkDeployment 的状态上看只是「一直在 DEPLOYING」。

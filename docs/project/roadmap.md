@@ -745,15 +745,23 @@ NetworkPolicy 只放行 oauth2-proxy 连 8080。**那条 NetworkPolicy 被去掉
 规则按分类写不按工具写:按工具写的话每加一个工具都要记得改那张表,漏了
 就是新工具对谁都不显示。**拿不到组信息时显示全部**,理由见下面那段。
 
-### 作业发布从单文件升级成可维护流程
+### 作业发布从单文件升级成可维护流程 —— 2026-08-29 做完大部分
 
 **问题**:`jobs/` 和 `streams/` 目前是"一个脚本 + 一份 yaml",没有多文件项目、
 依赖锁定、镜像构建、参数化重跑、补数、晋级。
-**验收**:算法工程师不需要理解 ConfigMap / Argo YAML / 本地 render 生成物;
-`owner_group` 和运行身份由可信身份绑定(不能完全相信用户在 yaml 里填的),
-dev/test/prod 有明确晋级路径。
-**依赖**:身份绑定依赖 notebook impersonation 那套(2026-08-29 已做),
-可以往上接。
+
+| 验收项 | 状态 |
+|---|---|
+| 多文件项目 | ✅ 作业目录下所有 `.py` 一起挂进容器,`import jobkit` 直接可用。**不支持子目录**,理由见 `jobs/README.md` —— 要多层结构就该打成内部包(ADR-083),而不是在 ConfigMap 上模拟文件系统 |
+| 依赖锁定 | ✅ `requires:` 和 `apps/platform-image/requirements.txt` 对账,写了镜像里没有的包 **CI 直接红**。**平台不在运行时装任何东西**(那是记过的反模式)。依赖也顺势从 Dockerfile 的续行搬进了 requirements.txt —— 校验的可信度取决于清单可不可靠 |
+| 参数化 / 补数 | ✅ `params:` → Argo workflow parameter + `PARAM_<名>` 环境变量。补数 = `argo submit --from cronwf/x -p run_date=...`。没有参数的话,重跑日更作业只会再算一遍今天 |
+| dev/test/prod 晋级 | ✅ `environments:` 列表,**晋级就是加一个环境名**,不是复制 yaml。校验对所有作业都做,不管它在不在当前环境 —— 否则"只在 prod 生效"的作业能一直绕过检查 |
+| owner_group 可信身份绑定 | 🟡 机制做了(拿作业目录最后一次提交的 git 作者去对账 `memberships.csv`),但**今天不生效**:真实提交邮箱是个人邮箱、`employees.csv` 是占位数据,每次都走"拿不到身份 → 放行"。**每次运行会把跳过的作业打印出来**,不让它变成又一个静默走 else 的检查。接真实 HR/IdP 之后自动生效 |
+| 不用理解 ConfigMap / Argo YAML | ✅ 写 `job.yaml` + `.py`,`jobs/README.md` 里没有一处要求读 Argo 文档 |
+| 镜像构建(每作业一个镜像) | ❌ **没做,而且暂时不打算做**:现在的路径是"依赖进平台镜像"。每作业一个镜像意味着每个作业都要走一次 CI 构建 + 推仓库,对一个几十行的日更脚本是不成比例的。真需要独立依赖的作业,`image:` 字段本来就可以指定 |
+
+**阻塞项**:owner_group 那条要真实 HR/IdP 数据才能生效,那是 zhenghe 提供
+对接方的事。
 
 ### 建表注册工具 —— 三项做完,**待实机验证**;表单那几项还没做
 

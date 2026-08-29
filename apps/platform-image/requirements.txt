@@ -1,0 +1,19 @@
+# 平台统一镜像里预装的第三方依赖。**这份清单同时是一份契约**:
+# `jobs/*/job.yaml` 里的 `requires` 只能写这里有的包,CI 会校验
+# (scripts/render-jobs.py)。
+#
+# 加一个包 = 改这里 + 重建镜像。**不要在作业里运行时 pip install** ——
+# 那是这个项目明确记过的反模式(见 apps/superset-image/Dockerfile 顶部:
+# 每次 pod 重启重装一遍,遇到这片网络的 PyPI 限速直接卡死探针预算,
+# 2026-08-16 真实故障 SIGKILL 5 分 44 秒整)。
+#
+# 版本全部钉死。不钉的话,同一个 Dockerfile 在两周后构建出的镜像行为可能
+# 不同,而那种问题最难查 —— 代码没改、配置没改,就是跑出来不一样。
+mlflow-skinny==3.14.0
+scikit-learn==1.5.2
+pandas==2.2.3
+trino==0.338.0
+# JupyterLab 里的 git 面板。singleuser 用的是同一个镜像,所以装在这里。
+# 上游没有稳定的版本节奏,不钉版本是**有意的例外**:它只影响 notebook 的
+# 一个界面插件,装不上或者行为变化都不会影响作业执行。
+jupyterlab-git

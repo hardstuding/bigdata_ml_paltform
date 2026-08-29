@@ -10,3 +10,20 @@ timezone: UTC
 cpu: "500m"
 memory: "1Gi"
 owner_group: data-analysts   # 用分析组的配额
+
+# 这个作业用到的第三方包。**平台不会在运行时安装任何东西** —— 这里声明的
+# 名字会和 apps/platform-image/requirements.txt 对账,写了镜像里没有的
+# 包,CI 直接红,而不是等作业半夜跑到 import 那一行才 ModuleNotFoundError。
+requires:
+  - trino
+
+# 作业参数。定时跑用默认值;补数时带上不同的值提交一次:
+#   argo submit --from cronwf/daily-order-summary -p run_date=2026-08-01
+params:
+  run_date: ""     # 空 = 用今天
+
+# 这个作业在哪些环境里生效。不写 = 所有环境。
+# **晋级就是往这个列表里加一个环境名**,不是复制一份 yaml 到别处。
+environments:
+  - local-lite
+  - cloud-full

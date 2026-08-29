@@ -110,7 +110,7 @@
 | 作业可观测 | ✅ | 集成验证 | 2026-08-21 | Spark History Server `/api/v1/applications` 列得出刚跑完的作业 |
 | 血缘 | ✅ | 集成验证 | 2026-08-22 | 直接查 lineage API 确认边存在。**Spark 血缘([ADR-014](../decisions/014-spark-lineage-official-agent.md))仍仅设计** |
 | 数据质量 / 契约 | ✅ | demo | 2026-08-25 | 质量 [ADR-065](../decisions/065-data-quality-on-openmetadata.md)/[070](../decisions/070-data-freshness-slo.md) + 契约 [ADR-068](../decisions/068-schema-registry.md)。**断言失败没有告警出口** |
-| 作业发布(定时) | 🟡 | 集成验证 | 2026-08-29 | `jobs/<名字>/job.yaml` 写一行 `schedule` → Argo CronWorkflow。手工提交验过;**定时路径从没被触发过**(UTC 01:30,云主机那时是关的) |
+| 作业发布(定时) | 🟡 | 集成验证 | 2026-08-29 | `jobs/<名字>/job.yaml` 写一行 `schedule` → Argo CronWorkflow;支持多文件、依赖声明(和镜像清单对账,CI 拦)、参数化补数、按环境晋级(见 [`jobs/README.md`](../../jobs/README.md))。手工提交验过;**定时路径从没被触发过**(UTC 01:30,云主机那时是关的),多文件/参数那几项**只有单元测试、没上过集群** |
 | 流作业发布 | ✅ | 集成验证 | 2026-08-29 | `streams/<名字>/stream.yaml` → FlinkDeployment;门户「流作业」一栏显示状态 |
 | 内部包共享 | ✅ | 集成验证 | 2026-08-29 | [ADR-083](../decisions/083-internal-package-registry.md)。pod 里**不加任何参数** `pip install platform-helpers` 装得上并能用 |
 

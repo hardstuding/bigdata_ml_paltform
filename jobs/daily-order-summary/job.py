@@ -3,23 +3,17 @@
 用 platform_sdk 拿连接,不手填连接串——连接信息由平台注入(见
 platform_sdk.config),换环境不用改这个脚本。
 """
-import datetime
-
 from platform_sdk import query
 
+# 同目录下的 jobkit.py —— 多文件作业(2026-08-29)。平台把作业目录下所有
+# .py 一起挂进容器并把 PYTHONPATH 指过去,所以这行 import 直接可用。
+from jobkit import rows_of, run_date
+
 TARGET = "iceberg.demo.orders_by_region_daily"
-RUN_DATE = datetime.date.today().isoformat()
 
-
-def rows_of(result):
-    """`query()` 装了 pandas 返回 DataFrame、没装返回 (列名, 行)。
-
-    **不要直接 `for r in result`** —— 在 DataFrame 上那是遍历列名,不是遍历
-    行,而且不会报错,只会安静地给出错的东西。
-    """
-    if hasattr(result, "itertuples"):
-        return [tuple(t)[1:] for t in result.itertuples()]
-    return result[1]
+# 处理哪一天:默认今天,可以用 run_date 参数覆盖 —— **这就是补数**:
+#   argo submit --from cronwf/daily-order-summary -p run_date=2026-08-01
+RUN_DATE = run_date()
 
 
 # 目标表不存在就先建。CREATE TABLE IF NOT EXISTS 让这个作业可以从零开始跑,

@@ -14,8 +14,11 @@ CronWorkflow。GitOps 是唯一操作接口这条原则在作业这一层也成�
 review 一个新作业时,看得到它最终会变成什么。
 
 用法:
-  python3 scripts/render-jobs.py           # 生成
-  python3 scripts/render-jobs.py --check   # CI:校验生成物没漂移 + 定义合法
+  python3 scripts/render-jobs.py                      # 按默认环境(cloud-full)生成
+  python3 scripts/render-jobs.py prod                 # 换一个环境
+  python3 scripts/render-jobs.py cloud-full --check   # CI:校验生成物没漂移 + 定义合法
+
+作业定义里可以写的字段见 jobs/README.md。
 """
 import re
 import sys
@@ -30,12 +33,90 @@ GROUPS_FILE = REPO / "platform" / "iam" / "groups.yaml"
 
 NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 CRON_RE = re.compile(r"^(\S+\s+){4}\S+$")
+PARAM_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+IMAGE_REQS = REPO / "apps" / "platform-image" / "requirements.txt"
+MEMBERSHIPS = REPO / "platform" / "iam" / "memberships.csv"
+EMPLOYEES = REPO / "platform" / "iam" / "employees.csv"
+ENVIRONMENTS = {"local-lite", "cloud-full", "prod"}
 NAMESPACE = "argo-workflows"
 GENERATED_HEADER = (
     "# 这个文件是生成的,不要手改。\n"
     "# 源:jobs/ 下各作业的 job.yaml + 脚本;生成器:scripts/render-jobs.py\n"
     "# CI 会校验它和 jobs/ 不漂移。\n"
 )
+
+
+def load_image_packages() -> set[str]:
+    """平台镜像里预装了哪些第三方包。
+
+    这份清单是 `requires` 校验的依据。**它必须是机器读得懂的**,所以依赖
+    从 Dockerfile 的续行里搬进了 requirements.txt(2026-08-29)—— 校验的
+    可信度取决于清单本身可不可靠。
+    """
+    if not IMAGE_REQS.exists():
+        return set()
+    names = set()
+    for line in IMAGE_REQS.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        names.add(re.split(r"[=<>!~\[]", line, 1)[0].strip().lower())
+    # SDK 本身不在 requirements.txt 里(它是从源码装的),但作业当然可以用。
+    names.add("platform-sdk")
+    names.add("platform_sdk")
+    return names
+
+
+def load_memberships() -> dict[str, set[str]]:
+    """username -> 他所在的组。"""
+    out: dict[str, set[str]] = {}
+    if not MEMBERSHIPS.exists():
+        return out
+    for line in MEMBERSHIPS.read_text().splitlines()[1:]:
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) >= 2 and parts[0]:
+            out.setdefault(parts[0], set()).add(parts[1])
+    return out
+
+
+def load_email_to_username() -> dict[str, str]:
+    out = {}
+    if not EMPLOYEES.exists():
+        return out
+    rows = EMPLOYEES.read_text().splitlines()
+    if not rows:
+        return out
+    header = [h.strip() for h in rows[0].split(",")]
+    try:
+        i_user, i_mail = header.index("username"), header.index("email")
+    except ValueError:
+        return out
+    for line in rows[1:]:
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) > max(i_user, i_mail) and parts[i_mail]:
+            out[parts[i_mail].lower()] = parts[i_user]
+    return out
+
+
+def last_author_email(job_dir: Path) -> str | None:
+    """这个作业目录最后一次是谁改的(git 提交邮箱)。
+
+    **这是"可信身份"能落地的地方**:`owner_group` 是用户自己在 yaml 里填的,
+    没有任何东西保证他真的属于那个组 —— 而 owner_group 决定用哪个组的计算
+    配额。填一个自己不在的组,等于蹭别人的配额,而且从 Workflow 上完全看不
+    出来。git 提交者是这条链上唯一不由 yaml 内容决定的身份信号,所以拿它对账。
+
+    拿不到(浅克隆、新文件还没提交)就返回 None,由调用方决定 —— **默认放行**,
+    因为把 CI 卡在"git 历史不完整"上,只会让人去关掉这个检查。
+    """
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO), "log", "-1", "--format=%ae", "--", str(job_dir)],
+            capture_output=True, text=True, timeout=15)
+        return (out.stdout.strip() or None) if out.returncode == 0 else None
+    except Exception:
+        return None
 
 
 def load_groups() -> set[str]:
@@ -45,8 +126,12 @@ def load_groups() -> set[str]:
     return {g["name"] if isinstance(g, dict) else g for g in raw}
 
 
-def load_jobs(groups: set[str]) -> tuple[list[dict], list[str]]:
+def load_jobs(groups: set[str], env_name: str | None = None) -> tuple[list[dict], list[str]]:
     jobs, problems = [], []
+    image_packages = load_image_packages()
+    memberships = load_memberships()
+    email_to_user = load_email_to_username()
+    skipped_identity: list[str] = []
     for d in sorted(p for p in JOBS.iterdir() if p.is_dir()):
         f = d / "job.yaml"
         if not f.exists():
@@ -75,22 +160,122 @@ def load_jobs(groups: set[str]) -> tuple[list[dict], list[str]]:
                 f"{where}: owner_group「{og}」不在 platform/iam/groups.yaml 里。"
                 f"写一个不存在的组,作业会一直排队等一个不存在的队列,"
                 f"而且从 Workflow 状态上看不出原因。")
+
+        # owner_group 和**提交人真实所属的组**对账。
+        #
+        # owner_group 决定这个作业占哪个组的计算配额,而它是用户自己在 yaml
+        # 里填的 —— 填一个自己不在的组等于蹭别人配额,从 Workflow 上完全看
+        # 不出来。git 提交者是这条链上唯一不由 yaml 内容决定的身份信号。
+        #
+        # **拿不到身份时放行**(浅克隆、新文件还没提交、提交邮箱不在
+        # employees.csv 里)。把 CI 卡在这些情况上只会让人去关掉这个检查,
+        # 而一个被关掉的检查等于没有。
+        if og and memberships:
+            email = last_author_email(d)
+            user = email_to_user.get((email or "").lower())
+            if user and user in memberships and og not in memberships[user]:
+                problems.append(
+                    f"{where}: owner_group 写的是「{og}」,但这个作业最后一次是 "
+                    f"{user} 改的,而他在 {sorted(memberships[user])} —— 不在 {og}。"
+                    f"owner_group 决定占用哪个组的计算配额,不能填一个自己不在的组。"
+                    f"要么改成自己的组,要么让 {og} 的人来提交这次改动。")
+            elif email and not user:
+                # **说出来,不要静默跳过。**
+                #
+                # 今天这个仓库里这条检查其实一次都不会触发:真实提交邮箱是
+                # 个人邮箱,而 employees.csv 是占位 demo 数据,两边对不上,
+                # 于是每次都走"拿不到身份 → 放行"。机制是对的,但在接真实
+                # HR 数据之前它是**inert 的**。
+                #
+                # 不打这行的话,这就变成又一个"看起来有检查、其实永远走
+                # else"的东西 —— 这个项目今天已经因为这个模式栽过三次
+                # (ADR-078 的 Trino group provider、Superset 的 groups
+                # scope、permission-request-app 的 is_approver)。
+                skipped_identity.append(f"{d.name}({email})")
+
+        # requires:声明这个作业用到哪些第三方包,和平台镜像预装的清单对账。
+        # **不装任何东西** —— 运行时 pip install 是这个项目明确记过的反模式。
+        # 这个校验把"半夜跑到 import 那一行才 ModuleNotFoundError"提前到 CI。
+        for pkg in (spec.get("requires") or []):
+            if str(pkg).lower().replace("_", "-") not in {
+                    n.replace("_", "-") for n in image_packages}:
+                problems.append(
+                    f"{where}: requires 里的「{pkg}」不在平台镜像里"
+                    f"(清单:apps/platform-image/requirements.txt)。"
+                    f"作业不会在运行时安装依赖 —— 那是这个项目踩过的反模式。"
+                    f"需要它就加进那份 requirements.txt 并重建镜像;"
+                    f"如果是内部包,先按 ADR-083 发布。")
+
+        # params:作业参数。参数化是"补数"能成立的前提 —— 没有参数,重跑
+        # 一个日更作业只会再算一遍今天。
+        params = spec.get("params") or {}
+        if not isinstance(params, dict):
+            problems.append(f"{where}: params 要写成 key: 默认值 的映射")
+            params = {}
+        for k in params:
+            if not PARAM_RE.match(str(k)):
+                problems.append(f"{where}: 参数名「{k}」不合法(只能字母数字下划线,不能数字开头)")
+
+        # environments:这个作业在哪些环境里生效。不写 = 所有环境。
+        # **晋级就是往这个列表里加一个环境名**,不是复制一份 yaml 到别处。
+        envs = spec.get("environments")
+        if envs is not None:
+            if not isinstance(envs, list) or not envs:
+                problems.append(f"{where}: environments 要写成非空列表")
+            else:
+                unknown = [e for e in envs if e not in ENVIRONMENTS]
+                if unknown:
+                    problems.append(
+                        f"{where}: environments 里有不认识的环境 {unknown},"
+                        f"只能是 {sorted(ENVIRONMENTS)}")
+
         spec["_dir"] = d
+        spec["_files"] = sorted(f.name for f in d.iterdir()
+                                if f.is_file() and f.suffix == ".py")
         jobs.append(spec)
+
+    if skipped_identity:
+        print(f"注意:{len(skipped_identity)} 个作业的 owner_group 没能对账 —— "
+              f"提交邮箱不在 platform/iam/employees.csv 里:{', '.join(skipped_identity)}。"
+              f"这条检查在接上真实 HR/IdP 数据之前是不生效的。")
+
+    if env_name:
+        # 不在当前环境里的作业:定义仍然读进来(校验照做),但不生成资源。
+        jobs = [j for j in jobs
+                if j.get("environments") is None or env_name in j["environments"]]
     return jobs, problems
 
 
 def render_configmap(jobs: list[dict]) -> str:
+    """把每个作业目录下**所有** .py 文件放进 ConfigMap。
+
+    2026-08-29 之前只放 `script` 那一个文件,于是一个作业只能是一个文件 ——
+    稍微长一点的作业就只能把所有东西堆进一个几百行的脚本,或者复制粘贴。
+    现在同目录下的 .py 都会被挂进去,`import helpers` 直接可用(容器里
+    PYTHONPATH 指向作业自己的目录)。
+
+    **不支持子目录**:ConfigMap 的 key 不能带 `/`,要支持嵌套就得自己编码
+    路径再在容器里还原,那是在 ConfigMap 上模拟文件系统。真需要多层结构的
+    作业,该走"打成一个包发布"(ADR-083)而不是继续往 ConfigMap 里塞 ——
+    这条边界写在这里,免得下一个人顺手把它扩成一个半吊子的打包机制。
+    """
     data = {}
     for j in jobs:
-        script = j["script"]
-        data[f"{j['name']}--{script}"] = (j["_dir"] / script).read_text()
+        for fname in j["_files"]:
+            data[f"{j['name']}--{fname}"] = (j["_dir"] / fname).read_text()
     cm = {
         "apiVersion": "v1", "kind": "ConfigMap",
         "metadata": {"name": "platform-jobs-scripts", "namespace": NAMESPACE},
         "data": data,
     }
     return GENERATED_HEADER + yaml.safe_dump(cm, allow_unicode=True, sort_keys=True, width=100000)
+
+
+def _script_items(j: dict) -> list[dict]:
+    """ConfigMap 的 key 是打平的(`<作业名>--<文件名>`,因为整个 ConfigMap 是
+    共用的),但挂进容器时要还原成原本的文件名,否则 `import helpers` 找不到
+    `helpers.py`。用 items 逐个映射。"""
+    return [{"key": f"{j['name']}--{f}", "path": f} for f in j["_files"]]
 
 
 def render_cronworkflow(j: dict) -> dict:
@@ -114,6 +299,20 @@ def render_cronworkflow(j: dict) -> dict:
 
     cpu = str(j.get("cpu", "200m"))
     mem = str(j.get("memory", "512Mi"))
+
+    # 参数:声明在 job.yaml 的 `params` 里,以 Argo workflow parameter 的形式
+    # 暴露(定时跑用默认值),同时作为 `PARAM_<大写名>` 注进环境变量给脚本读。
+    #
+    # **参数化是"补数"能成立的前提** —— 没有参数,重跑一个日更作业只会再算
+    # 一遍今天。补数的做法是带着不同的参数提交一次:
+    #   argo submit --from cronwf/<名字> -p run_date=2026-08-01
+    params = j.get("params") or {}
+    param_defs = [{"name": k, "value": str(v)} for k, v in sorted(params.items())]
+    for k in sorted(params):
+        env[f"PARAM_{k.upper()}"] = "{{workflow.parameters." + k + "}}"
+
+    # 作业自己的目录进 PYTHONPATH,同目录下的其它 .py 才 import 得到。
+    env.setdefault("PYTHONPATH", "/scripts")
     return {
         "apiVersion": "argoproj.io/v1alpha1",
         "kind": "CronWorkflow",
@@ -138,6 +337,7 @@ def render_cronworkflow(j: dict) -> dict:
             "failedJobsHistoryLimit": 3,
             "workflowSpec": {
                 "entrypoint": "main",
+                **({"arguments": {"parameters": param_defs}} if param_defs else {}),
                 # 不指定会落到没有 workflowtaskresults 权限的 default SA,
                 # 表现成"脚本跑完了但 Workflow 判定 Error"。
                 "serviceAccountName": "argo-workflow",
@@ -147,7 +347,7 @@ def render_cronworkflow(j: dict) -> dict:
                     "container": {
                         "image": j.get("image", "local/platform-runtime:0.1.0"),
                         "imagePullPolicy": "IfNotPresent",
-                        "command": ["python3", f"/scripts/{name}--{script}"],
+                        "command": ["python3", f"/scripts/{script}"],
                         "env": [{"name": k, "value": v} for k, v in sorted(env.items())],
                         "envFrom": [{"secretRef": {"name": "platform-job-credentials",
                                                    "optional": True}}],
@@ -156,17 +356,29 @@ def render_cronworkflow(j: dict) -> dict:
                                       "limits": {"memory": mem}},
                     },
                     "volumes": [{"name": "scripts",
-                                 "configMap": {"name": "platform-jobs-scripts"}}],
+                                 "configMap": {"name": "platform-jobs-scripts",
+                                               "items": _script_items(j)}}],
                 }],
             },
         },
     }
 
 
+DEFAULT_ENV = "cloud-full"
+
+
 def main() -> None:
     check = "--check" in sys.argv
+    # 环境:和 render-environment-config.py 一样按位置参数给。默认 cloud-full
+    # —— 那是当前真正在跑的环境,也是 CI 校验的那一档。生成物只有一份,所以
+    # 必须明确它代表哪个环境,否则"这个集群上有哪些定时作业"就答不上来。
+    positional = [a for a in sys.argv[1:] if not a.startswith("-")]
+    env_name = positional[0] if positional else DEFAULT_ENV
+    if env_name not in ENVIRONMENTS:
+        print(f"不认识的环境「{env_name}」,只能是 {sorted(ENVIRONMENTS)}", file=sys.stderr)
+        sys.exit(1)
     groups = load_groups()
-    jobs, problems = load_jobs(groups)
+    jobs, problems = load_jobs(groups, env_name)
     if problems:
         print("作业定义有问题:")
         for p in problems:
@@ -197,7 +409,8 @@ def main() -> None:
             else:
                 stale.unlink()
 
-    print(f"{len(jobs)} 个作业,其中 {len(scheduled)} 个有 schedule(会生成 CronWorkflow)。")
+    print(f"[{env_name}] {len(jobs)} 个作业在这个环境生效,"
+          f"其中 {len(scheduled)} 个有 schedule(会生成 CronWorkflow)。")
     if drift:
         print("\n生成物和 jobs/ 漂移了,跑一次 python3 scripts/render-jobs.py:")
         for d in drift:
