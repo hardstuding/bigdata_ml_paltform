@@ -436,7 +436,11 @@ fi
 # templates/apps-definitions/argo-workflows.yaml)靠 id_token 里的
 # groups claim 判断是不是 platform-team 组,不挂这个 scope 的话 groups
 # 字段根本不存在,规则永远匹配不上,直接 403。
-for gc in grafana jupyterhub mlflow spark-history-server argo-workflows; do
+# 2026-08-29 再补 superset:它此前不在这个名单里,拿不到 groups claim,
+# 所以只能用 AUTH_USER_REGISTRATION_ROLE="Admin" 兜底 —— **结果是任何能
+# 登录的人在 Superset 里都是管理员**,能改数据源连接串、能看所有人的看板。
+# 数据层有 OPA 挡着(ADR-074 的 impersonation),但产品层的权限是全开的。
+for gc in grafana jupyterhub mlflow spark-history-server argo-workflows superset; do
   gcid=$(kcadm get clients -r platform -q clientId="$gc" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -z "$gcid" ]; then
     echo "client ${gc} 还不存在,跳过挂 groups scope"

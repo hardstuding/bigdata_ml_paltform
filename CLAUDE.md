@@ -115,6 +115,39 @@ Application,且 `syncPolicy.automated.selfHeal: true`。
 ——这个项目被"看起来成功了"坑过太多次(ArgoCD Synced 不等于生效、
 Pod Running 不等于健康、Job Complete 不等于业务逻辑跑对)。
 
+## 改文件之前,先看它是不是生成物
+
+这个坑撞了 **4 次**(改 `platform/apps/keycloak.yaml`、
+`platform/bootstrap/argocd-values.yaml`、`apps/definitions/*`、
+`scripts/03-configure-keycloak.sh`),每次都白改一遍。
+
+**症状特别隐蔽**:改完当场是对的(文件里确实是你写的内容),下一次
+`render-environment-config.py` 一跑,改动被静默覆盖 —— 没有冲突、没有报错、
+没有任何提示。如果中间还提交过一次,git 历史里甚至能看到"改了又没了"。
+
+**动手之前先看文件头**:
+
+```bash
+head -3 <文件> | grep -q "自动生成\|这个文件是生成的" && echo "!! 这是生成物,去改 templates/"
+```
+
+生成物 → 源的对应关系在 `scripts/render-environment-config.py` 的 `DIR_MAP`
+里。常见的几组:
+
+| 生成物 | 源 |
+|---|---|
+| `apps/definitions/*.yaml` | `apps/components/*.yaml` |
+| `platform/apps/*.yaml` | `templates/platform-apps/*.yaml` |
+| `platform/bootstrap/*` | `templates/platform-bootstrap/*` |
+| `scripts/03-configure-keycloak.sh` 等 | `templates/scripts/*` |
+| `apps/platform-jobs/manifests/*` | `jobs/`(经 `render-jobs.py`) |
+| `apps/platform-streams/manifests/*` | `streams/`(经 `render-streams.py`) |
+| `docs/reference/service-catalog.md` | `platform/service-catalog.yaml` |
+
+`render-environment-config.py --check` 只在"改了源没重新渲染"时报错;
+"改了生成物"它是**发现不了**的 —— 因为下一次渲染会把生成物改回去,
+两边就一致了。所以只能靠动手前看一眼。
+
 ## 等后台任务:不要用 `pgrep -f` 判断"跑完没有"
 
 这个坑在 2026-08 撞了 **5 次**,每次都浪费几十分钟到几小时:
