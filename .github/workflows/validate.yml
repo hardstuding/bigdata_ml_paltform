@@ -67,6 +67,23 @@ jobs:
       - name: 环境配置单一源码校验(cloud-full 部署文件不能和 templates/ + environments/cloud-full/config.yaml 渲染结果漂移)
         run: python3 scripts/render-environment-config.py cloud-full --check
 
+      # "三档环境改配置切换"是这个仓库的三条底线之一。机制(ADR-059)早就有,
+      # 但 2026-08-29 盘点发现 56 个组件里只有 9 个真的用了占位符——机制存在
+      # 不等于被用。这个检查要求写死的必须显式登记豁免并写明理由,让"漏了"
+      # 和"想清楚了不做"能区分开。
+      - name: 规格分档校验(组件里不能有未登记的写死资源规格)
+        run: python3 scripts/check-resource-profiles.py
+
+      # 三档都要能渲染出来。只校验 cloud-full 的话,prod/local-lite 缺一个
+      # RES 键要等到真去部署那一档才会发现——而那时候人已经在等着上生产了。
+      - name: 三档环境都能渲染(prod/local-lite 缺键会在这里就报出来)
+        run: |
+          for env in local-lite cloud-full prod; do
+            echo "--- $env ---"
+            python3 scripts/render-environment-config.py "$env" >/dev/null
+          done
+          git checkout -- .   # 渲染会改工作区,校验完还原,不影响后面的步骤
+
   opa-test:
     # 2026-08-23 新增:apps/opa/policy/ 下的 Rego 策略(Trino 表级访问控制
     # ADR-051 + 列级脱敏/行级过滤 ADR-063)有真实的单元测试,写了没人跑

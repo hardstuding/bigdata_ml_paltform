@@ -55,12 +55,16 @@ spec:
           className: nginx
           hosts:
             - permission-request.{{DOMAIN_SUFFIX}}
+        # 这个进程在**认证请求路径上**:它一重启(滚更、节点漂移、OOM),
+        # 对应服务的 SSO 就断一次。prod 给 2 副本,见
+        # environments/resource-profiles.yaml。
+        replicaCount: {{RES:oauth2_proxy_replicas}}
         resources:
           requests:
-            cpu: 50m
-            memory: 64Mi
+            cpu: {{RES:oauth2_proxy_cpu}}
+            memory: {{RES:oauth2_proxy_memory_request}}
           limits:
-            memory: 128Mi
+            memory: {{RES:oauth2_proxy_memory_limit}}
   destination:
     server: https://kubernetes.default.svc
     namespace: permission-request-app

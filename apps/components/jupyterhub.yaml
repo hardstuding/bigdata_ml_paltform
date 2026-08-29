@@ -126,10 +126,10 @@ spec:
               c.KubeSpawner.pre_spawn_hook = _inject_groups
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: {{RES:jupyterhub_hub_cpu}}
+              memory: {{RES:jupyterhub_hub_memory_request}}
             limits:
-              memory: 512Mi
+              memory: {{RES:jupyterhub_hub_memory_limit}}
         singleuser:
           # 2026-08-19(ADR-058):从"用户自己按需装包"改成用平台统一镜像
           # (apps/platform-image/),里面已经带了 platform_sdk + Trino/
@@ -221,14 +221,14 @@ spec:
             # "1536Mi" 会在用户登录、hub 要给这个用户建 spawner 时直接
             # TraitError,500。和下面 cpu.guarantee 必须是纯数字是同一类
             # "chart 里这个字段最终走 Python 校验,不是走 k8s 校验"的坑。
-            guarantee: 512M
-            limit: 1536M
+            guarantee: {{RES:jupyterhub_singleuser_memory_guarantee}}
+            limit: {{RES:jupyterhub_singleuser_memory_limit}}
           cpu:
             # chart 的 schema 要求这里是纯数字(CPU 核数),不是
             # Kubernetes 常见的 "100m" 这种带单位字符串,0.1 = 100m。
-            guarantee: 0.1
+            guarantee: {{RES:jupyterhub_singleuser_cpu_guarantee}}
           storage:
-            capacity: 2Gi
+            capacity: {{RES:jupyterhub_singleuser_storage}}
           # 2026-08-19 更正:上面这条"用户自己按需装"的旧注释已经不成立
           # (见上面 image 那段)——scikit-learn/mlflow 这些包现在打进了
           # 统一镜像。这里只保留 startTimeout 本身。
@@ -257,12 +257,15 @@ spec:
           service:
             type: ClusterIP
           chp:
+            # configurable-http-proxy —— **每一个 notebook 的每一个请求都
+            # 经过它**,和 oauth2-proxy 是同一类"在请求路径上"的组件,所以
+            # 也按环境分档,不写死。
             resources:
               requests:
-                cpu: 50m
-                memory: 128Mi
+                cpu: {{RES:jupyterhub_chp_cpu}}
+                memory: {{RES:jupyterhub_chp_memory_request}}
               limits:
-                memory: 256Mi
+                memory: {{RES:jupyterhub_chp_memory_limit}}
         ingress:
           enabled: true
           ingressClassName: nginx

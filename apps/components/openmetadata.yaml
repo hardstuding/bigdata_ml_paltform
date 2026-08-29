@@ -141,11 +141,11 @@ spec:
                 # 两个要一起改,只改一个还是会被拦。
                 resources:
                   limits:
-                    cpu: "1"
-                    memory: "1536Mi"
+                    cpu: "{{RES:openmetadata_ingestion_cpu_limit}}"
+                    memory: "{{RES:openmetadata_ingestion_memory_limit}}"
                   requests:
-                    cpu: "200m"
-                    memory: "512Mi"
+                    cpu: "{{RES:openmetadata_ingestion_cpu_request}}"
+                    memory: "{{RES:openmetadata_ingestion_memory_request}}"
             authentication:
               enabled: true
               clientType: confidential
@@ -183,10 +183,10 @@ spec:
             readOnly: true
         resources:
           requests:
-            cpu: 300m
-            memory: 1024Mi
+            cpu: {{RES:openmetadata_cpu}}
+            memory: {{RES:openmetadata_memory_request}}
           limits:
-            memory: 2048Mi
+            memory: {{RES:openmetadata_memory_limit}}
         ingress:
           enabled: true
           className: nginx

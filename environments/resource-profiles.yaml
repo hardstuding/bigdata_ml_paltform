@@ -179,9 +179,43 @@ local-lite:
   prometheus_memory_limit: "1024Mi"
   prometheus_storage_spec: "{}"
 
-
-
-
+  # ---- 2026-08-29 补:认证入口 / 交互式工作负载 / 元数据服务 ----
+  # 这三类之前是写死的 local-lite 值。挑它们而不是"把所有组件都参数化",
+  # 判据是**这个值在生产上会不会真的伤到人**:
+  #   - oauth2-proxy:5 个都在**认证请求路径上**,单副本意味着它一重启
+  #     (滚更、节点漂移、OOM)整个平台的 SSO 就断一次。prod 给 2 副本。
+  #   - JupyterHub singleuser:直接决定分析师/算法能不能干活。local-lite
+  #     的 1536M / 0.1 核在生产上连一个正经 notebook 都跑不动。
+  #     注意单位:memory 走 KubeSpawner 的 ByteSpecification,只认 M/G
+  #     (十进制),写 Mi/Gi 会 TraitError 500;cpu 必须是纯数字。
+  #   - OpenMetadata:2048Mi 是给 demo 规模 catalog 的。采集任务那组的
+  #     注释里 2026-08-23 就写过"接真实生产 catalog 时要回头调这个值 +
+  #     一并调大命名空间配额,两个要一起改"——现在至少 prod 那档有值了。
+  # 其余 operator 类组件(cnpg / kafka / spark / argo-workflows 的
+  # controller,以及 flink-kubernetes-operator)**故意保持写死**:operator
+  # 的开销和数据规模基本无关,为它们各造三档只是增加噪音。真要动的是副本数
+  # (HA),而那属于"生产高可用"这个更大的话题,不在规格分档里顺手做。
+  oauth2_proxy_replicas: "1"
+  oauth2_proxy_cpu: "50m"
+  oauth2_proxy_memory_request: "64Mi"
+  oauth2_proxy_memory_limit: "128Mi"
+  jupyterhub_hub_cpu: "100m"
+  jupyterhub_hub_memory_request: "256Mi"
+  jupyterhub_hub_memory_limit: "512Mi"
+  jupyterhub_singleuser_cpu_guarantee: 0.1
+  jupyterhub_singleuser_memory_guarantee: "512M"
+  jupyterhub_singleuser_memory_limit: "1536M"
+  jupyterhub_singleuser_storage: "2Gi"
+  jupyterhub_chp_cpu: "50m"
+  jupyterhub_chp_memory_request: "128Mi"
+  jupyterhub_chp_memory_limit: "256Mi"
+  openmetadata_cpu: "300m"
+  openmetadata_memory_request: "1024Mi"
+  openmetadata_memory_limit: "2048Mi"
+  openmetadata_ingestion_cpu_request: "200m"
+  openmetadata_ingestion_cpu_limit: "1"
+  openmetadata_ingestion_memory_request: "512Mi"
+  openmetadata_ingestion_memory_limit: "1536Mi"
 
 cloud-full:
   # 阿里云 ECS 16 vCPU / 64 GiB,当前实际在跑的就是这一档
@@ -337,9 +371,43 @@ cloud-full:
   prometheus_memory_limit: "2Gi"
   prometheus_storage_spec: '{"volumeClaimTemplate":{"spec":{"storageClassName":"local-path","accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"20Gi"}}}}}'
 
-
-
-
+  # ---- 2026-08-29 补:认证入口 / 交互式工作负载 / 元数据服务 ----
+  # 这三类之前是写死的 local-lite 值。挑它们而不是"把所有组件都参数化",
+  # 判据是**这个值在生产上会不会真的伤到人**:
+  #   - oauth2-proxy:5 个都在**认证请求路径上**,单副本意味着它一重启
+  #     (滚更、节点漂移、OOM)整个平台的 SSO 就断一次。prod 给 2 副本。
+  #   - JupyterHub singleuser:直接决定分析师/算法能不能干活。local-lite
+  #     的 1536M / 0.1 核在生产上连一个正经 notebook 都跑不动。
+  #     注意单位:memory 走 KubeSpawner 的 ByteSpecification,只认 M/G
+  #     (十进制),写 Mi/Gi 会 TraitError 500;cpu 必须是纯数字。
+  #   - OpenMetadata:2048Mi 是给 demo 规模 catalog 的。采集任务那组的
+  #     注释里 2026-08-23 就写过"接真实生产 catalog 时要回头调这个值 +
+  #     一并调大命名空间配额,两个要一起改"——现在至少 prod 那档有值了。
+  # 其余 operator 类组件(cnpg / kafka / spark / argo-workflows 的
+  # controller,以及 flink-kubernetes-operator)**故意保持写死**:operator
+  # 的开销和数据规模基本无关,为它们各造三档只是增加噪音。真要动的是副本数
+  # (HA),而那属于"生产高可用"这个更大的话题,不在规格分档里顺手做。
+  oauth2_proxy_replicas: "1"
+  oauth2_proxy_cpu: "50m"
+  oauth2_proxy_memory_request: "64Mi"
+  oauth2_proxy_memory_limit: "128Mi"
+  jupyterhub_hub_cpu: "100m"
+  jupyterhub_hub_memory_request: "256Mi"
+  jupyterhub_hub_memory_limit: "512Mi"
+  jupyterhub_singleuser_cpu_guarantee: 0.5
+  jupyterhub_singleuser_memory_guarantee: "1G"
+  jupyterhub_singleuser_memory_limit: "4G"
+  jupyterhub_singleuser_storage: "5Gi"
+  jupyterhub_chp_cpu: "50m"
+  jupyterhub_chp_memory_request: "128Mi"
+  jupyterhub_chp_memory_limit: "256Mi"
+  openmetadata_cpu: "300m"
+  openmetadata_memory_request: "1024Mi"
+  openmetadata_memory_limit: "2048Mi"
+  openmetadata_ingestion_cpu_request: "200m"
+  openmetadata_ingestion_cpu_limit: "1"
+  openmetadata_ingestion_memory_request: "512Mi"
+  openmetadata_ingestion_memory_limit: "1536Mi"
 
 prod:
   # 6 台物理机(见 environments/prod/README.md 的目标硬件)。下面的数字是
@@ -526,6 +594,41 @@ prod:
   prometheus_memory_limit: "8Gi"
   prometheus_storage_spec: '{"volumeClaimTemplate":{"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"200Gi"}}}}}'
 
-
-
+  # ---- 2026-08-29 补:认证入口 / 交互式工作负载 / 元数据服务 ----
+  # 这三类之前是写死的 local-lite 值。挑它们而不是"把所有组件都参数化",
+  # 判据是**这个值在生产上会不会真的伤到人**:
+  #   - oauth2-proxy:5 个都在**认证请求路径上**,单副本意味着它一重启
+  #     (滚更、节点漂移、OOM)整个平台的 SSO 就断一次。prod 给 2 副本。
+  #   - JupyterHub singleuser:直接决定分析师/算法能不能干活。local-lite
+  #     的 1536M / 0.1 核在生产上连一个正经 notebook 都跑不动。
+  #     注意单位:memory 走 KubeSpawner 的 ByteSpecification,只认 M/G
+  #     (十进制),写 Mi/Gi 会 TraitError 500;cpu 必须是纯数字。
+  #   - OpenMetadata:2048Mi 是给 demo 规模 catalog 的。采集任务那组的
+  #     注释里 2026-08-23 就写过"接真实生产 catalog 时要回头调这个值 +
+  #     一并调大命名空间配额,两个要一起改"——现在至少 prod 那档有值了。
+  # 其余 operator 类组件(cnpg / kafka / spark / argo-workflows 的
+  # controller,以及 flink-kubernetes-operator)**故意保持写死**:operator
+  # 的开销和数据规模基本无关,为它们各造三档只是增加噪音。真要动的是副本数
+  # (HA),而那属于"生产高可用"这个更大的话题,不在规格分档里顺手做。
+  oauth2_proxy_replicas: "2"
+  oauth2_proxy_cpu: "100m"
+  oauth2_proxy_memory_request: "128Mi"
+  oauth2_proxy_memory_limit: "256Mi"
+  jupyterhub_hub_cpu: "500m"
+  jupyterhub_hub_memory_request: "1Gi"
+  jupyterhub_hub_memory_limit: "2Gi"
+  jupyterhub_singleuser_cpu_guarantee: 1
+  jupyterhub_singleuser_memory_guarantee: "4G"
+  jupyterhub_singleuser_memory_limit: "16G"
+  jupyterhub_singleuser_storage: "50Gi"
+  jupyterhub_chp_cpu: "200m"
+  jupyterhub_chp_memory_request: "512Mi"
+  jupyterhub_chp_memory_limit: "1Gi"
+  openmetadata_cpu: "1"
+  openmetadata_memory_request: "4Gi"
+  openmetadata_memory_limit: "8Gi"
+  openmetadata_ingestion_cpu_request: "500m"
+  openmetadata_ingestion_cpu_limit: "2"
+  openmetadata_ingestion_memory_request: "2Gi"
+  openmetadata_ingestion_memory_limit: "6Gi"
 
