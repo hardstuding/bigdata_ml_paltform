@@ -118,10 +118,16 @@ for ns in $NAMESPACES; do
       --docker-password="$ACR_PASSWORD" \
       --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   fi
-  # 挂到默认 ServiceAccount 上,这样这个命名空间里所有 Pod 自动带上,
-  # 不用逐个 Deployment 改 imagePullSecrets。
-  kubectl -n "$ns" patch serviceaccount default \
-    -p "{\"imagePullSecrets\":[{\"name\":\"${SECRET_NAME}\"}]}" >/dev/null
+  # 挂到这个命名空间的**每一个** ServiceAccount 上,Pod 就自动带上,不用
+  # 逐个 Deployment 改 imagePullSecrets。
+  #
+  # **不能只挂 default。** 2026-08-29 实测踩到:Flink 作业用的是 `flink` 这个
+  # SA、iam-sync 用自己的 SA,它们都没拿到凭据,表现是 ImagePullBackOff ——
+  # 而同命名空间里用 default 的 Pod 一切正常,很容易误判成"镜像本身有问题"。
+  for sa in $(kubectl -n "$ns" get sa -o name 2>/dev/null); do
+    kubectl -n "$ns" patch "$sa" \
+      -p "{\"imagePullSecrets\":[{\"name\":\"${SECRET_NAME}\"}]}" >/dev/null 2>&1 || true
+  done
   echo "    ${ns} 就绪"
 done
 

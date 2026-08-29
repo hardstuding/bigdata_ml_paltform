@@ -29,7 +29,7 @@ spec:
     metrics.reporter.prom.port: '9249'
     taskmanager.numberOfTaskSlots: '1'
   flinkVersion: v1_20
-  image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/flink-iceberg:3a01421f1383c9028ed8fb6754f244c7680b49b5
+  image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/flink-iceberg:97301dd24915009cd6cd77bb62af9eb931d026cf
   imagePullPolicy: IfNotPresent
   job:
     args:

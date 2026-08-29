@@ -37,11 +37,12 @@ GENERATED_HEADER = (
     "# CI 会校验它和 streams/ 不漂移。\n"
 )
 
-# Flink 镜像。和 apps/flink-audit-sink 用的是同一个 —— 里面已经打好
+# Flink 镜像。和 apps/flink-audit-sink 用的是同一个(tag 要和其它自建镜像
+# 保持同一次构建 —— 切 ACR 之后旧 tag 在 ACR 里不存在,2026-08-29 踩到) —— 里面已经打好
 # iceberg-flink-runtime / flink-connector-kafka / hadoop-aws(见
 # apps/flink-iceberg-image/Dockerfile),脚本不用自己拉 jar。
 FLINK_IMAGE = ("crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/flink-iceberg:"
-               "3a01421f1383c9028ed8fb6754f244c7680b49b5")
+               "97301dd24915009cd6cd77bb62af9eb931d026cf")
 # PyFlink 的 jar 名字带版本号,Flink 1.16 起模块坐标从 flink-python_2.12
 # 改成不带 Scala 后缀的 flink-python(查过 Maven Central 版本列表确认)。
 PYFLINK_JAR = "local:///opt/flink/opt/flink-python-1.20.5.jar"
