@@ -160,6 +160,21 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}/${{ matrix.image }}:latest
+          # **关掉 buildx 的 provenance / SBOM 证明清单。**
+          # 开着的话 buildx 除了镜像本身,还会推一个 attestation manifest,
+          # 它的 config 用 `application/vnd.oci.empty.v1+json` 这个 OCI 空
+          # 描述符。**阿里云 ACR 个人版不认这个类型**,直接
+          #   denied: unknown manifest class for application/vnd.oci.empty.v1+json
+          # GHCR 认,所以同一次推送会出现"GHCR 成功、ACR 失败"。
+          # 2026-08-29 配 ACR 时实测撞到(11 个镜像里 kafka-device-events-producer
+          # 那个触发了;**为什么只有它触发没查清楚**,但关掉之后这一整类
+          # 失败都不会再出现)。
+          #
+          # 代价:失去构建来源证明。对这个仓库可以接受——镜像本来就按
+          # commit SHA 打 tag、清单里按 digest/tag 锁定引用,可追溯性不靠
+          # attestation 提供。
+          provenance: false
+          sbom: false
 
       # 一次构建推两个 registry,不是构建两次——buildx 把同一份产物推到多个
       # tag,两边内容(和 digest)完全一致,不会出现"ACR 上那份和 GHCR 上
@@ -176,3 +191,18 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ matrix.image }}:latest
             ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/${{ matrix.image }}:${{ github.sha }}
             ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/${{ matrix.image }}:latest
+          # **关掉 buildx 的 provenance / SBOM 证明清单。**
+          # 开着的话 buildx 除了镜像本身,还会推一个 attestation manifest,
+          # 它的 config 用 `application/vnd.oci.empty.v1+json` 这个 OCI 空
+          # 描述符。**阿里云 ACR 个人版不认这个类型**,直接
+          #   denied: unknown manifest class for application/vnd.oci.empty.v1+json
+          # GHCR 认,所以同一次推送会出现"GHCR 成功、ACR 失败"。
+          # 2026-08-29 配 ACR 时实测撞到(11 个镜像里 kafka-device-events-producer
+          # 那个触发了;**为什么只有它触发没查清楚**,但关掉之后这一整类
+          # 失败都不会再出现)。
+          #
+          # 代价:失去构建来源证明。对这个仓库可以接受——镜像本来就按
+          # commit SHA 打 tag、清单里按 digest/tag 锁定引用,可追溯性不靠
+          # attestation 提供。
+          provenance: false
+          sbom: false
