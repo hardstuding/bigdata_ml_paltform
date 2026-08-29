@@ -21,6 +21,8 @@ Airflow DAG(还是 ConfigMap 挂载模式,没有跟着改),继续用,只是不�
                                                               非 0 表示有漂移
                                                               (适合接进 CI)
 """
+import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -74,6 +76,47 @@ def sync_one(dag_file: Path, cm_lines: list[str], check_only: bool) -> tuple[lis
     return new_lines, True
 
 
+AIRFLOW_COMPONENT = REPO_ROOT / "apps" / "components" / "airflow.yaml"
+CHECKSUM_RE = re.compile(r'(platform/dags-checksum: ")[^"]*(")')
+
+
+def sync_checksum(dag_files, check_only: bool) -> bool:
+    """把 DAG 内容的哈希写进 apps/components/airflow.yaml 的 podAnnotations。
+
+    **为什么必须有这一步**:DAG 是 subPath 挂 ConfigMap 的,而 subPath 挂载的
+    ConfigMap **Kubernetes 永远不会更新**(不是有延迟,是根本不更新,官方文档
+    写明了)。所以「改 DAG → push → ArgoCD Synced」这条链看起来完整,实际上
+    跑着的 Airflow 一直是旧代码。2026-08-29 给三条 DAG 加定时时实测撞到:
+    unpause 成功、ConfigMap 里确实是新内容、而 next_dagrun 一直是 None,
+    进 pod 里 grep 才发现文件是老的。
+
+    把内容哈希写进 pod 模板的注解,DAG 一改哈希就变,pod 模板就变,ArgoCD
+    自动滚更 —— 不依赖任何人记得去重启。
+    """
+    h = hashlib.sha256()
+    for f in dag_files:
+        h.update(f.name.encode())
+        h.update(f.read_bytes())
+    digest = h.hexdigest()[:16]
+
+    text = AIRFLOW_COMPONENT.read_text()
+    new_text, n = CHECKSUM_RE.subn(rf"\g<1>{digest}\g<2>", text)
+    if n == 0:
+        print(f"!! {AIRFLOW_COMPONENT} 里找不到 platform/dags-checksum 注解 —— "
+              f"这个机制被人删掉了?没有它,改 DAG 不会生效。", file=sys.stderr)
+        return False
+    if new_text == text:
+        return True
+    if check_only:
+        print(f"!! DAG 内容变了但 {AIRFLOW_COMPONENT.name} 里的 dags-checksum 没更新"
+              f"(应该是 {digest})。跑一次 scripts/sync-airflow-dags-configmap.py。",
+              file=sys.stderr)
+        return False
+    AIRFLOW_COMPONENT.write_text(new_text)
+    print(f"已更新 {AIRFLOW_COMPONENT.name} 里 {n} 处 dags-checksum -> {digest}")
+    return True
+
+
 def main():
     check_only = "--check" in sys.argv
     if not CM_FILE.exists():
@@ -100,6 +143,9 @@ def main():
 
     if not check_only and changed:
         print(f"已写回 {CM_FILE}")
+
+    if not sync_checksum(dag_files, check_only):
+        ok = False
 
     sys.exit(0 if ok else 1)
 
