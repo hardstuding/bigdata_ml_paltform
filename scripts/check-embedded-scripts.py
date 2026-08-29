@@ -100,7 +100,21 @@ def find_unregistered() -> list[str]:
     problems = []
     for f in sorted((REPO / "apps").rglob("*.yaml")):
         try:
-            docs = list(yaml.safe_load_all(f.read_text()))
+            text = f.read_text()
+        except Exception:  # noqa: BLE001
+            continue
+        # **生成物跳过**:它们的漂移由各自的生成器 --check 管
+        # (例:apps/platform-jobs/manifests/ 由 scripts/render-jobs.py 从
+        # jobs/ 渲染,漂移检查在 render-jobs.py --check 里)。在这里再要求
+        # 逐条登记,等于每加一个定时作业就要改一次这个脚本——那会把
+        # "在 jobs/ 里加个目录就行"这个卖点直接抵消掉。
+        #
+        # 判据是文件头那句"这个文件是生成的",不是路径白名单:换一个生成器、
+        # 换一个输出目录,这条豁免依然成立,不用回来改。
+        if "这个文件是生成的" in text[:400]:
+            continue
+        try:
+            docs = list(yaml.safe_load_all(text))
         except yaml.YAMLError:
             continue
         for d in docs:
