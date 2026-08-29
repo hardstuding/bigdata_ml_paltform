@@ -37,11 +37,48 @@ cd "$(dirname "$0")/.."
 
 SECRET_NAME="acr-pull"
 
-# 哪些命名空间会拉自建镜像。**不是"所有命名空间"**:imagePullSecret 是凭据,
-# 撒得越广泄露面越大。这个列表和 apps/ 下实际引用 ghcr.io 自建镜像的命名
-# 空间对应,加新组件时要跟着加(check-networkpolicy-consumers.py 那类检查
-# 的同类问题,暂时靠这条注释提醒)。
-NAMESPACES="platform-portal permission-request-app table-registration-app keycloak data kafka flink argo-workflows feast spark-operator jupyterhub airflow monitoring"
+# 哪些命名空间会拉自建镜像。**从仓库自己算出来,不是手写一份。**
+#
+# 第一版是手写的 13 个,当场就漏了 `superset` —— 表现是 superset 一个组件
+# `Init:ImagePullBackOff`,而其它全好。这正是这个仓库反复栽的那类:
+# "需要人记得同步的清单"一定会漏,而漏了之后不会有任何地方报错。
+#
+# 算法:遍历每个 Application(apps/definitions/ 和 platform/apps/),如果它
+# 自己或者它 source.path 指向的目录里出现了自建镜像的地址,就把它的
+# destination.namespace 收进来。
+#
+# **仍然不是"所有命名空间"**:imagePullSecret 是凭据,撒得越广泄露面越大。
+NAMESPACES="$(python3 - <<'PY'
+import pathlib, yaml
+REPO = pathlib.Path(".")
+MARKS = ("ghcr.io/hardstuding/bigdata_ml_paltform", "personal.cr.aliyuncs.com")
+out = set()
+for app_dir in (REPO / "apps" / "definitions", REPO / "platform" / "apps"):
+    if not app_dir.exists():
+        continue
+    for f in app_dir.glob("*.yaml"):
+        try:
+            d = yaml.safe_load(f.read_text())
+        except Exception:
+            continue
+        if not isinstance(d, dict) or d.get("kind") != "Application":
+            continue
+        spec = d.get("spec", {})
+        ns = (spec.get("destination") or {}).get("namespace")
+        if not ns:
+            continue
+        text = f.read_text()
+        src = spec.get("source") or {}
+        path = src.get("path")
+        if path:
+            for m in (REPO / path).rglob("*.yaml") if (REPO / path).exists() else []:
+                text += m.read_text(errors="ignore")
+        if any(x in text for x in MARKS):
+            out.add(ns)
+print(" ".join(sorted(out)))
+PY
+)"
+[ -n "$NAMESPACES" ] || { echo "!! 算不出任何命名空间,不继续(空列表会静默什么都不做)"; exit 1; }
 
 echo "==> 在 ${NAMESPACES} 里建/更新 ${SECRET_NAME}"
 for ns in $NAMESPACES; do
