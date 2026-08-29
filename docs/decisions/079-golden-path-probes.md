@@ -197,3 +197,55 @@ ArgoCD 原本的语义**——db-init 这类 Job 失败仍然要变 Degraded。
 3. 审计链路故意没做探针:它已经有 `AuditSinkJobNotRunning`(作业级),而要
    探它就得读 `audit.query_events`,那张表[刚刚才收紧](066-trino-query-audit.md)
    成只有 platform-team 能读——为了探针去开一个口子不划算。
+
+---
+
+## 2026-08-29 更正:那段 `batch/Job` 的 Lua 其实没解决它想解决的问题
+
+这条 ADR 里加了 `resource.customizations.health.batch_Job`,理由是"探针
+失败说明它抓到了东西,不说明探针这个组件坏了,不该让 Application 变红"。
+**当时以为生效了,实际上挂错了对象。**
+
+Trino 因为 startupProbe 预算不够重启了 9 次(见 `apps/components/trino.yaml`
+里的说明),期间 query/authz/inference/model 几条探针全部失败。Trino 修好
+之后:
+
+- `golden-path-probes` 这个 Application 一直是 `Degraded`
+- `.status.resources` 里 7 个资源(1 个 ConfigMap + 6 个 CronJob)的
+  health **全是空的**,一条 Degraded 都没有——从这里完全看不出是谁的问题
+- 把所有失败的 Job 和 Pod **全删干净,依然是 Degraded**
+- `argocd app get golden-path-probes` 才看到真相:6 个 CronJob 里
+  `goldenpath-inference` 和 `goldenpath-model` 是 Degraded
+- 手工触发一次成功的 inference/model 探针之后,**整个 Application 立刻
+  回到 Healthy**
+
+也就是说:变黄的是 **CronJob**,而 Lua 加在 `batch/Job` 上。这段 Lua 在
+过去一直"看起来是对的",只是因为那阵子探针一直是通的。
+
+### 试过的两条修法,都撤回了
+
+1. **给 `Pod` 加自定义健康检查**(先按"是 Pod 冒上来的"这个错误判断做的)
+   —— 那等于用一段简化的 Lua 重写 ArgoCD 内置的 Pod 判定,
+   `CrashLoopBackOff` 这类会被误判成 Healthy。为了修一个黄灯把整个平台
+   "部署好没好"的主要依据变钝,不划算。
+2. **给 `batch/CronJob` 加**,对带标签的返回 Healthy、其余返回空 status
+   想"交回内置判定" —— **空 status 不是 ArgoCD 的 fallback 约定**。实测
+   结果是 `iam-sync` / `opa` / `openmetadata` / `postgres-backup` /
+   `trino-liveness-fix` 等 **8 个带 CronJob 的 Application 全部变成
+   `Unknown`**。ArgoCD 的自定义健康检查一旦为某个 kind 定义,就完全接管
+   那个 kind,没有"这一个我不管"的写法。
+
+### 现在的结论:维持现状,不修
+
+要做对得把 ArgoCD 内置的 CronJob 判定完整重写一遍。而这个黄灯的实际影响
+是:某条探针失败之后,`golden-path-probes` 会黄一段时间,**下一次探针跑通
+就自己好了**(实测确认)。为了消掉一个会自愈的黄灯去重写平台健康判断的
+一部分,代价和收益不成比例。
+
+`batch/Job` 那段 Lua 保留 —— 它本身没有害处,而且 Job 层的语义是对的,
+只是不够。
+
+**这条更正本身比结论重要**:一个"加了就不再管它"的健康检查定制,在
+真正需要它的那次故障里没起作用,而且从 Application 的 `.status.resources`
+里根本看不出来。以后再判断"某个 Application 为什么是 Degraded",
+`kubectl get app -o json` 不够,要用 `argocd app get`。
