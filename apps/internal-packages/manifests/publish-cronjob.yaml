@@ -29,12 +29,14 @@ spec:
           priorityClassName: batch
           containers:
             - name: publish
-              # **用 python:3.12 而不是 -slim**:slim 里没有 git,而在境内
-              # ECS 上 `apt-get update` 连 Debian 源会卡住不动(2026-08-29
-              # 实测,任务 11 分钟没过 apt 这一步)。非 slim 的官方镜像基于
-              # buildpack-deps,自带 git,省掉整个 apt 步骤。
-              # 代价是镜像大一些,但它一小时才拉一次、而且有本地缓存。
-              image: python:3.12
+              # 2026-08-29 在这里连撞两次,记下来免得再走一遍:
+              #   1. slim 里没有 git,直接 `apt-get update` 连 deb.debian.org
+              #      在境内 ECS 上**卡住不动**(任务 11 分钟没过这一步)。
+              #   2. 于是换成非 slim 的 python:3.12(自带 git),结果那个镜像
+              #      1GB,从 Docker Hub **拉不下来**(ImagePullBackOff)——
+              #      和 spark 镜像那次是同一个问题。
+              # 最后:还是 slim,但先把 apt 源换成阿里云再装 git。
+              image: python:3.12-slim
               env:
                 - name: MINIO_ENDPOINT
                   value: http://minio.minio.svc.cluster.local:9000
@@ -51,6 +53,15 @@ spec:
                   # 构建期装依赖:这个任务每小时才跑一次,而且不在任何请求
                   # 路径上,现装可以接受(和"运行时 pip install"那条禁令
                   # 针对的是常驻服务,不是一小时一次的批任务)。
+                  # apt 源换成阿里云。bookworm 起配置文件换成了
+                  # /etc/apt/sources.list.d/debian.sources,老路径可能不存在,
+                  # 两个都试一下(|| true 是因为只会命中其中一个)。
+                  sed -i 's|deb.debian.org|mirrors.aliyun.com|g' \
+                    /etc/apt/sources.list.d/debian.sources 2>/dev/null || true
+                  sed -i 's|deb.debian.org|mirrors.aliyun.com|g' \
+                    /etc/apt/sources.list 2>/dev/null || true
+                  apt-get update -qq
+                  apt-get install -y -qq --no-install-recommends git >/dev/null
                   pip install --quiet --no-cache-dir \
                     -i https://mirrors.aliyun.com/pypi/simple/ build boto3
                   git clone --depth 1 "$REPO_URL" /repo
