@@ -17,7 +17,6 @@ lupa = pytest.importorskip("lupa", reason="没装 lupa 就跳过(pip install lup
 
 VALUES = Path(__file__).resolve().parent.parent / "platform" / "bootstrap" / "argocd-values.yaml"
 KEY = "resource.customizations.health.batch_Job"
-CRONJOB_KEY = "resource.customizations.health.batch_CronJob"
 
 
 def _make_runner(key):
@@ -44,11 +43,6 @@ def _make_runner(key):
 @pytest.fixture(scope="module")
 def run_health():
     return _make_runner(KEY)
-
-
-@pytest.fixture(scope="module")
-def run_cronjob_health():
-    return _make_runner(CRONJOB_KEY)
 
 
 PROBE = {"platform/golden-path": "probe"}
@@ -92,26 +86,3 @@ def test_探针_job_刚创建也是健康(run_health):
 
 
 
-# ---- CronJob 那条(2026-08-29 加)----
-# 这才是真正让 Application 变黄的对象。实测:golden-path-probes 变 Degraded
-# 既不是 Job 也不是 Pod 冒上来的,是 CronJob —— ArgoCD 对 batch/CronJob 有
-# 内置健康判定,某条探针最近一次失败就会让对应 CronJob 变 Degraded。把失败
-# 的 Job 和 Pod 全删干净都没用,手工跑一次成功的探针之后才回到 Healthy。
-
-
-def _cronjob(labels=None):
-    return {"metadata": {"labels": labels} if labels else {}, "status": {}}
-
-
-def test_探针cronjob永远健康(run_cronjob_health):
-    assert run_cronjob_health(_cronjob(PROBE))["status"] == "Healthy"
-
-
-def test_普通cronjob交回内置判定(run_cronjob_health):
-    # 返回空 status 是 ArgoCD 约定的"我不管,你按默认来"。**不能在这里
-    # 自己实现一套** —— 内置的比几行 Lua 周全。
-    assert run_cronjob_health(_cronjob({"app": "postgres-backup"}))["status"] == ""
-
-
-def test_cronjob没有labels也不能崩(run_cronjob_health):
-    assert run_cronjob_health(_cronjob())["status"] == ""

@@ -239,33 +239,29 @@ configs:
       hs.status = "Progressing"
       hs.message = "Job 还在跑"
       return hs
-    # **Job 那条其实挂错了对象** —— 2026-08-29 实测查清楚的:
-    # `golden-path-probes` 这个 Application 变 Degraded,既不是 Job 也不是
-    # Pod 冒上来的,是 **CronJob** ——ArgoCD 对 `batch/CronJob` 有内置健康
-    # 判定,某条探针最近一次失败就会让对应的 CronJob 变 Degraded。
+    # **2026-08-29 试过给 CronJob 也加一条,失败了,撤回来了 —— 记下来
+    # 免得以后有人再试一遍**:
     #
-    # 实证过程:`argocd app get golden-path-probes` 显示 6 个 CronJob 里
-    # `goldenpath-inference` 和 `goldenpath-model` 是 Degraded(它们上一次
-    # 的 Job 在 Trino 那次故障期间失败了),手工触发一次成功的探针之后,
-    # 整个 Application 立刻回到 Healthy。而这之前把失败的 Job 和 Pod 全删
-    # 干净都没用——所以 ADR-079 只给 `batch/Job` 加 Lua 是解决不了问题的,
-    # 它当时"看起来解决了"只是因为那阵子探针一直是通的。
+    # 起因是 `golden-path-probes` 这个 Application 在 Trino 那次故障之后
+    # 一直是 Degraded。查下来既不是 Job 也不是 Pod 冒上来的:
+    # `argocd app get` 显示 6 个 CronJob 里 `goldenpath-inference` 和
+    # `goldenpath-model` 是 Degraded,而把失败的 Job 和 Pod 全删干净都没用,
+    # 手工触发一次成功的探针之后整个 Application 立刻回到 Healthy。
     #
-    # **注意这里没有再给 Pod 加自定义健康检查**:试过,但那等于用一段简化
-    # 的 Lua 重写 ArgoCD 内置的 Pod 判定,CrashLoopBackOff 这类会被误判成
-    # Healthy——为了修一个黄灯,把整个平台"部署好没好"的主要依据变钝,
-    # 不划算。
-    resource.customizations.health.batch_CronJob: |
-      hs = {}
-      if obj.metadata ~= nil and obj.metadata.labels ~= nil and obj.metadata.labels["platform/golden-path"] ~= nil then
-        hs.status = "Healthy"
-        hs.message = "黄金链路探针:失败信息走告警和看板,不进部署状态(ADR-079)"
-        return hs
-      end
-      -- 其余 CronJob 一律交回 ArgoCD 内置判定。返回空 status 让它走默认路径,
-      -- 不要在这里自己实现一套——内置的比这几行考虑得周全。
-      hs.status = ""
-      return hs
+    # 于是加了 `resource.customizations.health.batch_CronJob`,对带
+    # `platform/golden-path` 标签的返回 Healthy、其余返回空 status 想"交回
+    # ArgoCD 内置判定"。**空 status 不是 ArgoCD 的 fallback 约定** —— 实测
+    # 结果是 iam-sync / opa / postgres-backup / trino-liveness-fix 等 8 个
+    # 带 CronJob 的 Application 全部变成 `Unknown`。ArgoCD 的自定义健康检查
+    # 一旦为某个 kind 定义,就完全接管那个 kind,没有"这一个我不管"的写法。
+    #
+    # 要做对,得把 ArgoCD 内置的 CronJob 判定完整重写一遍——为了消一个偶发
+    # 黄灯去重写平台健康判断的一部分,不划算,而且那个黄灯**下一次探针跑通
+    # 就自己好了**(实测确认过)。所以维持现状:探针失败会让这个 Application
+    # 黄一阵子,这是可以接受的。
+    #
+    # 同理也不要给 Pod 加 —— 试过,那等于用简化的 Lua 重写内置 Pod 判定,
+    # CrashLoopBackOff 会被误判成 Healthy。
     resource.customizations.health.Service: |
       hs = {}
       hs.status = "Healthy"
