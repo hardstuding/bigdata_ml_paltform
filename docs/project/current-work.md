@@ -171,6 +171,28 @@ Spark History 的 **SSO 配置**里也写死了 `keycloak.local-lite.test` —�
 **剩下三批**转成带验收条件的 backlog,见
 [`roadmap.md`](roadmap.md) 的 P1.5。
 
+### 2026-08-29 下半场:zhenghe 提的五点全部落地
+
+| 他提的 | 状态 |
+|---|---|
+| ③ notebook 连各工具怎么鉴权 | ✅ 实机验证:`current_user` 是登录用户、无 grant 的表被拒、**列级脱敏在 notebook 里生效**(修之前看到的是明文身份证号) |
+| ⑤ Flink/Kafka 怎么开发、门户上没有 | ✅ `streams/` 写几行 yaml + PyFlink 脚本;门户加「流作业」一栏 + Schema Registry 入口 |
+| ① Superset 权限 | ✅ 实机验证:走真实登录逻辑,`analyst001`→`Alpha/Gamma/sql_lab`,未分组→`Gamma`(**修之前所有人都是 Admin**) |
+| ② 门户设计 / logo | ✅ 11 个官方图标(CC0)内联,3 个自建工具回退首字母;卡片改成图标+文字两栏 |
+| ④ 内部包共享 | ✅ 实机验证端到端:`packages/` 下 push → 集群构建 wheel → 发 MinIO → pod 里**不加任何参数** `pip install platform-helpers` 装上并能用(ADR-083) |
+
+**ACR 也打通了**:同一个 3.44GB 的镜像,GHCR 上 `docker pull` 25 秒 0 字节,
+ACR 上 1 分 59 秒拉完。
+
+这一轮踩到并记进注释/文档的坑(都是"不报错但不生效"那一类):
+- Trino 的 `password.db` 是 subPath 挂载 → 新增服务账号后必须重启 coordinator,
+  否则 401,而 Secret 对、脚本说成功、Trino 不报错
+- Trino 的 impersonation **不是加 header**,是"认证用服务账号、会话 user 填被
+  代理的人" —— 按 header 写的第一版不生效而且不报错
+- S3 不会把目录 URL 解析成 `index.html` → PEP 503 索引要额外写一个带尾斜杠的键
+- 拉取凭据要挂到**每个** ServiceAccount,不只是 default(Flink/iam-sync 用自己的 SA)
+- 空的 `pyproject.toml` 不会构建失败,会静默产出一个 `0.0.0` 的包
+
 ### 云主机状态
 
 **运行中**(2026-08-28 22:56 开机)。08-29 02:00 前后因为我这边被用量限制
