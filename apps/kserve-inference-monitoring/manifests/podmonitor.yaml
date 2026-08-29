@@ -43,15 +43,29 @@ spec:
       # KServe 给 predictor pod 打的标准标签(实测确认过)
       component: predictor
   podMetricsEndpoints:
-    # **用 portNumber 而不是 port**:KServe 建出来的 predictor 容器
-    # 一个命名端口都没有(实测 `.spec.containers[].ports` 是 null),
-    # 写 `port: http` 会永远匹配不到。
-    # 也不要用 `targetPort` —— prometheus-operator v3.13 会打 warn:
-    # "'targetPort' is deprecated, use 'port' or 'portNumber' instead"。
-    - portNumber: 8082
-      path: /metrics
+    # **不指定 port / portNumber / targetPort,靠 relabeling 自己拼地址。**
+    #
+    # 2026-08-29 实测的完整过程,写下来免得下次又走一遍:
+    #   1. 按 KServe 文档写 `port: http` → 匹配不到,因为 predictor 容器
+    #      **一个命名端口都没有**(`.spec.containers[].ports` 是 null)。
+    #   2. 改 `targetPort: 8082` → operator 打 warn 说它已废弃。
+    #   3. 改 `portNumber: 8082` → 目标被**发现了但被丢弃**
+    #      (`/api/v1/targets` 的 droppedTargets 里能看到 10.42.0.186,
+    #      health 是 None)。原因:operator 为 portNumber 生成的是一条
+    #      `keep __meta_kubernetes_pod_container_port_number == 8082`,
+    #      而容器没声明端口,这个 meta 标签压根不存在,必然被丢。
+    #   4. 最后:不给端口字段,自己用 relabeling 把 pod IP + 8082 拼成
+    #      `__address__`。
+    #
+    # 另外注意 KServe 自己打的注解是 `prometheus.kserve.io/port: "8080"`
+    # ——**那个值对 MLServer 是错的**(它的 metrics 在 8082),所以这里
+    # 写死 8082,不去读那个注解。
+    - path: /metrics
       interval: 30s
       relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_ip]
+          targetLabel: __address__
+          replacement: "$1:8082"
         # 指标自带 model 标签,但把 InferenceService 名字也带上,方便和
         # 黄金链路看板、KServe 的其它对象对得上。
         - sourceLabels: [__meta_kubernetes_pod_label_serving_kserve_io_inferenceservice]
