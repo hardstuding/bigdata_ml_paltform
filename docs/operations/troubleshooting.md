@@ -127,6 +127,26 @@ fail-closed 的组件配好 rollout,这次真的兜住了。
 
 ### 各组件专属故障
 
+### 新增 Trino 服务账号后登录报 401 Invalid credentials
+
+**症状**:`scripts/00-generate-secrets.sh` 打印"已追加: trino/trino-service-account
+里的 xxx",Secret 里也确实有了,而用这个账号连 Trino 就是
+`401 Access Denied: Invalid credentials`。
+
+**原因**:`password.db` 是 **subPath 挂进 coordinator 的**,而 subPath 挂载的
+Secret/ConfigMap **Kubernetes 永远不会更新**(见下一条)。跑着的 Trino 里
+那个文件还是旧的。**从任何一层都看不出是"没生效"** —— Secret 对、脚本说
+成功了、Trino 也没报错,只有登录的那一刻失败。
+
+**处置**:重启 coordinator。`scripts/00` 现在会在新增过账号时自动做这件事,
+但手动加账号的话要自己来:
+
+```bash
+kubectl -n trino rollout restart deploy/trino-coordinator
+```
+
+**注意 Trino 启动要几分钟**(startupProbe 预算 610s),重启期间所有查询会断。
+
 ### 改了 DAG(或任何 subPath 挂载的 ConfigMap)之后不生效,而且一切显示正常
 
 **症状**:改完 DAG、push、ArgoCD 显示 Synced/Healthy、`kubectl get cm
