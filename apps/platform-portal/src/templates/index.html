@@ -226,7 +226,7 @@
         <tr><th>作业</th><th>状态</th><th>提交时间</th></tr>
         {% for j in jobs.rows %}
         <tr>
-          <td>{{ j.name }}</td>
+          <td><a href="{{ url_for('job_detail', name=j.name) }}">{{ j.name }}</a></td>
           {# 字段名必须和 my_jobs() 返回的一致。2026-08-29 之前这里写的是
              j.status / j.at,而后端给的是 phase / started —— Jinja 对未定义
              变量渲染成空字符串、**不报错**,所以页面上这两列一直是空白,

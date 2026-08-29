@@ -693,3 +693,177 @@ class TestPermApiClient:
             portal.my_permissions("li ming")
         assert captured["token"] == "tok"
         assert "li%20ming" in captured["url"]
+
+
+# ---------------------------------------------------------------------------
+# 作业详情页(roadmap P1.5「门户升级成角色工作台」的后半)
+#
+# 这一组测试里**最重要的是归属检查那几条**。门户加了 workflows 的
+# patch/create 和 pods/log 的读权限,而门户是所有登录用户都能打开的页面 ——
+# 挡住"操作别人作业"的唯一一道闸就在应用层。
+# ---------------------------------------------------------------------------
+def _wf(name="job-abc", owner="alice", phase="Failed", message="exit code 1"):
+    return {
+        "metadata": {"name": name, "labels": {"platform-sdk/submitted-by": owner}},
+        "spec": {
+            "arguments": {"parameters": [{"name": "date", "value": "2026-08-29"}]},
+            "serviceAccountName": "argo-workflow",
+            "templates": [{
+                "name": "main",
+                "metadata": {"labels": {"kueue.x-k8s.io/queue-name": "data-analysts"}},
+                "container": {"image": "local/platform-runtime:0.1.0",
+                              "command": ["python3", "/scripts/x.py"],
+                              "resources": {"requests": {"cpu": "500m"}}},
+            }],
+        },
+        "status": {
+            "phase": phase, "message": message,
+            "startedAt": "2026-08-29T01:00:00Z", "finishedAt": "2026-08-29T01:02:00Z",
+            "nodes": {
+                "n1": {"type": "DAG", "displayName": "job-abc", "phase": phase},
+                "n2": {"type": "Pod", "id": "job-abc-123", "displayName": "main",
+                       "phase": phase, "message": message,
+                       "startedAt": "2026-08-29T01:00:10Z"},
+            },
+        },
+    }
+
+
+class TestJobDetailOwnership:
+    def _get(self, path, user="alice", wf=None, exc=None):
+        api = MagicMock()
+        if exc:
+            api.get_namespaced_custom_object.side_effect = exc
+        else:
+            api.get_namespaced_custom_object.return_value = wf
+        with patch.object(portal, "_k8s", return_value=api):
+            portal.app.config["TESTING"] = True
+            return portal.app.test_client().get(path, headers={"X-Forwarded-User": user}), api
+
+    def test_自己的作业能打开(self):
+        resp, _ = self._get("/job/job-abc", "alice", _wf())
+        assert resp.status_code == 200
+
+    def test_别人的作业打不开(self):
+        resp, _ = self._get("/job/job-abc", "bob", _wf(owner="alice"))
+        assert resp.status_code == 404
+
+    def test_不存在和不是你的_给同一句话(self):
+        # 不区分这两种情况,免得拿这个接口去探测别人的作业名。
+        a, _ = self._get("/job/job-abc", "bob", _wf(owner="alice"))
+        b, _ = self._get("/job/nope", "bob", exc=RuntimeError("not found"))
+        assert a.get_data(as_text=True).count("不是你提交的") == 1
+        assert b.get_data(as_text=True).count("不是你提交的") == 1
+
+    def test_没识别出登录用户时不放行(self):
+        resp, _ = self._get("/job/job-abc", "", _wf())
+        assert resp.status_code == 404
+
+    def test_别人的日志读不到(self):
+        resp, _ = self._get("/job/job-abc/logs/job-abc-123", "bob", _wf(owner="alice"))
+        assert resp.status_code == 404
+
+    def test_不能拿日志接口读任意_pod(self):
+        # pod 名必须真的属于这个 workflow,否则这就是"读 argo 命名空间下
+        # 任意 pod 日志"的入口了。
+        resp, _ = self._get("/job/job-abc/logs/some-other-pod", "alice", _wf())
+        assert resp.status_code == 404
+
+
+class TestJobDetailContent:
+    def _html(self, wf):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = wf
+        with patch.object(portal, "_k8s", return_value=api):
+            portal.app.config["TESTING"] = True
+            r = portal.app.test_client().get("/job/job-abc",
+                                             headers={"X-Forwarded-User": "alice"})
+        return r.get_data(as_text=True)
+
+    def test_失败原因渲染出来了(self):
+        html = self._html(_wf(message="OOMKilled: container exceeded memory"))
+        assert "OOMKilled" in html
+
+    def test_镜像_资源_参数_队列都在页面上(self):
+        html = self._html(_wf())
+        assert "local/platform-runtime:0.1.0" in html
+        assert "500m" in html
+        assert "date = 2026-08-29" in html
+        assert "data-analysts" in html      # 队列标签在 template 上不在 workflow 上
+
+    def test_只列_pod_节点_不列编排节点(self):
+        # DAG/Steps 节点的失败信息是下面某个 Pod 的转述,列出来是同一件事看两遍
+        steps = portal._wf_steps(_wf())
+        assert [s["pod"] for s in steps] == ["job-abc-123"]
+
+    def test_跑着的作业才显示取消按钮(self):
+        assert "取消" in self._html(_wf(phase="Running", message=""))
+        assert "取消" not in self._html(_wf(phase="Succeeded", message=""))
+
+    def test_已结束的作业仍然能重跑(self):
+        assert "重跑" in self._html(_wf(phase="Succeeded", message=""))
+
+
+class TestJobActions:
+    def _post(self, path, user="alice", wf=None):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = wf if wf else _wf()
+        api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "job-xyz"}}
+        with patch.object(portal, "_k8s", return_value=api):
+            portal.app.config["TESTING"] = True
+            r = portal.app.test_client().post(path, headers={"X-Forwarded-User": user})
+        return r, api
+
+    def test_取消是打_shutdown_不是删除(self):
+        # 删掉会连带丢失这次运行的记录和日志,而取消的人经常正是要去查它。
+        resp, api = self._post("/job/job-abc/cancel", wf=_wf(phase="Running"))
+        assert resp.status_code == 302
+        api.delete_namespaced_custom_object.assert_not_called()
+        body = api.patch_namespaced_custom_object.call_args[0][-1]
+        assert body == {"spec": {"shutdown": "Terminate"}}
+
+    def test_不能取消别人的作业(self):
+        resp, api = self._post("/job/job-abc/cancel", "bob", _wf(owner="alice"))
+        assert resp.status_code == 404
+        api.patch_namespaced_custom_object.assert_not_called()
+
+    def test_不能重跑别人的作业(self):
+        resp, api = self._post("/job/job-abc/rerun", "bob", _wf(owner="alice"))
+        assert resp.status_code == 404
+        api.create_namespaced_custom_object.assert_not_called()
+
+    def test_重跑用_generateName_不自己拼名字(self):
+        _, api = self._post("/job/job-abc/rerun")
+        body = api.create_namespaced_custom_object.call_args[0][-1]
+        assert "generateName" in body["metadata"]
+        assert "name" not in body["metadata"]
+
+    def test_重跑出来的作业归当前用户(self):
+        # 否则它不会出现在他自己的列表里,也就没人能再管它。
+        _, api = self._post("/job/job-abc/rerun")
+        body = api.create_namespaced_custom_object.call_args[0][-1]
+        assert body["metadata"]["labels"]["platform-sdk/submitted-by"] == "alice"
+        assert body["metadata"]["labels"]["platform-portal/rerun-of"] == "job-abc"
+
+    def test_重跑不会把取消状态一起复制过去(self):
+        wf = _wf(phase="Failed")
+        wf["spec"]["shutdown"] = "Terminate"
+        _, api = self._post("/job/job-abc/rerun", wf=wf)
+        body = api.create_namespaced_custom_object.call_args[0][-1]
+        assert "shutdown" not in body["spec"]
+
+    def test_重跑不动原来那个(self):
+        _, api = self._post("/job/job-abc/rerun")
+        api.patch_namespaced_custom_object.assert_not_called()
+        api.delete_namespaced_custom_object.assert_not_called()
+
+    def test_k8s_报错时返回_500_而不是抛栈(self):
+        api = MagicMock()
+        api.get_namespaced_custom_object.return_value = _wf(phase="Running")
+        api.patch_namespaced_custom_object.side_effect = RuntimeError("boom")
+        with patch.object(portal, "_k8s", return_value=api):
+            portal.app.config["TESTING"] = True
+            r = portal.app.test_client().post("/job/job-abc/cancel",
+                                              headers={"X-Forwarded-User": "alice"})
+        assert r.status_code == 500 and "取消失败" in r.get_json()["error"]

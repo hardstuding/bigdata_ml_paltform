@@ -47,7 +47,7 @@ import urllib.parse
 import json
 
 import requests
-from flask import Flask, redirect, render_template, request
+from flask import Flask, abort, redirect, render_template, request, url_for
 
 import sqllab
 
@@ -478,6 +478,126 @@ def my_jobs(username, limit=8):
 
 ARGO_NAMESPACE = os.environ.get("PLATFORM_ARGO_NAMESPACE", "argo-workflows")
 
+# --------------------------------------------------------------- 作业详情
+#
+# roadmap P1.5:「点进某个作业能看日志、参数、镜像、资源、失败原因,并能
+# 取消和重跑」。
+#
+# **安全模型(这一段是这个功能能不能做的前提,不是补充说明)**:
+#
+# 门户是所有登录用户都能打开的页面,所以它 ServiceAccount 的权限,就是
+# "任何一个能登录的人间接能拿到的权限"上限。原来这份 RBAC 只有 get/list,
+# 注释里写着"这个页面上没有一个按钮会改集群状态"。加取消/重跑就打破了
+# 那句话,所以要用两层把范围收回来:
+#
+# 1. **RBAC 层给最窄的动词**:取消用 `patch`(设 spec.shutdown=Terminate),
+#    不是 `delete`;重跑用 `create`。没有 delete。
+# 2. **应用层按归属收口**:每个入口都先确认这个 workflow 的
+#    `platform-sdk/submitted-by` 标签等于当前登录用户,不是就 403。
+#    **日志也一样** —— 别人作业的日志里可能有他打印出来的敏感数据。
+#
+# 第 2 层成立的前提是 `X-Forwarded-User` 不可伪造:platform-portal 命名
+# 空间的 NetworkPolicy 只放行 oauth2-proxy 连 app 的 8080,集群里其它 pod
+# 连不上,伪造不了这个头。**哪天那条 NetworkPolicy 被去掉,这个功能的
+# 安全性就没了** —— 所以这句话写在这里,不是写在某个 ADR 里。
+
+
+def _own_workflow(name, username):
+    """取一个 workflow,并确认它确实是这个人提交的。
+
+    返回 (对象, 错误信息)。拿不到或者不是他的,一律返回同一句话 ——
+    不区分"不存在"和"不是你的",避免拿这个接口去探测别人的作业名。
+    """
+    if not username:
+        return None, "还没识别出当前登录用户"
+    try:
+        wf = _k8s().get_namespaced_custom_object(
+            "argoproj.io", "v1alpha1", ARGO_NAMESPACE, "workflows", name)
+    except Exception:
+        return None, "找不到这个作业,或者它不是你提交的"
+    if wf.get("metadata", {}).get("labels", {}).get("platform-sdk/submitted-by") != username:
+        return None, "找不到这个作业,或者它不是你提交的"
+    return wf, None
+
+
+def _wf_steps(wf):
+    """把 workflow 的节点树摊平成"每一步怎么样了"。
+
+    只保留 Pod 类型的节点 —— DAG/Steps 那些是编排容器,它们的失败信息
+    是下面某个 Pod 的失败信息的转述,列出来只会让人看到两遍同一件事。
+    """
+    nodes = (wf.get("status") or {}).get("nodes") or {}
+    steps = []
+    for node in nodes.values():
+        if node.get("type") != "Pod":
+            continue
+        steps.append({
+            "name": node.get("displayName") or node.get("name", ""),
+            "pod": node.get("id", ""),
+            "phase": node.get("phase", ""),
+            "message": node.get("message", ""),
+            "started": node.get("startedAt", ""),
+            "finished": node.get("finishedAt", ""),
+        })
+    steps.sort(key=lambda x: x["started"] or "")
+    return steps
+
+
+def _wf_spec_summary(wf):
+    """镜像 / 资源 / 参数 —— 排查"为什么这次和上次不一样"最常要的三样。"""
+    spec = wf.get("spec") or {}
+    templates = spec.get("templates") or []
+    images, resources, commands = [], [], []
+    for t in templates:
+        c = t.get("container") or t.get("script")
+        if not c:
+            continue
+        if c.get("image"):
+            images.append(c["image"])
+        if c.get("resources"):
+            resources.append(c["resources"])
+        cmd = " ".join((c.get("command") or []) + (c.get("args") or []))
+        if cmd:
+            commands.append(cmd)
+    params = [(p.get("name"), p.get("value"))
+              for p in ((spec.get("arguments") or {}).get("parameters") or [])]
+    return {
+        "images": images,
+        "resources": resources,
+        "commands": commands,
+        "params": params,
+        "service_account": spec.get("serviceAccountName", ""),
+        # 队列标签打在 Pod 上不是 Workflow 上(Kueue 的要求,踩过),所以
+        # 这里要去 template 的 metadata 里找,不是 workflow 的 labels。
+        "queue": next((t.get("metadata", {}).get("labels", {}).get("kueue.x-k8s.io/queue-name")
+                       for t in templates
+                       if t.get("metadata", {}).get("labels", {}).get("kueue.x-k8s.io/queue-name")), ""),
+    }
+
+
+def _pod_logs(pod_name, tail=200):
+    """取一个 pod 的日志。
+
+    Argo 的 pod 里有 main / wait / init 几个容器,只要 main —— wait 容器
+    打的是 executor 自己的事,对排查业务失败没用,而且量大。
+    """
+    if not pod_name:
+        return "(这一步还没有产生 Pod)"
+    try:
+        from kubernetes import client as k8s_client
+        # 先走一次 _k8s():kube 配置是全局的,CoreV1Api() 自己不会去加载它。
+        # 现在的调用链上 _own_workflow() 已经先调过了,但**依赖调用顺序是
+        # 脆的** —— 以后有人换个地方调这个函数就会拿到一个没配置的客户端,
+        # 而报错信息会指向认证失败,和真正的原因差着十万八千里。
+        _k8s()
+        return k8s_client.CoreV1Api().read_namespaced_pod_log(
+            pod_name, ARGO_NAMESPACE, container="main", tail_lines=tail) or "(没有输出)"
+    except Exception as exc:
+        # Pod 被回收之后日志就没了,这是正常的,不是错误 —— 说清楚是哪种
+        # 情况,比抛一个 ApiException 给用户看有用。
+        return f"(取不到日志:{type(exc).__name__}。Pod 可能已经被清理了)"
+
+
 
 # --------------------------------------------------------------- 黄金链路
 #
@@ -633,6 +753,98 @@ def query_table(catalog, schema, table):
         app.logger.warning("SQL Lab 深链降级:%s", exc)
         path = "/sqllab/"
     return redirect(_SQLLAB_BASE + path)
+
+
+@app.route("/job/<name>")
+def job_detail(name):
+    username = request.headers.get("X-Forwarded-User", "")
+    wf, err = _own_workflow(name, username)
+    if err:
+        return render_template("job.html", username=username, name=name, error=err), 404
+    status = wf.get("status") or {}
+    return render_template(
+        "job.html", username=username, name=name, error=None,
+        phase=status.get("phase", "Pending"),
+        # 失败原因摆在最上面。这是打开这个页面最常见的理由,不该让人先
+        # 滚过一屏参数才看到。
+        message=status.get("message", ""),
+        started=status.get("startedAt", ""),
+        finished=status.get("finishedAt", ""),
+        steps=_wf_steps(wf),
+        spec=_wf_spec_summary(wf),
+        can_cancel=status.get("phase") in ("Running", "Pending"),
+    )
+
+
+@app.route("/job/<name>/logs/<pod>")
+def job_logs(name, pod):
+    """某一步的日志。**归属检查和详情页是同一套** —— 别人作业的日志里
+    可能有他打印出来的敏感数据,不能因为"只是日志"就放宽。"""
+    username = request.headers.get("X-Forwarded-User", "")
+    wf, err = _own_workflow(name, username)
+    if err:
+        abort(404)
+    # pod 名必须真的属于这个 workflow,不能拿这个接口当"读任意 pod 日志"用。
+    if pod not in {s["pod"] for s in _wf_steps(wf)}:
+        abort(404)
+    return app.response_class(_pod_logs(pod), mimetype="text/plain; charset=utf-8")
+
+
+@app.route("/job/<name>/cancel", methods=["POST"])
+def job_cancel(name):
+    """取消:给 workflow 打 `spec.shutdown=Terminate`,**不是删掉它**。
+
+    删掉会连带丢失这次运行的全部记录(哪一步失败的、日志、参数),而人
+    要取消一个作业的时候,恰恰经常是因为它出了问题、接下来要查。
+    """
+    username = request.headers.get("X-Forwarded-User", "")
+    wf, err = _own_workflow(name, username)
+    if err:
+        abort(404)
+    try:
+        _k8s().patch_namespaced_custom_object(
+            "argoproj.io", "v1alpha1", ARGO_NAMESPACE, "workflows", name,
+            {"spec": {"shutdown": "Terminate"}})
+    except Exception as exc:
+        return {"error": f"取消失败:{type(exc).__name__}"}, 500
+    return redirect(url_for("job_detail", name=name))
+
+
+@app.route("/job/<name>/rerun", methods=["POST"])
+def job_rerun(name):
+    """重跑:照原样提交一个新的 workflow,**不动原来那个**。
+
+    用 generateName 让 API server 分配新名字,不自己拼 —— 拼名字要处理
+    重名、长度上限(k8s 63 字符)这些,而 generateName 本来就是干这个的。
+    """
+    username = request.headers.get("X-Forwarded-User", "")
+    wf, err = _own_workflow(name, username)
+    if err:
+        abort(404)
+    spec = wf.get("spec") or {}
+    spec.pop("shutdown", None)      # 原来那个可能是被取消的,别把取消状态也复制过去
+    body = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Workflow",
+        "metadata": {
+            "generateName": f"{name.rsplit('-', 1)[0]}-",
+            "namespace": ARGO_NAMESPACE,
+            "labels": {
+                **(wf.get("metadata", {}).get("labels") or {}),
+                # 重跑出来的作业仍然算这个人的,否则它不会出现在他自己的
+                # 列表里,也就没人能再管它。
+                "platform-sdk/submitted-by": username,
+                "platform-portal/rerun-of": name[:63],
+            },
+        },
+        "spec": spec,
+    }
+    try:
+        created = _k8s().create_namespaced_custom_object(
+            "argoproj.io", "v1alpha1", ARGO_NAMESPACE, "workflows", body)
+    except Exception as exc:
+        return {"error": f"重跑失败:{type(exc).__name__}"}, 500
+    return redirect(url_for("job_detail", name=created["metadata"]["name"]))
 
 
 @app.route("/healthz")

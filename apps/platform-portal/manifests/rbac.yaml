@@ -1,11 +1,33 @@
-# 门户读集群数据用的只读权限(ADR-067)。
+# 门户访问集群资源用的权限(ADR-067)。
 #
-# **只给 get/list/watch,而且只给这两类资源**——门户是个所有人登录后都能
-# 打开的页面,它的 ServiceAccount 权限就是"任何一个能登录的人间接能拿到
-# 的权限"上限。多给一点都是在扩大攻击面,给写权限更是没有任何理由:
-# 这个页面上没有一个按钮会改集群状态。
+# **原则**:门户是个所有人登录后都能打开的页面,它 ServiceAccount 的权限
+# 就是"任何一个能登录的人间接能拿到的权限"上限。多给一点都是在扩大攻击面。
 #
-# ClusterQueue 是集群级资源,只能用 ClusterRole;Workflow 限定在
+# **2026-08-29 这份从纯只读变成了带两个写动词**,因为作业详情页要支持取消
+# 和重跑(roadmap P1.5)。原来这里写着"给写权限没有任何理由:这个页面上
+# 没有一个按钮会改集群状态"——那句话现在不成立了,所以下面把新的边界写清楚,
+# 而不是留着一句和现实相反的注释。
+#
+# 新增的三样,每一样都挑了最窄的:
+#
+# 1. `workflows: patch` —— 取消。取消的实现是打 `spec.shutdown=Terminate`,
+#    **不是 delete**。给 delete 意味着任何登录用户间接能删掉 workflow(连带
+#    丢失这次运行的全部记录),而 patch 只能改字段。
+# 2. `workflows: create` —— 重跑。这是这份 RBAC 里最大的一个授权,它的边界
+#    完全靠应用层:门户只允许重跑**你自己提交的**作业,而且新作业的
+#    `submitted-by` 标签强制写成当前登录用户。
+# 3. `pods: get/list` + `pods/log: get` —— 看某一步的日志。**日志的归属检查
+#    和详情页一样严** :别人作业的日志里可能有他打印出来的敏感数据,不能
+#    因为"只是日志"就放宽。
+#
+# **这三条的安全性都建立在 `X-Forwarded-User` 不可伪造上**,而那靠的是
+# platform-portal 命名空间的 NetworkPolicy 只放行 oauth2-proxy 连 app 的
+# 8080(platform/network-policies/manifests/platform-portal.yaml)。
+# **那条 NetworkPolicy 被去掉的话,这里就是个越权入口。**
+#
+# 仍然没给的:`delete`(任何资源)、其它命名空间的任何东西、集群级的写。
+#
+# ClusterQueue 是集群级资源,只能用 ClusterRole;Workflow/Pod 限定在
 # argo-workflows 这一个命名空间里,用 Role 就够,不要图省事写成 ClusterRole。
 apiVersion: v1
 kind: ServiceAccount
@@ -38,22 +60,30 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: platform-portal-read-workflows
+  name: platform-portal-workflows
   namespace: argo-workflows
 rules:
   - apiGroups: ["argoproj.io"]
     resources: ["workflows"]
+    # patch 用于取消(spec.shutdown=Terminate),create 用于重跑。
+    # **没有 delete**,理由见文件顶部。
+    verbs: ["get", "list", "patch", "create"]
+  - apiGroups: [""]
+    resources: ["pods"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: platform-portal-read-workflows
+  name: platform-portal-workflows
   namespace: argo-workflows
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: platform-portal-read-workflows
+  name: platform-portal-workflows
 subjects:
   - kind: ServiceAccount
     name: platform-portal
