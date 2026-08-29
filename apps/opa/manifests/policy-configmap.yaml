@@ -101,7 +101,17 @@ data:
     # 构造的是 `OpaQueryInputResource.builder().user(new TrinoUser(userName))`,
     # 而 TrinoUser 是 `record TrinoUser(String user, ...)` —— 所以是
     # input.action.resource.user.user。
-    impersonation_allowed_accounts := {"superset_service"}
+    # notebook_service(2026-08-29 加):JupyterHub 里的 notebook 和 SDK 提交的
+    # 作业连 Trino 用它。**它刻意不在上面的 service_accounts 里** —— 那个集合
+    # 是无条件放行,而 notebook 恰恰是真实用户在查真实数据的地方,必须走和
+    # Superset 一样的代理路径,按登录用户算权限。
+    #
+    # 修的是一个真实的洞:在这之前 SDK 文档让人 export 一个服务账号
+    # (platform_sdk_demo_service,它在 service_accounts 里),于是
+    # **行列级权限对 notebook 完全不生效** —— 分析师在 Superset 里被脱敏的
+    # 手机号,在 notebook 里能直接查出明文。Superset 那条路 2026-08-26 就用
+    # impersonation 修好了(ADR-074),SDK 这条路一直没修。
+    impersonation_allowed_accounts := {"superset_service", "notebook_service"}
 
     allow if {
     	input.action.operation == "ImpersonateUser"

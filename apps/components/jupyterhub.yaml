@@ -214,6 +214,25 @@ spec:
           # ConfigMap/Workflow,见
           # apps/platform-image/manifests/submitter-rbac.yaml。
           serviceAccountName: platform-sdk-submitter
+          # notebook 里 `platform_sdk.query()` 要用的 Trino 凭据。
+          # **2026-08-29 之前这里什么都没有**,notebook 里查数直接抛
+          # MissingCredential;文档让人自己 export 一个服务账号,而那个账号
+          # 在 OPA 里无条件放行,等于「要么用不了,要么用了就越权」。
+          #
+          # 现在注入的是 notebook_service —— 它**只有代理权限,自己什么都
+          # 查不了**。SDK 会自动带上 JupyterHub 注入的 JUPYTERHUB_USER 作为
+          # 代理目标,所以权限按登录用户算,和 Superset 走同一条路(ADR-074)。
+          extraEnv:
+            - name: PLATFORM_TRINO_USER
+              valueFrom:
+                secretKeyRef: {name: platform-job-credentials, key: PLATFORM_TRINO_USER}
+            - name: PLATFORM_TRINO_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: platform-job-credentials, key: PLATFORM_TRINO_PASSWORD}
+            - name: PLATFORM_TRINO_HOST
+              value: trino.trino.svc.cluster.local
+            - name: PLATFORM_TRINO_PORT
+              value: "8443"
           memory:
             # 这两个字段最终传进 KubeSpawner 自己的 mem_guarantee/mem_limit
             # traitlet(ByteSpecification),只认 K/M/G/T(十进制)后缀,不认

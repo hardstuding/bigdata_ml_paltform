@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from . import config
@@ -20,11 +21,33 @@ from . import config
 # ------------------------------------------------------------------ Trino
 
 
+def acting_user() -> str | None:
+    """当前这段代码是"代表谁"在跑 —— 拿不到就返回 None。
+
+    **为什么需要这个概念**:SDK 连 Trino 用的是**服务账号**,而服务账号在
+    OPA 策略里是无条件放行的(见 apps/opa/manifests/policy-configmap.yaml)。
+    如果就这么查下去,行列级权限对 notebook 完全不生效 —— 分析师在 Superset
+    里被脱敏的手机号,在 notebook 里能直接查出明文。Superset 那条路
+    2026-08-26 就用 impersonation 修好了(ADR-074),SDK 这条路一直没修。
+
+    取值优先级:
+      1. `PLATFORM_ACTING_USER` —— 显式指定,给"我知道自己在代表谁"的场景
+         (比如一个服务代表某个用户跑批)。
+      2. `JUPYTERHUB_USER` —— JupyterHub 给每个 notebook pod 自动注入的标准
+         变量,值就是登录用户名。**这是 notebook 场景不用任何配置就能生效
+         的关键**。
+    两个都没有(比如定时作业)就返回 None,连接退回"以服务账号身份查"——
+    那种场景本来就没有"当前用户"这个概念。
+    """
+    return os.environ.get("PLATFORM_ACTING_USER") or os.environ.get("JUPYTERHUB_USER") or None
+
+
 def trino_connection(
     catalog: str | None = None,
     schema: str | None = None,
     user: str | None = None,
     password: str | None = None,
+    act_as: str | None = None,
 ):
     """建一个 Trino 连接(DBAPI 连接对象)。
 
@@ -52,6 +75,16 @@ def trino_connection(
         "trino-service-account 这个 Secret 里。",
     )
 
+    # 身份代理:让 Trino 把这次查询当成 `acting` 这个人发起的,权限也按他算。
+    # 用的是 Trino 原生的 `X-Trino-Authorization-User` 头,和 Superset 走的是
+    # 同一条路(ADR-074)。服务账号必须在 OPA 的 impersonation_allowed_accounts
+    # 里,否则 Trino 直接拒绝——**这是有意的**:能代理别人是一项特权,不该
+    # 因为某个账号"是服务账号"就自动拥有。
+    headers = {}
+    acting = act_as or acting_user()
+    if acting and acting != user:
+        headers["X-Trino-Authorization-User"] = acting
+
     return connect(
         host=config.trino_host(),
         port=config.trino_port(),
@@ -61,16 +94,18 @@ def trino_connection(
         http_scheme=config.trino_scheme(),
         auth=BasicAuthentication(user, password),
         verify=config.trino_verify(),
+        http_headers=headers or None,
     )
 
 
-def query(sql: str, catalog: str | None = None, schema: str | None = None):
+def query(sql: str, catalog: str | None = None, schema: str | None = None,
+          act_as: str | None = None):
     """跑一条 SQL,尽量返回 pandas DataFrame,没装 pandas 就返回 (列名, 行) 元组。
 
     不硬依赖 pandas 是有意的:调度任务里跑一条 DDL/INSERT 不该被迫装 pandas。
     交互式场景基本都有 pandas(统一镜像里带了),会走 DataFrame 这条路径。
     """
-    with trino_connection(catalog=catalog, schema=schema) as conn:
+    with trino_connection(catalog=catalog, schema=schema, act_as=act_as) as conn:
         cursor = conn.cursor()
         cursor.execute(sql)
         rows = cursor.fetchall()

@@ -46,6 +46,14 @@ PAIRS = [
     # 用 query 不用 table""ttl 为什么给这么大"这类只有当时那个人知道的东西。
     ("apps/feast/manifests/feature-repo-configmap.yaml", "definitions.py", "scripts/feast_feature_repo/definitions.py"),
     ("apps/argo-workflows-training-image/manifests/feast-feature-repo-configmap.yaml", "definitions.py", "scripts/feast_feature_repo/definitions.py"),
+    # 2026-08-29 补:OPA 的 Rego 策略也是两份拷贝(`apps/opa/policy/trino.rego`
+    # 是源、有单元测试跟着;`apps/opa/manifests/policy-configmap.yaml` 是
+    # 集群上真正加载的那份),此前**完全靠人记得同步,没有任何检查**。
+    # 当天就撞到了:给 impersonation 加 notebook_service 时只改了 ConfigMap,
+    # 源文件没动——而**测试跑的是源文件**,于是"测试全绿"和"集群上的策略
+    # 变了"同时成立,两边说的却不是一件事。
+    # 这是 CLAUDE.md「已知差距」里"源码和 ConfigMap 靠人工同步"那条的又一例。
+    ("apps/opa/manifests/policy-configmap.yaml", "trino.rego", "apps/opa/policy/trino.rego"),
 ]
 
 
@@ -121,7 +129,9 @@ def find_unregistered() -> list[str]:
             if not isinstance(d, dict) or d.get("kind") != "ConfigMap":
                 continue
             for key in (d.get("data") or {}):
-                if not key.endswith(".py"):
+                # 不只是 .py:Rego 策略同样是"两份拷贝、改一份不报错"的形态,
+                # 而它管的是**谁能看到哪张表**,漂移的后果比脚本更严重。
+                if not key.endswith((".py", ".rego")):
                     continue
                 rel = str(f.relative_to(REPO))
                 if (rel, key) in INLINE_ONLY:

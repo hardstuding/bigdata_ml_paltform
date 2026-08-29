@@ -463,18 +463,39 @@ copy_secret trino platform-sdk-demo trino-service-account
 #
 # 用 platform_sdk_demo_service 这个账号(它已经有 demo 表的 grant),
 # 建在 argo-workflows 命名空间——作业 pod 起在那里。
-echo "==> 建作业运行时的 Trino 凭据(argo-workflows/platform-job-credentials)"
-ensure_trino_service_account platform_sdk_demo_service
+# **用 notebook_service 而不是 platform_sdk_demo_service**:后者在 OPA 的
+# service_accounts 里(无条件放行),用它等于让作业绕开所有行列级权限。
+# notebook_service 只在 impersonation_allowed_accounts 里 —— 它必须代表某个
+# 真实用户才能查数据,自己什么都查不了。
+echo "==> 建作业/notebook 运行时的 Trino 凭据"
+ensure_trino_service_account notebook_service
 ensure_ns argo-workflows
 if kubectl -n argo-workflows get secret platform-job-credentials >/dev/null 2>&1; then
   echo "已存在,跳过: argo-workflows/platform-job-credentials"
 else
   JOB_TRINO_PW="$(kubectl -n trino get secret trino-service-account \
-    -o jsonpath='{.data.password-platform_sdk_demo_service}' | base64 -d)"
+    -o jsonpath='{.data.password-notebook_service}' | base64 -d)"
   kubectl -n argo-workflows create secret generic platform-job-credentials \
-    --from-literal=PLATFORM_TRINO_USER=platform_sdk_demo_service \
+    --from-literal=PLATFORM_TRINO_USER=notebook_service \
     --from-literal=PLATFORM_TRINO_PASSWORD="$JOB_TRINO_PW" \
     && echo "已创建: argo-workflows/platform-job-credentials"
+fi
+
+# notebook 也要有同一份凭据。**这是"在 notebook 里 query() 开箱即用"的前提**
+# ——2026-08-29 之前 JupyterHub 只往 notebook pod 注入了 PLATFORM_GROUPS,
+# 一个 Trino 账号都没有,`platform_sdk.query()` 直接抛 MissingCredential。
+# 文档里让人自己 export 一个服务账号,而那个账号是无条件放行的,等于
+# "要么用不了,要么用了就越权"。
+ensure_ns jupyterhub
+if kubectl -n jupyterhub get secret platform-job-credentials >/dev/null 2>&1; then
+  echo "已存在,跳过: jupyterhub/platform-job-credentials"
+else
+  NB_PW="$(kubectl -n trino get secret trino-service-account \
+    -o jsonpath='{.data.password-notebook_service}' | base64 -d)"
+  kubectl -n jupyterhub create secret generic platform-job-credentials \
+    --from-literal=PLATFORM_TRINO_USER=notebook_service \
+    --from-literal=PLATFORM_TRINO_PASSWORD="$NB_PW" \
+    && echo "已创建: jupyterhub/platform-job-credentials"
 fi
 
 # 黄金链路探针(ADR-079)用的 Trino 账号。**刻意不加进 OPA 的

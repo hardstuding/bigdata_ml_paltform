@@ -217,3 +217,51 @@ test_impersonated_user_still_gets_masked if {
 	}
 	mask.expression != ""
 }
+
+# ---- notebook_service 的代理权限(2026-08-29 加)----
+#
+# 这几条锁住的是一个真实的洞:在这之前 SDK 让人用 platform_sdk_demo_service
+# 连 Trino,而那个账号在 service_accounts 里(无条件放行),等于**行列级
+# 权限对 notebook 完全不生效**。现在换成 notebook_service —— 它只能代理,
+# 自己什么都查不了。
+#
+# **最重要的是下面第二条**:写错了的后果不是报错,是安静地放行。
+
+test_notebook_service_can_impersonate_real_user if {
+	trino.allow with input as {
+		"context": {"identity": {"user": "notebook_service", "groups": []}},
+		"action": {
+			"operation": "ImpersonateUser",
+			"resource": {"user": {"user": "analyst001"}},
+		},
+	}
+}
+
+test_notebook_service_cannot_select_as_itself if {
+	# 它**不在** service_accounts 里,所以没有"服务账号无条件放行"这条兜底。
+	# 这条如果挂了,说明有人把 notebook_service 加进了 service_accounts,
+	# 那个洞就又回来了。
+	not trino.allow with input as {
+		"context": {"identity": {"user": "notebook_service", "groups": []}},
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {
+				"catalogName": "iceberg",
+				"schemaName": "demo",
+				"tableName": "orders",
+				"columns": ["order_id"],
+			}},
+		},
+	}
+}
+
+test_unlisted_account_cannot_impersonate if {
+	# 能代理别人是一项特权,不该因为"是个服务账号"就自动拥有。
+	not trino.allow with input as {
+		"context": {"identity": {"user": "dbt_demo_service", "groups": []}},
+		"action": {
+			"operation": "ImpersonateUser",
+			"resource": {"user": {"user": "analyst001"}},
+		},
+	}
+}
