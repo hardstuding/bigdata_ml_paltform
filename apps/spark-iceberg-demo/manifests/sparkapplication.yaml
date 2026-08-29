@@ -40,7 +40,7 @@ spec:
   # hadoop-aws/aws-sdk 三个 jar 已经在构建期打进 $SPARK_HOME/jars/,不再靠
   # spark.jars.packages 在运行时拉(那条路在这台云主机上会卡死,见
   # apps/spark-iceberg-image/Dockerfile 里的完整说明和实测数据)。
-  image: ghcr.io/hardstuding/bigdata_ml_paltform/spark-iceberg:3a01421f1383c9028ed8fb6754f244c7680b49b5
+  image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/spark-iceberg:97301dd24915009cd6cd77bb62af9eb931d026cf
   imagePullPolicy: IfNotPresent
   mainApplicationFile: local:///opt/spark-demo/spark_iceberg_demo.py
   sparkVersion: "4.1.3"

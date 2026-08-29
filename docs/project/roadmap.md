@@ -550,10 +550,25 @@ GitHub Pages 巨型 index.yaml 的 Application,一旦需要真正重新同步
 - 同一时间小镜像(platform-portal,约 100MB)拉得下来——不是 GHCR 挂了,
   是大 blob 过不去
 
-最后是用 `scripts/38-ship-image-to-cloud.sh` 一个一个搬 tar 过去的(本机
-crane 拉 4 分钟,rsync 上传约 5 MB/s)。**这个办法能用但不可持续**:每次
-改镜像都要人在场手工搬,和"一键部署"是直接冲突的。方案 1(阿里云 ACR)
-需要用户提供凭据,这是现在真正的阻塞点。
+**2026-08-29 已解决**:CI 同时推 GHCR 和阿里云 ACR(个人版,杭州),集群
+侧配 `acr-pull` 凭据并把清单里的自建镜像地址切到 ACR。实测对比同一个
+3.44GB 的 spark-iceberg 镜像:
+
+| 源 | 结果 |
+|---|---|
+| GHCR | `docker pull` **25 秒 0 字节**,kubelet 拉取超时被打断 |
+| ACR | **1 分 59 秒拉完**(1.39GB 压缩后) |
+
+小镜像(platform-portal,60MB)从 ACR 是 7.5 秒。
+
+踩到的两件事记在 `docs/operations/image-registry.md`:buildx 默认推的
+provenance 证明清单用 `application/vnd.oci.empty.v1+json`,ACR 个人版不认
+(`denied: unknown manifest class`),要 `provenance: false`;个人版一个账号
+只有一个实例、地域跟着实例走,跨地域就走不了 VPC 内网(但境内到境内仍然
+远快于跨境)。
+
+`scripts/38-ship-image-to-cloud.sh` 那条手工搬 tar 的路留着当兜底,不再是
+日常路径。
 
 ### 2.5 扩大 CI
 

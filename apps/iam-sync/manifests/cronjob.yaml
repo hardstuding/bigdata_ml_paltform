@@ -109,7 +109,7 @@ spec:
               # `kubectl version --client`/`python3 -c "import yaml"`
               # 三个工具都确认能用,还没在真实集群里跑过一次(下次开云
               # 主机时应该验证 CronJob 真的能触发、Job 能 Complete)。
-              image: ghcr.io/hardstuding/bigdata_ml_paltform/iam-sync@sha256:fb9ffde1ae04ca954339f3fb942070899d466a19a266a471d663de23f8c84467
+              image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/iam-sync:97301dd24915009cd6cd77bb62af9eb931d026cf
               command:
                 - sh
                 - -c

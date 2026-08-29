@@ -76,7 +76,7 @@ spec:
           # 单架构 digest 那次),这次多架构重新构建后的 digest 还没有
           # 单独在云上重新验证,理论上内容一致(同一份 Dockerfile/源码),
           # 下次开云主机时确认一下 ArgoCD 同步后 Pod 状态。
-          image: ghcr.io/hardstuding/bigdata_ml_paltform/permission-request-app@sha256:082546c2e65e6352bee968710dfe95bd296a23bdd1b8802fc02f9a502e685818
+          image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/permission-request-app:97301dd24915009cd6cd77bb62af9eb931d026cf
           env:
             - name: DB_PATH
               value: /data/requests.db

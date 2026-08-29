@@ -54,7 +54,7 @@ spec:
     spec:
       containers:
         - name: history-server
-          image: ghcr.io/hardstuding/bigdata_ml_paltform/spark-iceberg:3a01421f1383c9028ed8fb6754f244c7680b49b5
+          image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/spark-iceberg:97301dd24915009cd6cd77bb62af9eb931d026cf
           command:
             - /opt/spark/bin/spark-class
             - org.apache.spark.deploy.history.HistoryServer

@@ -61,7 +61,7 @@ spec:
         parameters:
           - name: script
       container:
-        image: "ghcr.io/hardstuding/bigdata_ml_paltform/argo-workflows-training:3a01421f1383c9028ed8fb6754f244c7680b49b5"
+        image: "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/argo-workflows-training:97301dd24915009cd6cd77bb62af9eb931d026cf"
         imagePullPolicy: IfNotPresent
         command: ["python3"]
         args: ["/scripts/{{inputs.parameters.script}}"]

@@ -40,7 +40,7 @@ GENERATED_HEADER = (
 # Flink 镜像。和 apps/flink-audit-sink 用的是同一个 —— 里面已经打好
 # iceberg-flink-runtime / flink-connector-kafka / hadoop-aws(见
 # apps/flink-iceberg-image/Dockerfile),脚本不用自己拉 jar。
-FLINK_IMAGE = ("ghcr.io/hardstuding/bigdata_ml_paltform/flink-iceberg:"
+FLINK_IMAGE = ("crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/flink-iceberg:"
                "3a01421f1383c9028ed8fb6754f244c7680b49b5")
 # PyFlink 的 jar 名字带版本号,Flink 1.16 起模块坐标从 flink-python_2.12
 # 改成不带 Scala 后缀的 flink-python(查过 Maven Central 版本列表确认)。

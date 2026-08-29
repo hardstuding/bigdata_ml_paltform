@@ -77,11 +77,11 @@ spec:
         # 里同一个 SHA tag 只会被这一次构建推送一次,不会被覆盖,和 digest
         # 引用的不可变性是一回事,只是表达方式不同。
         image:
-          repository: ghcr.io/hardstuding/bigdata_ml_paltform/superset
+          repository: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/superset
           # ee61412 = 除了 pybabel compile,还生成了 React 前端的 language pack 那版
           # (ADR-077)。用 commit SHA 做 tag,
           # 因为 chart 的 image 是 repository:tag 字符串拼接,塞不进 digest。
-          tag: ee61412c2ee6572deea7ee205bdf8a080f41c626
+          tag: 97301dd24915009cd6cd77bb62af9eb931d026cf
           pullPolicy: IfNotPresent
         postgresql:
           enabled: false
