@@ -307,7 +307,20 @@ with DAG(
     dag_id="seatunnel_device_events",
     description="SeaTunnel FakeSource -> Iceberg(demo.device_events),验证 Phase 2 数据工程主线",
     start_date=datetime(2026, 8, 1),
-    schedule=None,  # 手动触发,不是常驻定时任务——这是验证链路用的 demo
+    # 2026-08-29:从 schedule=None 改成定时。
+    #
+    # **为什么反悔**:这些 DAG 原本刻意设成手动触发("验证链路用的 demo,
+    # 不是常驻定时任务")。但 08-29 做 dbt 血缘时撞到后果——dbt 产物是
+    # `dbt_demo` 产出的,而它从 08-22 推倒重建之后就没人跑过,
+    # `s3://lakehouse/dbt-artifacts/` **压根是空的**,血缘无从谈起。
+    # 特征物化同理:不跑,Redis 里的在线特征就一直是旧的。
+    # 一个"什么都要人手动点一下才会发生"的平台,谈不上生产可用。
+    #
+    # **为什么是这个时间**:三条 DAG 错开,不要在同一时刻和开机时几十个
+    # 组件抢资源(Trino 就因为开机满载被 startupProbe 杀过,见
+    # apps/components/trino.yaml)。`catchup=False` 保持不变——这台机器
+    # 大部分时间关机,补跑历史区间没有意义,开机后跑最近这一次就够了。
+    schedule="0 3 * * *",  # 每天 03:00 UTC,和前两条错开
     catchup=False,
     tags=["demo", "phase2", "seatunnel", "iceberg"],
 ) as dag:

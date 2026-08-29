@@ -189,7 +189,20 @@ with DAG(
     # 演示/验证阶段手动触发为主,先不定时跑——demo 数据是固定的历史订单,
     # 定时物化不会产生新增量,意义不大。真的接入会持续变化的数据源之后,
     # 再按需要的新鲜度设置 schedule(比如每小时)。
-    schedule=None,
+    # 2026-08-29:从 schedule=None 改成定时。
+    #
+    # **为什么反悔**:这些 DAG 原本刻意设成手动触发("验证链路用的 demo,
+    # 不是常驻定时任务")。但 08-29 做 dbt 血缘时撞到后果——dbt 产物是
+    # `dbt_demo` 产出的,而它从 08-22 推倒重建之后就没人跑过,
+    # `s3://lakehouse/dbt-artifacts/` **压根是空的**,血缘无从谈起。
+    # 特征物化同理:不跑,Redis 里的在线特征就一直是旧的。
+    # 一个"什么都要人手动点一下才会发生"的平台,谈不上生产可用。
+    #
+    # **为什么是这个时间**:三条 DAG 错开,不要在同一时刻和开机时几十个
+    # 组件抢资源(Trino 就因为开机满载被 startupProbe 杀过,见
+    # apps/components/trino.yaml)。`catchup=False` 保持不变——这台机器
+    # 大部分时间关机,补跑历史区间没有意义,开机后跑最近这一次就够了。
+    schedule="0 2 * * *",  # 每天 02:00 UTC,和 dbt 错开一小时
     catchup=False,
     tags=["demo", "phase3.5", "feast", "feature-store"],
 ) as dag:
