@@ -63,6 +63,15 @@ spec:
     - path: /metrics
       interval: 30s
       relabelings:
+        # **只留 kserve-container 这一个容器。** role: pod 的服务发现是
+        # **按容器**产生目标的,init 容器 `storage-initializer` 也会算一个;
+        # 两个容器都没声明端口,relabeling 又都拼成同一个 pod IP:8082,
+        # 结果是同一个地址被抓两遍(实测:activeTargets 里两条,instance
+        # 完全相同,只有 container 标签不同)。重复抓不只是浪费,还会产生
+        # 时间戳冲突的样本。
+        - sourceLabels: [__meta_kubernetes_pod_container_name]
+          regex: kserve-container
+          action: keep
         - sourceLabels: [__meta_kubernetes_pod_ip]
           targetLabel: __address__
           replacement: "$1:8082"
