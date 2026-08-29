@@ -17,7 +17,7 @@ lupa = pytest.importorskip("lupa", reason="没装 lupa 就跳过(pip install lup
 
 VALUES = Path(__file__).resolve().parent.parent / "platform" / "bootstrap" / "argocd-values.yaml"
 KEY = "resource.customizations.health.batch_Job"
-POD_KEY = "resource.customizations.health.Pod"
+CRONJOB_KEY = "resource.customizations.health.batch_CronJob"
 
 
 def _make_runner(key):
@@ -47,8 +47,8 @@ def run_health():
 
 
 @pytest.fixture(scope="module")
-def run_pod_health():
-    return _make_runner(POD_KEY)
+def run_cronjob_health():
+    return _make_runner(CRONJOB_KEY)
 
 
 PROBE = {"platform/golden-path": "probe"}
@@ -91,40 +91,27 @@ def test_探针_job_刚创建也是健康(run_health):
     assert run_health(_job(PROBE))["status"] == "Healthy"
 
 
-# ---- Pod 那条(2026-08-29 加)----
-# 为什么需要它:只给 Job 加 Lua 不够——ArgoCD 还会把 Job 底下的 **Pod**
-# 算进应用健康,失败 Pod 走内置判定直接 Degraded,ADR-079 想解决的
-# "常年黄灯"当时只解决了一半。这组测试锁住"探针 Pod 不变红、普通 Pod
-# 该红还得红"这个边界。
+
+# ---- CronJob 那条(2026-08-29 加)----
+# 这才是真正让 Application 变黄的对象。实测:golden-path-probes 变 Degraded
+# 既不是 Job 也不是 Pod 冒上来的,是 CronJob —— ArgoCD 对 batch/CronJob 有
+# 内置健康判定,某条探针最近一次失败就会让对应 CronJob 变 Degraded。把失败
+# 的 Job 和 Pod 全删干净都没用,手工跑一次成功的探针之后才回到 Healthy。
 
 
-def _pod(labels=None, phase=None, message=None):
-    st = {}
-    if phase:
-        st["phase"] = phase
-    if message:
-        st["message"] = message
-    return {"metadata": {"labels": labels} if labels else {}, "status": st}
+def _cronjob(labels=None):
+    return {"metadata": {"labels": labels} if labels else {}, "status": {}}
 
 
-def test_探针pod失败不让应用变红(run_pod_health):
-    assert run_pod_health(_pod(PROBE, "Failed", "探针没通"))["status"] == "Healthy"
+def test_探针cronjob永远健康(run_cronjob_health):
+    assert run_cronjob_health(_cronjob(PROBE))["status"] == "Healthy"
 
 
-def test_普通pod失败仍然变红(run_pod_health):
-    # **这条最重要**:写错了等于把 ArgoCD 判断"部署好没好"的主要依据关掉。
-    hs = run_pod_health(_pod({"app": "trino"}, "Failed", "OOMKilled"))
-    assert hs["status"] == "Degraded"
-    assert hs["message"] == "OOMKilled"
+def test_普通cronjob交回内置判定(run_cronjob_health):
+    # 返回空 status 是 ArgoCD 约定的"我不管,你按默认来"。**不能在这里
+    # 自己实现一套** —— 内置的比几行 Lua 周全。
+    assert run_cronjob_health(_cronjob({"app": "postgres-backup"}))["status"] == ""
 
 
-def test_普通pod运行中是健康(run_pod_health):
-    assert run_pod_health(_pod({"app": "trino"}, "Running"))["status"] == "Healthy"
-
-
-def test_普通pod正常结束是健康(run_pod_health):
-    assert run_pod_health(_pod({"app": "db-init"}, "Succeeded"))["status"] == "Healthy"
-
-
-def test_pod没有labels和phase也不能崩(run_pod_health):
-    assert run_pod_health(_pod())["status"] == "Progressing"
+def test_cronjob没有labels也不能崩(run_cronjob_health):
+    assert run_cronjob_health(_cronjob())["status"] == ""

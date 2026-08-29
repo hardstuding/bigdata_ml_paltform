@@ -239,41 +239,32 @@ configs:
       hs.status = "Progressing"
       hs.message = "Job 还在跑"
       return hs
-    # **Job 那条不够** —— 2026-08-29 实测:`batch/Job` 的 Lua 确实生效了,
-    # 但 ArgoCD 还会把 Job 底下的 **Pod** 一起算进应用健康,失败 Pod 走内置
-    # 的 Pod 判定直接 Degraded,`golden-path-probes` 这个 Application 照样
-    # 是黄的。也就是说 ADR-079 想解决的"探针失败不该表现成部署有问题"当时
-    # 只解决了一半,而且看不出来——因为 `.status.resources` 里只有 CronJob,
-    # 没有 Pod,查半天找不到是谁 Degraded。
+    # **Job 那条其实挂错了对象** —— 2026-08-29 实测查清楚的:
+    # `golden-path-probes` 这个 Application 变 Degraded,既不是 Job 也不是
+    # Pod 冒上来的,是 **CronJob** ——ArgoCD 对 `batch/CronJob` 有内置健康
+    # 判定,某条探针最近一次失败就会让对应的 CronJob 变 Degraded。
     #
-    # 同样只对带 `platform/golden-path` 标签的 Pod 特殊处理。**不要写成对
-    # 所有 Pod 生效**——那等于把 ArgoCD 判断"部署好没好"的主要依据整个关掉。
-    resource.customizations.health.Pod: |
+    # 实证过程:`argocd app get golden-path-probes` 显示 6 个 CronJob 里
+    # `goldenpath-inference` 和 `goldenpath-model` 是 Degraded(它们上一次
+    # 的 Job 在 Trino 那次故障期间失败了),手工触发一次成功的探针之后,
+    # 整个 Application 立刻回到 Healthy。而这之前把失败的 Job 和 Pod 全删
+    # 干净都没用——所以 ADR-079 只给 `batch/Job` 加 Lua 是解决不了问题的,
+    # 它当时"看起来解决了"只是因为那阵子探针一直是通的。
+    #
+    # **注意这里没有再给 Pod 加自定义健康检查**:试过,但那等于用一段简化
+    # 的 Lua 重写 ArgoCD 内置的 Pod 判定,CrashLoopBackOff 这类会被误判成
+    # Healthy——为了修一个黄灯,把整个平台"部署好没好"的主要依据变钝,
+    # 不划算。
+    resource.customizations.health.batch_CronJob: |
       hs = {}
       if obj.metadata ~= nil and obj.metadata.labels ~= nil and obj.metadata.labels["platform/golden-path"] ~= nil then
         hs.status = "Healthy"
-        hs.message = "黄金链路探针的 Pod:失败信息走告警和看板,不进部署状态(ADR-079)"
+        hs.message = "黄金链路探针:失败信息走告警和看板,不进部署状态(ADR-079)"
         return hs
       end
-      if obj.status ~= nil and obj.status.phase ~= nil then
-        if obj.status.phase == "Succeeded" then
-          hs.status = "Healthy"
-          hs.message = "Pod 正常结束"
-          return hs
-        end
-        if obj.status.phase == "Failed" then
-          hs.status = "Degraded"
-          hs.message = obj.status.message or "Pod 失败"
-          return hs
-        end
-        if obj.status.phase == "Running" then
-          hs.status = "Healthy"
-          hs.message = "Running"
-          return hs
-        end
-      end
-      hs.status = "Progressing"
-      hs.message = "Pod 还没到终态"
+      -- 其余 CronJob 一律交回 ArgoCD 内置判定。返回空 status 让它走默认路径,
+      -- 不要在这里自己实现一套——内置的比这几行考虑得周全。
+      hs.status = ""
       return hs
     resource.customizations.health.Service: |
       hs = {}
