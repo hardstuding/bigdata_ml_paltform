@@ -43,10 +43,12 @@ spec:
       # KServe 给 predictor pod 打的标准标签(实测确认过)
       component: predictor
   podMetricsEndpoints:
-    # **用 targetPort 而不是 port**:KServe 建出来的 predictor 容器
+    # **用 portNumber 而不是 port**:KServe 建出来的 predictor 容器
     # 一个命名端口都没有(实测 `.spec.containers[].ports` 是 null),
     # 写 `port: http` 会永远匹配不到。
-    - targetPort: 8082
+    # 也不要用 `targetPort` —— prometheus-operator v3.13 会打 warn:
+    # "'targetPort' is deprecated, use 'port' or 'portNumber' instead"。
+    - portNumber: 8082
       path: /metrics
       interval: 30s
       relabelings:
