@@ -317,7 +317,8 @@ class TestGroupRequestFlow:
         assert resp.status_code == 403
 
 
-def _create_table_request(username, table_fqn, security_level, table_owner, monkeypatch, client, reason=""):
+def _create_table_request(username, table_fqn, security_level, table_owner, monkeypatch, client,
+                          reason="日常报表口径核对,需要看这张表的明细"):
     """走真实的 /table-access/request 路由建一条申请(不是直接调内部
     函数),顺带验证这条路由本身的行为。lookup_table_governance 被
     monkeypatch 掉——这个函数本来是查 OpenMetadata 的,测试环境没有真的
@@ -425,7 +426,11 @@ class TestTableAccessApprovalFlow:
         request_id = row["id"]
         steps = self._steps(request_id)
 
-        resp = client.post(f"/table-access/step/{steps['manager1']['id']}/reject", headers=auth("manager1"))
+        # 2026-08-29 起拒绝必须带原因(没有原因的拒绝对申请人是一堵墙),
+        # 所以这里补上 comment;不带 comment 的分支由 TestRejectRequiresReason 覆盖。
+        resp = client.post(f"/table-access/step/{steps['manager1']['id']}/reject",
+                           data={"comment": "这张表含客户手机号,该场景用脱敏视图即可"},
+                           headers=auth("manager1"))
         assert resp.status_code == 302
         final = self._request_status(request_id)
         assert final["status"] == "rejected"
@@ -1066,3 +1071,215 @@ class TestReadOnlyApi:
         conn.commit(); conn.close()
         assert client.get("/api/my-approvals?user=director",
                           headers=self._hdr()).get_json()["pending"] == []
+
+
+# ---------------------------------------------------------------------------
+# 审批体验(roadmap P1.5「审批体验」)
+# ---------------------------------------------------------------------------
+class TestChineseStatusLabels:
+    def test_最容易误读的那个状态有中文说明(self):
+        # approved_pending_apply 字面像"批了",实际是"批了但权限还没生效",
+        # 这两件事对使用者的意义完全不同。
+        label = perm.status_label("approved_pending_apply")
+        assert "已通过" in label and "尚未生效" in label
+
+    def test_认不出来的状态原样返回_不吞信息(self):
+        assert perm.status_label("some_new_state") == "some_new_state"
+
+    def test_页面上印的是中文不是英文枚举(self, client, monkeypatch):
+        _create_table_request("engineer1", "iceberg.demo.orders", 1, "manager1",
+                              monkeypatch, client)
+        html = client.get("/", headers=auth("engineer1")).get_data(as_text=True)
+        assert "等待审批" in html
+        # 表格里那一栏不该再直接印英文枚举
+        assert ">pending<" not in html
+
+
+class TestLocalTimeRendering:
+    def test_时间戳带上_time_标签交给浏览器换算时区(self, client, monkeypatch):
+        _create_table_request("engineer1", "iceberg.demo.orders", 1, "manager1",
+                              monkeypatch, client)
+        html = client.get("/", headers=auth("engineer1")).get_data(as_text=True)
+        # 服务端不知道用户在哪个时区,所以只输出 UTC 值 + 标记,由页面 JS 换算
+        assert '<time class="lt"' in html
+        assert "toLocaleString" in html
+
+    def test_空时间不渲染出空标签(self):
+        assert perm._localtime_html("") == ""
+        assert perm._localtime_html(None) == ""
+
+
+class TestReasonRequiredBySecurityLevel:
+    def test_低敏表不强制写理由(self, client, monkeypatch):
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (1, "manager1"))
+        resp = client.post("/table-access/request",
+                           data={"table_fqn": "iceberg.demo.orders", "reason": ""},
+                           headers=auth("engineer1"))
+        assert resp.status_code == 302
+
+    def test_二级起必须写理由_而且不能敷衍(self, client, monkeypatch):
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (2, "manager1"))
+        resp = client.post("/table-access/request",
+                           data={"table_fqn": "iceberg.demo.users", "reason": "查数"},
+                           headers=auth("engineer1"))
+        assert resp.status_code == 400
+        assert "必须写明申请理由" in resp.get_json()["error"]
+
+    def test_写够了就放行(self, client, monkeypatch):
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (2, "manager1"))
+        resp = client.post("/table-access/request",
+                           data={"table_fqn": "iceberg.demo.users",
+                                 "reason": "对账需要核对用户表的注册时间字段"},
+                           headers=auth("engineer1"))
+        assert resp.status_code == 302
+
+    def test_批量申请里只挡住需要补理由的_其余照常提交(self, client, monkeypatch):
+        # 勾了一堆表,因为其中几张要理由就全部作废,是很气人的设计。
+        levels = {"iceberg.demo.a": 1, "iceberg.demo.b": 3}
+        monkeypatch.setattr(perm, "lookup_table_governance",
+                            lambda fqn: (levels[fqn], "manager1"))
+        resp = client.post("/table-access/request-batch",
+                           data={"table_fqn": ["iceberg.demo.a", "iceberg.demo.b"],
+                                 "reason": ""},
+                           headers=auth("engineer1"))
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert len(body["details"]) == 1 and "iceberg.demo.b" in body["details"][0]
+        # a 那条已经建出来了
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        got = conn.execute("SELECT table_fqn FROM table_access_requests").fetchall()
+        conn.close()
+        assert [g[0] for g in got] == ["iceberg.demo.a"]
+
+
+class TestRejectRequiresReason:
+    def _step(self, client, monkeypatch):
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "manager1",
+                                    monkeypatch, client)
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        step = conn.execute(
+            "SELECT * FROM approval_steps WHERE request_id=? AND approver_username='manager1'",
+            (row["id"],)).fetchone()
+        conn.close()
+        return step
+
+    def test_不写原因的拒绝被服务端挡住(self, client, monkeypatch):
+        # 前端有 required,但直接 POST 能绕过去,所以服务端必须也校验。
+        step = self._step(client, monkeypatch)
+        resp = client.post(f"/table-access/step/{step['id']}/reject",
+                           headers=auth("manager1"))
+        assert resp.status_code == 400
+        assert "必须填写原因" in resp.get_json()["error"]
+
+    def test_被挡住时状态没有被改坏(self, client, monkeypatch):
+        step = self._step(client, monkeypatch)
+        client.post(f"/table-access/step/{step['id']}/reject", headers=auth("manager1"))
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        after = conn.execute("SELECT * FROM approval_steps WHERE id=?", (step["id"],)).fetchone()
+        conn.close()
+        assert after["status"] == "pending"
+
+    def test_原因会被存下来并能给申请人看到(self, client, monkeypatch):
+        step = self._step(client, monkeypatch)
+        client.post(f"/table-access/step/{step['id']}/reject",
+                    data={"comment": "这个场景用脱敏视图就够了,不需要明细表"},
+                    headers=auth("manager1"))
+        html = client.get("/", headers=auth("engineer1")).get_data(as_text=True)
+        assert "脱敏视图" in html          # 申请人真的看得到,不只是存进库
+
+    def test_批准的意见是可选的(self, client, monkeypatch):
+        step = self._step(client, monkeypatch)
+        resp = client.post(f"/table-access/step/{step['id']}/approve",
+                           headers=auth("manager1"))
+        assert resp.status_code == 302
+
+
+class TestNudge:
+    def _pending(self, client, monkeypatch):
+        return _create_table_request("engineer1", "iceberg.demo.orders", 1, "manager1",
+                                     monkeypatch, client)
+
+    def test_只能催自己的申请(self, client, monkeypatch):
+        row = self._pending(client, monkeypatch)
+        resp = client.post(f"/table-access/request/{row['id']}/nudge",
+                           headers=auth("manager1"))
+        assert resp.status_code == 403
+
+    def test_催办发出通知并记时间(self, client, monkeypatch):
+        row = self._pending(client, monkeypatch)
+        sent = []
+        monkeypatch.setattr(perm, "notify_wecom", lambda t: sent.append(t))
+        resp = client.post(f"/table-access/request/{row['id']}/nudge",
+                           headers=auth("engineer1"))
+        assert resp.status_code == 302
+        assert len(sent) == 1
+        assert "催办" in sent[0] and "manager1" in sent[0]
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        after = conn.execute("SELECT * FROM table_access_requests WHERE id=?",
+                             (row["id"],)).fetchone()
+        conn.close()
+        assert after["last_nudged_at"] is not None
+
+    def test_冷却期内再催被挡住(self, client, monkeypatch):
+        # 一个能无限催的按钮,最后的结果是所有通知都被审批人无视。
+        row = self._pending(client, monkeypatch)
+        monkeypatch.setattr(perm, "notify_wecom", lambda t: None)
+        client.post(f"/table-access/request/{row['id']}/nudge", headers=auth("engineer1"))
+        resp = client.post(f"/table-access/request/{row['id']}/nudge", headers=auth("engineer1"))
+        assert resp.status_code == 429
+        assert "只能催办一次" in resp.get_json()["error"]
+
+    def test_已经有结果的申请不能催(self, client, monkeypatch):
+        row = self._pending(client, monkeypatch)
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.execute("UPDATE table_access_requests SET status='approved' WHERE id=?",
+                     (row["id"],))
+        conn.commit(); conn.close()
+        resp = client.post(f"/table-access/request/{row['id']}/nudge", headers=auth("engineer1"))
+        assert resp.status_code == 400
+
+
+class TestExpiryWarning:
+    """到期前提醒 —— 权限悄悄失效是这套机制最伤人的地方。"""
+
+    def _run(self, client, monkeypatch, local_git_repo, rows):
+        import subprocess as sp
+        # 往裸仓库里放一份 grants.csv
+        work = tempfile.mkdtemp()
+        sp.run(["git", "clone", local_git_repo, work], check=True, capture_output=True)
+        csv_path = Path(work) / "platform" / "iam" / "table-access-grants.csv"
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        header = "username,table_fqn,security_level,granted_at,expires_at"
+        csv_path.write_text("\n".join([header] + rows) + "\n")
+        sp.run(["git", "-C", work, "add", "-A"], check=True)
+        sp.run(["git", "-C", work, "-c", "user.email=t@t", "-c", "user.name=t",
+                "commit", "-m", "seed"], check=True, capture_output=True)
+        sp.run(["git", "-C", work, "push", "origin", "HEAD"], check=True, capture_output=True)
+
+        sent = []
+        monkeypatch.setattr(perm, "notify_wecom", lambda t: sent.append(t))
+        monkeypatch.setattr(perm, "INTERNAL_TOKEN", "tok")
+        resp = client.post("/internal/reclaim-expired", headers={"X-Internal-Token": "tok"})
+        return resp.get_json(), sent
+
+    def test_快到期的会被提醒_但不会被回收(self, client, monkeypatch, local_git_repo):
+        from datetime import datetime, timedelta, timezone
+        soon = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+        body, sent = self._run(client, monkeypatch, local_git_repo,
+                               [f"alice,iceberg.demo.orders,1,2026-01-01T00:00:00+00:00,{soon}"])
+        assert body["reclaimed"] == 0
+        assert body["warned"] == 1
+        # 剩 2.99 天显示"2 天"——`.days` 向下取整,是有意的:对截止期限
+        # 来说少说比多说安全,说"3 天"会让人第 3 天才动手,那时已经过期了。
+        assert "即将到期" in sent[0] and "2 天" in sent[0]
+
+    def test_还早的不提醒(self, client, monkeypatch, local_git_repo):
+        from datetime import datetime, timedelta, timezone
+        later = (datetime.now(timezone.utc) + timedelta(days=100)).isoformat()
+        body, sent = self._run(client, monkeypatch, local_git_repo,
+                               [f"alice,iceberg.demo.orders,1,2026-01-01T00:00:00+00:00,{later}"])
+        assert body["warned"] == 0
+        assert sent == []

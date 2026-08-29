@@ -47,6 +47,22 @@ from flask import Flask, abort, redirect, render_template_string, request, url_f
 
 app = Flask(__name__)
 
+# 模板里用 {{ x|zh }} 把状态英文枚举转成中文;{{ t|localtime }} 把 UTC
+# 时间戳转成一个带 data-utc 的 <time>,由页面底部那段 JS 按**浏览器自己的
+# 时区**渲染 —— 服务端不知道用户在哪个时区,猜不如让浏览器算。
+app.jinja_env.filters["zh"] = lambda v: status_label(v)
+
+
+def _localtime_html(value):
+    if not value:
+        return ""
+    from markupsafe import Markup, escape
+    return Markup(f'<time class="lt" datetime="{escape(value)}">{escape(value)}</time>')
+
+
+app.jinja_env.filters["localtime"] = _localtime_html
+
+
 DB_PATH = os.environ.get("DB_PATH", "/data/requests.db")
 REPO_URL = os.environ.get("REPO_URL", "https://github.com/hardstuding/bigdata_ml_paltform.git")
 GIT_TOKEN = os.environ.get("GIT_TOKEN", "")
@@ -102,12 +118,44 @@ EXTERNAL_OA_CALLBACK_TOKEN = os.environ.get("EXTERNAL_OA_CALLBACK_TOKEN", "")
 # 瞎猜)。
 GRANT_EXPIRY_DAYS = int(os.environ.get("GRANT_EXPIRY_DAYS", "180"))
 
+# 到期前多少天开始提醒。7 天是按"够走一轮审批链"选的:L3 的链有四级,
+# 提前一天说等于没说。
+EXPIRY_WARN_DAYS = int(os.environ.get("EXPIRY_WARN_DAYS", "7"))
+
 APPROVAL_ROLE_LABELS = {
     "manager": "直属上级",
     "manager_manager": "上级的上级",
     "table_owner": "表负责人",
     "designated_admin": "指定管理员(L3)",
 }
+
+# 状态在页面上一直是直接印英文枚举值(`pending` / `approved_pending_apply`)。
+# 对申请人来说 `approved_pending_apply` 尤其糟:它字面像"批了",实际是
+# "批了但还没落到 git,权限还没生效",这两件事对使用者的意义完全不同。
+STATUS_LABELS = {
+    "pending": "等待审批",
+    "pending_external": "已转外部 OA,等待回复",
+    "approved": "已通过,权限已生效",
+    "approved_pending_apply": "已通过,但授权还没写进 git(权限尚未生效)",
+    "applied": "已生效",
+    "rejected": "已拒绝",
+    "escalated": "已超时升级",
+    "skipped": "无需审批(前序已拒绝)",
+}
+
+
+def status_label(value):
+    """英文枚举 → 中文。认不出来的原样返回,不吞掉信息。"""
+    return STATUS_LABELS.get(value, value)
+
+
+# 申请理由按安全等级决定是否必填。
+#
+# **为什么不是一律必填**:1 级表(公开/低敏)强制写理由,只会逼出"查数"
+# 这种没有信息量的占位文字,反而稀释了真正需要理由的场合。2 级起必填,
+# 因为那时审批人真的要靠理由做判断 —— 他批的是"这个人为什么需要看这些"。
+REASON_REQUIRED_FROM_LEVEL = int(os.environ.get("REASON_REQUIRED_FROM_LEVEL", "2"))
+MIN_REASON_LENGTH = 10
 
 
 def init_db():
@@ -166,6 +214,18 @@ def init_db():
     # 是幂等的)。
     for stmt in (
         "ALTER TABLE approval_steps ADD COLUMN activated_at TEXT",
+        # 审批意见。批准时可选,**拒绝时必填** —— 一条没有理由的拒绝,
+        # 申请人除了重新申请一遍之外无事可做,而重新申请多半会被再拒一次。
+        "ALTER TABLE approval_steps ADD COLUMN comment TEXT",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+    for stmt in (
+        # 催办:记上次催的时间,用来限频。不限频的话催办按钮就是一个
+        # 给审批人刷屏的工具,最后的结果是所有通知都被无视。
+        "ALTER TABLE table_access_requests ADD COLUMN last_nudged_at TEXT",
     ):
         try:
             conn.execute(stmt)
@@ -653,8 +713,8 @@ TEMPLATE = """
 {% for r in my_requests %}
 <tr>
 <td>{{ r.id }}</td><td>{{ r.group_name }}</td><td>{{ r.reason or '' }}</td>
-<td class="status-{{ r.status }}">{{ r.status }}{% if r.note %}<br><span class="hint">{{ r.note }}</span>{% endif %}</td>
-<td>{{ r.requested_at }}</td>
+<td class="status-{{ r.status }}">{{ r.status|zh }}{% if r.note %}<br><span class="hint">{{ r.note }}</span>{% endif %}</td>
+<td>{{ r.requested_at|localtime }}</td>
 </tr>
 {% else %}
 <tr><td colspan="5" class="hint">还没提交过申请</td></tr>
@@ -667,7 +727,7 @@ TEMPLATE = """
 <tr><th>ID</th><th>申请人</th><th>申请的组</th><th>理由</th><th>时间</th><th>操作</th></tr>
 {% for r in pending %}
 <tr>
-<td>{{ r.id }}</td><td>{{ r.username }}</td><td>{{ r.group_name }}</td><td>{{ r.reason or '' }}</td><td>{{ r.requested_at }}</td>
+<td>{{ r.id }}</td><td>{{ r.username }}</td><td>{{ r.group_name }}</td><td>{{ r.reason or '' }}</td><td>{{ r.requested_at|localtime }}</td>
 <td>
 <form class="inline" method="post" action="{{ url_for('approve', req_id=r.id) }}"><button type="submit">批准</button></form>
 <form class="inline" method="post" action="{{ url_for('reject', req_id=r.id) }}"><button type="submit">拒绝</button></form>
@@ -694,17 +754,23 @@ TEMPLATE = """
 {% for r in my_table_requests %}
 <tr>
 <td>{{ r.id }}</td><td>{{ r.table_fqn }}</td><td>L{{ r.security_level }}</td>
-<td class="status-{{ r.status }}">{{ r.status }}{% if r.note %}<br><span class="hint">{{ r.note }}</span>{% endif %}</td>
+<td class="status-{{ r.status }}">{{ r.status|zh }}{% if r.note %}<br><span class="hint">{{ r.note }}</span>{% endif %}</td>
 <td>
 <ol class="steps">
 {% for s in r.steps %}
 <li class="{{ 'done' if s.status == 'approved' else ('rejected' if s.status == 'rejected' else (s.status if s.status in ('escalated', 'skipped') else ('waiting' if s.step_order == r.current_step else 'future'))) }}">
-第{{ s.step_order }}级 · {{ role_labels[s.approver_role] }}({{ s.approver_username }}):{{ s.status }}
+第{{ s.step_order }}级 · {{ role_labels[s.approver_role] }}({{ s.approver_username }}):{{ s.status|zh }}{% if s.comment %}<br><span class="hint">意见:{{ s.comment }}</span>{% endif %}
 </li>
 {% endfor %}
 </ol>
 </td>
-<td>{{ r.requested_at }}</td>
+<td>{{ r.requested_at|localtime }}
+{% if r.status == 'pending' %}
+<form class="inline" method="post" action="{{ url_for('nudge_request', req_id=r.id) }}">
+  <button type="submit" title="提醒当前这一级的审批人。{{ nudge_cooldown }} 小时内只能催一次">催办</button>
+</form>
+{% endif %}
+</td>
 </tr>
 {% else %}
 <tr><td colspan="6" class="hint">还没提交过表访问申请</td></tr>
@@ -719,14 +785,64 @@ TEMPLATE = """
 <td>{{ s.request_id }}</td><td>{{ s.username }}</td><td>{{ s.table_fqn }}</td><td>L{{ s.security_level }}</td>
 <td>{{ role_labels[s.approver_role] }}</td><td>{{ s.reason or '' }}</td>
 <td>
-<form class="inline" method="post" action="{{ url_for('approve_table_step', step_id=s.step_id) }}"><button type="submit">批准</button></form>
-<form class="inline" method="post" action="{{ url_for('reject_table_step', step_id=s.step_id) }}"><button type="submit">拒绝</button></form>
+{# 意见框两个按钮共用一个 —— 批准时可选,拒绝时必填(required 只是前端
+   提示,服务端也校验,直接 POST 绕不过去)。 #}
+<form class="inline" method="post" action="{{ url_for('approve_table_step', step_id=s.step_id) }}">
+  <input type="hidden" name="comment" class="linked-comment" value="">
+  <button type="submit">批准</button>
+</form>
+<form class="inline reject-form" method="post" action="{{ url_for('reject_table_step', step_id=s.step_id) }}">
+  <input type="text" name="comment" class="comment-box" placeholder="意见(拒绝必填)" maxlength="500">
+  <button type="submit">拒绝</button>
+</form>
 </td>
 </tr>
 {% else %}
 <tr><td colspan="7" class="hint">没有轮到你审批的表访问申请</td></tr>
 {% endfor %}
 </table>
+<script>
+// 时间一律按**浏览器自己的时区**渲染。服务端存的是 UTC ISO 串,直接印出来
+// 对人是不可读的("2026-08-29T11:48:52+00:00" 要心算时差),而服务端并不
+// 知道用户在哪个时区 —— 猜不如让浏览器算。
+// 超过 3 天的显示绝对时间(那时"几天前"已经没有意义),3 天内显示相对时间
+// ("2 小时前"),因为审批场景里"等了多久"比"哪一天提的"更要紧。
+// 审批意见:一个输入框服务两个按钮。批准时把它带上(可选),拒绝时
+// 空着就先在前端拦一下 —— 服务端同样会拒(400),这里只是省一次往返。
+document.querySelectorAll('tr').forEach(function (tr) {
+  var box = tr.querySelector('.comment-box');
+  if (!box) { return; }
+  var hidden = tr.querySelector('.linked-comment');
+  if (hidden) { box.addEventListener('input', function () { hidden.value = box.value; }); }
+  var rejectForm = tr.querySelector('.reject-form');
+  if (rejectForm) {
+    rejectForm.addEventListener('submit', function (e) {
+      if (!box.value.trim()) {
+        e.preventDefault();
+        box.focus();
+        box.placeholder = '拒绝必须写原因——申请人要知道该怎么改';
+      }
+    });
+  }
+});
+document.querySelectorAll('time.lt').forEach(function (el) {
+  var raw = el.getAttribute('datetime');
+  var d = new Date(raw);
+  if (isNaN(d)) { return; }   // 解析不了就保持原样,不要变成 "Invalid Date"
+  var diffMin = (Date.now() - d.getTime()) / 60000;
+  var abs = d.toLocaleString();
+  if (diffMin >= 0 && diffMin < 60 * 24 * 3) {
+    var rel = diffMin < 1 ? '刚刚'
+            : diffMin < 60 ? Math.floor(diffMin) + ' 分钟前'
+            : diffMin < 60 * 24 ? Math.floor(diffMin / 60) + ' 小时前'
+            : Math.floor(diffMin / 1440) + ' 天前';
+    el.textContent = rel;
+  } else {
+    el.textContent = abs;
+  }
+  el.title = abs + '(UTC ' + raw + ')';   // 悬停仍能看到精确值
+});
+</script>
 </body>
 </html>
 """
@@ -764,6 +880,30 @@ Trino 的访问控制(OPA)读的就是这份数据 —— <b>批准之后才查�
 不是只做个记录。行级过滤和列级脱敏也按同一份授权生效。</p>
 <p>授权同步有几十秒延迟(每 5 分钟一轮同步,通常更快)。刚批完立刻查还被拒的话,
 稍等一下再试。</p>
+<script>
+// 时间一律按**浏览器自己的时区**渲染。服务端存的是 UTC ISO 串,直接印出来
+// 对人是不可读的("2026-08-29T11:48:52+00:00" 要心算时差),而服务端并不
+// 知道用户在哪个时区 —— 猜不如让浏览器算。
+// 超过 3 天的显示绝对时间(那时"几天前"已经没有意义),3 天内显示相对时间
+// ("2 小时前"),因为审批场景里"等了多久"比"哪一天提的"更要紧。
+document.querySelectorAll('time.lt').forEach(function (el) {
+  var raw = el.getAttribute('datetime');
+  var d = new Date(raw);
+  if (isNaN(d)) { return; }   // 解析不了就保持原样,不要变成 "Invalid Date"
+  var diffMin = (Date.now() - d.getTime()) / 60000;
+  var abs = d.toLocaleString();
+  if (diffMin >= 0 && diffMin < 60 * 24 * 3) {
+    var rel = diffMin < 1 ? '刚刚'
+            : diffMin < 60 ? Math.floor(diffMin) + ' 分钟前'
+            : diffMin < 60 * 24 ? Math.floor(diffMin / 60) + ' 小时前'
+            : Math.floor(diffMin / 1440) + ' 天前';
+    el.textContent = rel;
+  } else {
+    el.textContent = abs;
+  }
+  el.title = abs + '(UTC ' + raw + ')';   // 悬停仍能看到精确值
+});
+</script>
 </body></html>
 """
 
@@ -795,9 +935,9 @@ AUDIT_TEMPLATE = """
 {% for r in table_requests %}
 <tr>
 <td>{{ r.id }}</td><td>{{ r.username }}</td><td>{{ r.table_fqn }}</td><td>L{{ r.security_level }}</td>
-<td><span class="badge badge-{{ r.status }}">{{ r.status }}</span>{% if r.note %}<br><span class="hint">{{ r.note }}</span>{% endif %}</td>
-<td>{{ r.requested_at }}</td>
-<td>{% for s in r.steps %}第{{ s.step_order }}级 {{ role_labels[s.approver_role] }}({{ s.approver_username }}):<span class="badge badge-{{ s.status }}">{{ s.status }}</span>{% if s.decided_at %} @{{ s.decided_at }}{% endif %}<br>{% endfor %}</td>
+<td><span class="badge badge-{{ r.status }}">{{ r.status|zh }}</span>{% if r.note %}<br><span class="hint">{{ r.note }}</span>{% endif %}</td>
+<td>{{ r.requested_at|localtime }}</td>
+<td>{% for s in r.steps %}第{{ s.step_order }}级 {{ role_labels[s.approver_role] }}({{ s.approver_username }}):<span class="badge badge-{{ s.status }}">{{ s.status|zh }}</span>{% if s.decided_at %} @{{ s.decided_at|localtime }}{% endif %}{% if s.comment %} <span class="hint">「{{ s.comment }}」</span>{% endif %}<br>{% endfor %}</td>
 </tr>
 {% else %}
 <tr><td colspan="7" class="hint">没有记录</td></tr>
@@ -810,13 +950,37 @@ AUDIT_TEMPLATE = """
 {% for r in group_requests %}
 <tr>
 <td>{{ r.id }}</td><td>{{ r.username }}</td><td>{{ r.group_name }}</td>
-<td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
-<td>{{ r.decided_by or '' }}</td><td>{{ r.requested_at }}</td>
+<td><span class="badge badge-{{ r.status }}">{{ r.status|zh }}</span></td>
+<td>{{ r.decided_by or '' }}</td><td>{{ r.requested_at|localtime }}</td>
 </tr>
 {% else %}
 <tr><td colspan="6" class="hint">没有记录</td></tr>
 {% endfor %}
 </table>
+<script>
+// 时间一律按**浏览器自己的时区**渲染。服务端存的是 UTC ISO 串,直接印出来
+// 对人是不可读的("2026-08-29T11:48:52+00:00" 要心算时差),而服务端并不
+// 知道用户在哪个时区 —— 猜不如让浏览器算。
+// 超过 3 天的显示绝对时间(那时"几天前"已经没有意义),3 天内显示相对时间
+// ("2 小时前"),因为审批场景里"等了多久"比"哪一天提的"更要紧。
+document.querySelectorAll('time.lt').forEach(function (el) {
+  var raw = el.getAttribute('datetime');
+  var d = new Date(raw);
+  if (isNaN(d)) { return; }   // 解析不了就保持原样,不要变成 "Invalid Date"
+  var diffMin = (Date.now() - d.getTime()) / 60000;
+  var abs = d.toLocaleString();
+  if (diffMin >= 0 && diffMin < 60 * 24 * 3) {
+    var rel = diffMin < 1 ? '刚刚'
+            : diffMin < 60 ? Math.floor(diffMin) + ' 分钟前'
+            : diffMin < 60 * 24 ? Math.floor(diffMin / 60) + ' 小时前'
+            : Math.floor(diffMin / 1440) + ' 天前';
+    el.textContent = rel;
+  } else {
+    el.textContent = abs;
+  }
+  el.title = abs + '(UTC ' + raw + ')';   // 悬停仍能看到精确值
+});
+</script>
 </body></html>
 """
 
@@ -842,6 +1006,30 @@ TRANSFER_TEMPLATE = """
   <button type="submit">执行交接</button>
 </form>
 {% if result %}<div class="result">{{ result }}</div>{% endif %}
+<script>
+// 时间一律按**浏览器自己的时区**渲染。服务端存的是 UTC ISO 串,直接印出来
+// 对人是不可读的("2026-08-29T11:48:52+00:00" 要心算时差),而服务端并不
+// 知道用户在哪个时区 —— 猜不如让浏览器算。
+// 超过 3 天的显示绝对时间(那时"几天前"已经没有意义),3 天内显示相对时间
+// ("2 小时前"),因为审批场景里"等了多久"比"哪一天提的"更要紧。
+document.querySelectorAll('time.lt').forEach(function (el) {
+  var raw = el.getAttribute('datetime');
+  var d = new Date(raw);
+  if (isNaN(d)) { return; }   // 解析不了就保持原样,不要变成 "Invalid Date"
+  var diffMin = (Date.now() - d.getTime()) / 60000;
+  var abs = d.toLocaleString();
+  if (diffMin >= 0 && diffMin < 60 * 24 * 3) {
+    var rel = diffMin < 1 ? '刚刚'
+            : diffMin < 60 ? Math.floor(diffMin) + ' 分钟前'
+            : diffMin < 60 * 24 ? Math.floor(diffMin / 60) + ' 小时前'
+            : Math.floor(diffMin / 1440) + ' 天前';
+    el.textContent = rel;
+  } else {
+    el.textContent = abs;
+  }
+  el.title = abs + '(UTC ' + raw + ')';   // 悬停仍能看到精确值
+});
+</script>
 </body></html>
 """
 
@@ -916,6 +1104,30 @@ CATALOG_TEMPLATE = """
 </form>
 <p class="hint">安全等级/负责人以提交时 OpenMetadata 里的真实数据为准(这里显示的是查询时刻的快照,如果表刚被改过标注,提交时会重新校验)。行级/列级细粒度权限现在还只是记录申请理由,不是自动强制执行,见 <a href="{{ url_for('table_access_help') }}">怎么用这个流程</a>里的范围边界说明。</p>
 {% endif %}
+<script>
+// 时间一律按**浏览器自己的时区**渲染。服务端存的是 UTC ISO 串,直接印出来
+// 对人是不可读的("2026-08-29T11:48:52+00:00" 要心算时差),而服务端并不
+// 知道用户在哪个时区 —— 猜不如让浏览器算。
+// 超过 3 天的显示绝对时间(那时"几天前"已经没有意义),3 天内显示相对时间
+// ("2 小时前"),因为审批场景里"等了多久"比"哪一天提的"更要紧。
+document.querySelectorAll('time.lt').forEach(function (el) {
+  var raw = el.getAttribute('datetime');
+  var d = new Date(raw);
+  if (isNaN(d)) { return; }   // 解析不了就保持原样,不要变成 "Invalid Date"
+  var diffMin = (Date.now() - d.getTime()) / 60000;
+  var abs = d.toLocaleString();
+  if (diffMin >= 0 && diffMin < 60 * 24 * 3) {
+    var rel = diffMin < 1 ? '刚刚'
+            : diffMin < 60 ? Math.floor(diffMin) + ' 分钟前'
+            : diffMin < 60 * 24 ? Math.floor(diffMin / 60) + ' 小时前'
+            : Math.floor(diffMin / 1440) + ' 天前';
+    el.textContent = rel;
+  } else {
+    el.textContent = abs;
+  }
+  el.title = abs + '(UTC ' + raw + ')';   // 悬停仍能看到精确值
+});
+</script>
 </body></html>
 """
 
@@ -967,7 +1179,7 @@ def index():
         TEMPLATE, username=username, available_groups=AVAILABLE_GROUPS,
         my_requests=my_requests, pending=pending, is_approver=approver,
         my_table_requests=my_table_requests, my_actionable=my_actionable,
-        role_labels=APPROVAL_ROLE_LABELS,
+        role_labels=APPROVAL_ROLE_LABELS, nudge_cooldown=NUDGE_COOLDOWN_HOURS,
     )
 
 
@@ -1039,6 +1251,15 @@ def create_table_access_request(conn, username: str, table_fqn: str, reason: str
     只管一条申请内部的原子性(申请行 + 它的 steps 行要么都插,不存在只
     插了一半的情况),不管跨多条申请的提交时机。"""
     security_level, table_owner = lookup_table_governance(table_fqn)
+    # 理由是否必填,要等查到安全等级之后才知道 —— 所以这个校验放在这里,
+    # 不在路由层。返回 (ok, 提示) 让调用方决定怎么呈现:单张申请直接报错,
+    # 批量申请要能说清楚"哪几张需要补理由"。
+    if (security_level is not None
+            and security_level >= REASON_REQUIRED_FROM_LEVEL
+            and len(reason.strip()) < MIN_REASON_LENGTH):
+        return (False, f"{table_fqn} 是 {security_level} 级表,必须写明申请理由"
+                       f"(至少 {MIN_REASON_LENGTH} 个字)——审批人要靠它判断"
+                       f"你为什么需要看这些数据")
     if security_level is None:
         conn.execute(
             "INSERT INTO table_access_requests (username, table_fqn, security_level, table_owner, reason, status, requested_at, note) "
@@ -1046,7 +1267,7 @@ def create_table_access_request(conn, username: str, table_fqn: str, reason: str
             (username, table_fqn, 0, table_owner, reason, "rejected", datetime.now(timezone.utc).isoformat(),
              "在 OpenMetadata 里查不到这张表的安全等级(没登记过,或者 OPENMETADATA_TOKEN 没配置),请先用建表注册工具登记这张表"),
         )
-        return
+        return (True, None)
 
     cur = conn.execute(
         "INSERT INTO table_access_requests (username, table_fqn, security_level, table_owner, reason, requested_at) "
@@ -1070,6 +1291,7 @@ def create_table_access_request(conn, username: str, table_fqn: str, reason: str
         )
     else:
         activate_next_step(conn, request_id)
+    return (True, None)
 
 
 @app.route("/table-access/request", methods=["POST"])
@@ -1083,9 +1305,11 @@ def submit_table_access():
         abort(400)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    create_table_access_request(conn, username, table_fqn, reason)
+    ok, err = create_table_access_request(conn, username, table_fqn, reason)
     conn.commit()
     conn.close()
+    if not ok:
+        return {"error": err}, 400
     return redirect(url_for("index"))
 
 
@@ -1121,10 +1345,17 @@ def submit_table_access_batch():
         return redirect(url_for("table_access_catalog"))
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    errors = []
     for fqn in table_fqns:
-        create_table_access_request(conn, username, fqn, reason)
+        ok, err = create_table_access_request(conn, username, fqn, reason)
+        if not ok:
+            errors.append(err)
     conn.commit()
     conn.close()
+    if errors:
+        # **已经建成的那些照常提交**,只把需要补理由的挑出来告诉用户 ——
+        # 勾了 20 张表因为其中 2 张要理由就全部作废,是很气人的设计。
+        return {"error": "以下申请没有提交,需要补充理由:", "details": errors}, 400
     return redirect(url_for("index"))
 
 
@@ -1143,8 +1374,9 @@ def approve_table_step(step_id):
         conn.close()
         abort(409)
     conn.execute(
-        "UPDATE approval_steps SET status='approved', decided_at=? WHERE id=?",
-        (datetime.now(timezone.utc).isoformat(), step_id),
+        "UPDATE approval_steps SET status='approved', decided_at=?, comment=? WHERE id=?",
+        (datetime.now(timezone.utc).isoformat(),
+         request.form.get("comment", "").strip()[:500] or None, step_id),
     )
     finalize_table_request_if_done(conn, step["request_id"])
     conn.commit()
@@ -1161,11 +1393,82 @@ def reject_table_step(step_id):
     if not step or step["status"] != "pending" or step["approver_username"] != username:
         conn.close()
         abort(403)
+    comment = request.form.get("comment", "").strip()[:500]
+    if not comment:
+        # **拒绝必须写原因。** 没有原因的拒绝对申请人是一堵墙:他不知道是
+        # 表选错了、理由不够、还是本来就不该有这个权限,唯一能做的是原样
+        # 再申请一次,然后再被拒一次。这个校验放在服务端而不是只做前端
+        # required,是因为直接 POST 能绕过前端。
+        conn.close()
+        return {"error": "拒绝必须填写原因"}, 400
     conn.execute(
-        "UPDATE approval_steps SET status='rejected', decided_at=? WHERE id=?",
-        (datetime.now(timezone.utc).isoformat(), step_id),
+        "UPDATE approval_steps SET status='rejected', decided_at=?, comment=? WHERE id=?",
+        (datetime.now(timezone.utc).isoformat(), comment, step_id),
     )
     finalize_table_request_if_done(conn, step["request_id"])
+    conn.commit()
+    conn.close()
+    return redirect(url_for("index"))
+
+
+# 催办:申请人主动提醒当前这一级的审批人(roadmap P1.5「审批体验」)。
+#
+# 和 ADR-045 的**超时升级**是两件事,不要混:升级是系统在人不管的时候
+# 越过他往上找,催办是申请人在还没到升级阈值时说一声"我还在等"。没有催办
+# 的话,申请人在这段时间里唯一能做的就是干等,或者线下去戳人 —— 而线下
+# 戳人这个动作是不留痕的,后面复盘"这条为什么拖了五天"就查不到。
+NUDGE_COOLDOWN_HOURS = int(os.environ.get("NUDGE_COOLDOWN_HOURS", "24"))
+
+
+@app.route("/table-access/request/<int:req_id>/nudge", methods=["POST"])
+def nudge_request(req_id):
+    username, _ = get_current_user()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    req = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (req_id,)).fetchone()
+    if not req or req["username"] != username:
+        conn.close()
+        abort(403)          # 只能催自己的申请
+    if req["status"] != "pending":
+        conn.close()
+        return {"error": "这条申请已经有结果了,不需要催办"}, 400
+
+    now = datetime.now(timezone.utc)
+    last = req["last_nudged_at"]
+    if last:
+        try:
+            hours = (now - datetime.fromisoformat(last)).total_seconds() / 3600
+            if hours < NUDGE_COOLDOWN_HOURS:
+                conn.close()
+                # 限频不是为了给申请人添堵,是因为一个能无限催的按钮,最后
+                # 的结果是所有通知都被审批人无视 —— 那对谁都没好处。
+                return {"error": f"{NUDGE_COOLDOWN_HOURS} 小时内只能催办一次,"
+                                 f"还差 {NUDGE_COOLDOWN_HOURS - int(hours)} 小时"}, 429
+        except ValueError:
+            pass
+
+    order = current_step_order(conn, req_id)
+    step = conn.execute(
+        "SELECT * FROM approval_steps WHERE request_id=? AND step_order=? "
+        "AND status IN ('pending','pending_external')", (req_id, order)).fetchone()
+    if not step:
+        conn.close()
+        return {"error": "找不到当前待审批的步骤"}, 400
+
+    waited = ""
+    if step["activated_at"]:
+        try:
+            h = int((now - datetime.fromisoformat(step["activated_at"])).total_seconds() // 3600)
+            waited = f",已经等了 {h // 24} 天 {h % 24} 小时" if h >= 24 else f",已经等了 {h} 小时"
+        except ValueError:
+            pass
+    notify_wecom(
+        f"【催办】{req['username']} 申请 {req['table_fqn']}(L{req['security_level']})"
+        f"的访问权限,等你作为{APPROVAL_ROLE_LABELS.get(step['approver_role'], step['approver_role'])}"
+        f"审批{waited}。审批人:{step['approver_username']}"
+    )
+    conn.execute("UPDATE table_access_requests SET last_nudged_at=? WHERE id=?",
+                 (now.isoformat(), req_id))
     conn.commit()
     conn.close()
     return redirect(url_for("index"))
@@ -1328,20 +1631,43 @@ def reclaim_expired():
         with open(csv_path, newline="") as f:
             rows = list(csv.DictReader(f))
 
-        kept, reclaimed = [], []
+        kept, reclaimed, expiring = [], [], []
         for row in rows:
             expires_at = (row.get("expires_at") or "").strip()
             if expires_at:
                 try:
-                    if datetime.fromisoformat(expires_at) <= now:
+                    exp = datetime.fromisoformat(expires_at)
+                    if exp <= now:
                         reclaimed.append(row)
                         continue
+                    # **回收之前先提醒。** 到期这件事对用户是完全看不见的:
+                    # 授权悄悄失效,OPA 5 分钟内跟着生效,人第二天来上班发现
+                    # 查不到数据,第一反应是"平台坏了"而不是"我的权限到期了"。
+                    # 提前几天说一声,是让他有机会续期,而不是事后来报故障。
+                    # `.days` 是**向下取整**,剩 2.99 天会显示"2 天"。这是
+                    # 有意保留的:对截止期限来说,少说比多说安全 —— 说"3 天"
+                    # 会让人第 3 天才动手,而那时已经过期了。
+                    days_left = (exp - now).days
+                    if 0 <= days_left <= EXPIRY_WARN_DAYS:
+                        expiring.append((row, days_left))
                 except ValueError:
                     pass  # 解析不了的脏数据保守保留,不当成"已过期"误删
             kept.append(row)
 
+        # 提醒和回收是分开的两件事:即使这一轮没有任何东西要回收,快到期的
+        # 也照样要提醒 —— 所以这段放在 `if not reclaimed` 之前。
+        for row, days_left in expiring:
+            notify_wecom(
+                f"【权限即将到期】{row.get('username')} 对 "
+                f"{row.get('table_fqn')} 的访问权限还有 {days_left} 天到期"
+                f"({row.get('expires_at')})。到期会自动回收,需要继续用的话"
+                f"请提前重新申请。"
+            )
+
         if not reclaimed:
-            return {"reclaimed": 0}
+            # 返回 warned 让调用方(CronJob 日志)看得出提醒真的发了几条,
+            # 不然"这一轮什么都没做"和"提醒了 5 个人"在日志里长得一样。
+            return {"reclaimed": 0, "warned": len(expiring)}
 
         header = "username,table_fqn,security_level,granted_at,expires_at"
         lines = [header] + [
@@ -1361,7 +1687,8 @@ def reclaim_expired():
 
         for r in reclaimed:
             notify_wecom(f"访问权限到期回收:{r['username']} 对 {r['table_fqn']} 的访问授权已过期,记录已从 grants.csv 移除,如需继续使用请重新申请。")
-        return {"reclaimed": len(reclaimed), "tables": [r["table_fqn"] for r in reclaimed]}
+        return {"reclaimed": len(reclaimed), "warned": len(expiring),
+                "tables": [r["table_fqn"] for r in reclaimed]}
     except subprocess.CalledProcessError as e:
         stderr = e.stderr if hasattr(e, "stderr") else str(e)
         return {"reclaimed": 0, "error": stderr}, 500
