@@ -74,6 +74,13 @@ jobs:
       - name: 规格分档校验(组件里不能有未登记的写死资源规格)
         run: python3 scripts/check-resource-profiles.py
 
+      # 一份没有东西逼它跟上现实的服务清单,三个月后就是一份过期清单,
+      # 比没有更糟——这个仓库已经在 roles.md / BACKLOG / ADR 里各栽过一次
+      # 「文档和事实反了」。所以目录和覆盖检查是一起加的,不是先写文档
+      # 再想办法维护。
+      - name: 服务目录覆盖校验(新组件必须登记归属)+ 生成的 md 不能漂移
+        run: python3 scripts/check-service-catalog.py --check-doc
+
       # 三档都要能渲染出来。只校验 cloud-full 的话,prod/local-lite 缺一个
       # RES 键要等到真去部署那一档才会发现——而那时候人已经在等着上生产了。
       - name: 三档环境都能渲染(prod/local-lite 缺键会在这里就报出来)
