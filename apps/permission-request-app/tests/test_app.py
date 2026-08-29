@@ -1283,3 +1283,39 @@ class TestExpiryWarning:
                                [f"alice,iceberg.demo.orders,1,2026-01-01T00:00:00+00:00,{later}"])
         assert body["warned"] == 0
         assert sent == []
+
+
+class TestNoSelfApproval:
+    """申请人永远不能是自己的审批人(2026-08-29 堵的一条真实提权路径)。
+
+    路径是这样的:建表注册工具的 owner 是一个自由填写的表单字段,谁都能
+    把自己填成某张表的负责人;而 table_owner 在审批链里是第一级审批人。
+    "自己建表填自己 → 之后申请这张表的权限 → 自己批自己"因此成立。
+    """
+
+    def test_自己是表负责人时_不会出现在自己的审批链里(self):
+        steps = perm.build_approval_steps("engineer1", "engineer1", 1)
+        assert all(u != "engineer1" for _, _, u in steps)
+
+    def test_别人是负责人时照常进链(self):
+        # 用 director 而不是 manager1 —— manager1 本来就是 engineer1 的上级,
+        # 会以 manager 角色进链然后被去重(同一个人只批一次,是对的行为)。
+        steps = perm.build_approval_steps("engineer1", "director", 1)
+        assert any(u == "director" and role == "table_owner" for _, role, u in steps)
+
+    def test_链上只剩自己时_申请被拒而不是被自动放行(self, client, monkeypatch):
+        # 这是最危险的一种:组织架构里查不到上级(manager 为 None),
+        # 表负责人又填的是自己 —— 如果这时候"没有审批人"被当成"不需要
+        # 审批",就等于完全自助授权。
+        monkeypatch.setattr(perm, "get_manager_chain", lambda u, levels=2: [])
+        row = _create_table_request("engineer1", "iceberg.demo.mine", 1, "engineer1",
+                                    monkeypatch, client)
+        assert row["status"] == "rejected"
+        assert "自己不能批自己" in row["note"]
+
+    def test_高等级链上自己被剔除后其余人照常(self, client, monkeypatch):
+        # engineer1 的上级是 manager1、上上级是 director(见测试组织数据)
+        steps = perm.build_approval_steps("engineer1", "engineer1", 2)
+        names = [u for _, _, u in steps]
+        assert "engineer1" not in names
+        assert "manager1" in names and "director" in names

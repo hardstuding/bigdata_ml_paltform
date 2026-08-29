@@ -55,6 +55,15 @@ spec:
           env:
             - name: DB_PATH
               value: /data/registrations.db
+            # 对账重试 CronJob 调 /internal/reconcile-openmetadata 用的共享
+            # 密钥。optional: true —— 没建这个 Secret 时应用照常起,只是那两个
+            # /internal 端点会拒绝所有请求(拒绝比误开安全)。
+            - name: INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: table-registration-app-internal
+                  key: token
+                  optional: true
             - name: TRINO_HOST
               value: trino.trino.svc.cluster.local
             - name: TRINO_PORT

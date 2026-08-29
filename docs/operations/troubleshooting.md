@@ -1291,7 +1291,11 @@ Pod 的 `imagePullPolicy: IfNotPresent` 会直接用本地这份。
 已从当前版本里去掉,但 **git 历史里还在,去不掉** —— 唯一真正有效的处置是
 **换掉这个密码**,不是改文档。
 
-**下次开机要做的第一件事之一**:
+**zhenghe 2026-08-29 的决定:不换。** 原话"密码不用换,我们只是开发测试"。
+所以这条**不是待办**,不要在下一轮又提一次。前提是这台机器一直只作开发
+测试用;**哪天它承载真实数据或真实用户,这条要重新拿出来。**
+
+真要换的时候:
 
 ```bash
 KC_ADMIN_PW=$(kubectl -n keycloak get secret keycloak-admin -o jsonpath='{.data.password}' | base64 -d)

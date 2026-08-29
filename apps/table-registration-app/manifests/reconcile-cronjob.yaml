@@ -1,0 +1,58 @@
+# 建表登记的对账重试。
+#
+# **它解决的是一个会静默积累的问题**:Trino 建表成功了、回写 OpenMetadata
+# 失败了 —— 这张表于是在数据目录里查不到、也查不到安全等级,而
+# permission-request-app 查不到安全等级时会**直接拒绝**这张表的所有权限
+# 申请。结果是"表存在,但没有任何人能通过正常流程拿到它的权限",而且
+# 没人会想到去建表工具的历史记录里翻那一行 openmetadata_status=failed。
+#
+# 半小时一次:回写失败通常是 OpenMetadata 短暂不可用/token 过期这类,
+# 恢复之后越早补上越好,但也不值得每分钟去敲一次。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: table-registration-app-reconcile
+  namespace: table-registration-app
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        metadata:
+          # 这个命名空间**目前没有任何 NetworkPolicy**(见
+          # platform/network-policies/manifests/platform-portal.yaml 顶部
+          # 那句"table-registration-app 那种漏配的状态"),所以现在不需要
+          # 放行规则。标签先打上:哪天给这个命名空间补 default-deny 时,
+          # 才不会忘了它 —— permission-request-app 那边已经因为"CronJob 的
+          # pod 不带任何已放行的标签"撞过两次。
+          labels:
+            app: table-registration-app-reconcile
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: reconcile
+              image: curlimages/curl:8.11.0
+              env:
+                - name: INTERNAL_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: table-registration-app-internal
+                      key: token
+              command:
+                - sh
+                - -c
+                - |
+                  curl -fsS -m 90 --retry 5 --retry-delay 2 --retry-connrefused -X POST \
+                    -H "X-Internal-Token: ${INTERNAL_TOKEN}" \
+                    http://table-registration-app.table-registration-app.svc.cluster.local:8080/internal/reconcile-openmetadata
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi

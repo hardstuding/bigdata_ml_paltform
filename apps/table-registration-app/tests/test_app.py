@@ -205,11 +205,14 @@ class TestSubmitRoute:
             )
         assert resp.status_code == 302
         mock_create.assert_called_once()
-        mock_om.assert_called_once_with("iceberg", "demo", "orders", [("id", "BIGINT")], "someone", 2)
+        # 2026-08-29:这条断言之前写的是 "someone" —— 也就是**在断言那个漏洞**。
+        # 表单里的 owner 现在完全不看,负责人一律是登录者本人,原因见
+        # app.py 里 submit() 那段注释(表负责人是审批链的第一级审批人)。
+        mock_om.assert_called_once_with("iceberg", "demo", "orders", [("id", "BIGINT")], "zhenghe", 2)
         row = sqlite3.connect(reg.DB_PATH).execute(
             "SELECT trino_status, openmetadata_status, security_level, owner FROM registrations ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        assert row == ("ok", "ok", 2, "someone")
+        assert row == ("ok", "ok", 2, "zhenghe")   # 同上:落库的负责人也是登录者
 
     def test_invalid_security_level_defaults_to_1(self, client):
         with patch.object(reg, "create_table_in_trino"), patch.object(reg, "OPENMETADATA_TOKEN", ""):
@@ -228,3 +231,155 @@ def test_healthz(client):
     resp = client.get("/healthz")
     assert resp.status_code == 200
     assert resp.get_json() == {"status": "ok"}
+
+
+class TestOwnerCannotBeSpoofed:
+    """负责人只能是登录者本人(2026-08-29 堵的一条真实提权路径)。
+
+    表负责人在 permission-request-app 里是**第一级审批人**。owner 能随便填
+    的话,就能给自己安排一个好说话的审批人,或者干脆填自己然后批自己 ——
+    组织架构里查不到上级的人,那条审批链上甚至只有他一个人。
+    """
+
+    def _submit(self, client, form_owner, login_as="zhenghe"):
+        with patch.object(reg, "create_table_in_trino"), \
+             patch.object(reg, "OPENMETADATA_TOKEN", "fake-token"), \
+             patch.object(reg, "register_table_in_openmetadata", return_value="ok") as om:
+            client.post("/submit",
+                        data={"table_fqn": "demo.t1", "columns": "id BIGINT",
+                              "security_level": "1", "owner": form_owner},
+                        headers={"X-Forwarded-User": login_as})
+        return om.call_args[0][4]      # owner 参数(catalog, schema, table, columns, owner, level)
+
+    def test_填别人的名字无效(self, client):
+        assert self._submit(client, "victim001") == "zhenghe"
+
+    def test_不填也是登录者本人(self, client):
+        assert self._submit(client, "") == "zhenghe"
+
+    def test_落库记录的负责人也是登录者(self, client):
+        with patch.object(reg, "create_table_in_trino"), \
+             patch.object(reg, "OPENMETADATA_TOKEN", ""), \
+             patch.object(reg, "register_table_in_openmetadata", return_value="ok"):
+            client.post("/submit",
+                        data={"table_fqn": "demo.t2", "columns": "id BIGINT",
+                              "security_level": "1", "owner": "victim001"},
+                        headers={"X-Forwarded-User": "zhenghe"})
+        conn = reg.sqlite3.connect(reg.DB_PATH)
+        row = conn.execute("SELECT owner FROM registrations WHERE table_fqn='demo.t2'").fetchone()
+        conn.close()
+        assert row[0] == "zhenghe"
+
+    def test_页面上那个输入框是禁用的(self, client):
+        html = client.get("/", headers={"X-Forwarded-User": "zhenghe"}).get_data(as_text=True)
+        assert "disabled" in html
+        assert 'name="owner"' not in html      # 干脆不提交这个字段
+
+
+class TestReconcileOpenMetadata:
+    """对账 + 重试。
+
+    "Trino 里表建好了、OpenMetadata 里没有"这个半成功状态特别糟:表在目录里
+    查不到、也查不到安全等级,而 permission-request-app 查不到安全等级时会
+    **直接拒绝**这张表的所有权限申请 —— 表存在,但没人能通过正常流程拿到
+    它的权限,而且谁也不会想到去建表工具的历史记录里翻那一行。
+    """
+    TOKEN = "tok"
+
+    @pytest.fixture(autouse=True)
+    def _token(self, monkeypatch):
+        monkeypatch.setattr(reg, "INTERNAL_TOKEN", self.TOKEN)
+
+    def _hdr(self):
+        return {"X-Internal-Token": self.TOKEN}
+
+    def _seed(self, om_status, table="demo.halfdone", trino_status="ok"):
+        conn = reg.sqlite3.connect(reg.DB_PATH)
+        conn.execute(
+            "INSERT INTO registrations (requested_by, table_fqn, owner, security_level,"
+            " columns_raw, trino_status, openmetadata_status, note, created_at)"
+            " VALUES ('zhenghe',?,'zhenghe',1,'id BIGINT',?,?,'','2026-08-29T00:00:00+00:00')",
+            (table, trino_status, om_status))
+        conn.commit(); conn.close()
+
+    def _status_of(self, table):
+        conn = reg.sqlite3.connect(reg.DB_PATH)
+        row = conn.execute(
+            "SELECT openmetadata_status, note FROM registrations WHERE table_fqn=?",
+            (table,)).fetchone()
+        conn.close()
+        return row
+
+    def test_没有_token_403(self, client):
+        assert client.post("/internal/reconcile-openmetadata").status_code == 403
+        assert client.get("/internal/reconcile-status").status_code == 403
+
+    def test_补写成功后状态变成_ok(self, client):
+        self._seed("failed")
+        with patch.object(reg, "OPENMETADATA_TOKEN", "fake"), \
+             patch.object(reg, "register_table_in_openmetadata", return_value="ok"):
+            body = client.post("/internal/reconcile-openmetadata",
+                               headers=self._hdr()).get_json()
+        assert body["fixed"] == ["demo.halfdone"]
+        assert self._status_of("demo.halfdone")[0] == "ok"
+
+    def test_skipped_的也会被补写(self, client):
+        # OPENMETADATA_TOKEN 当时没配导致的 skipped,和 failed 一样是"目录里
+        # 没有这张表",不能因为它当时不算错误就不管。
+        self._seed("skipped", table="demo.skipped")
+        with patch.object(reg, "OPENMETADATA_TOKEN", "fake"), \
+             patch.object(reg, "register_table_in_openmetadata", return_value="ok"):
+            body = client.post("/internal/reconcile-openmetadata",
+                               headers=self._hdr()).get_json()
+        assert "demo.skipped" in body["fixed"]
+
+    def test_仍然失败的留着等下一轮_并记最新原因(self, client):
+        self._seed("failed")
+        with patch.object(reg, "OPENMETADATA_TOKEN", "fake"), \
+             patch.object(reg, "register_table_in_openmetadata",
+                          side_effect=RuntimeError("connection refused")):
+            body = client.post("/internal/reconcile-openmetadata",
+                               headers=self._hdr()).get_json()
+        assert body["still_failing"] == ["demo.halfdone"]
+        status, note = self._status_of("demo.halfdone")
+        assert status == "failed"
+        assert "connection refused" in note
+
+    def test_一条失败不影响其余的(self, client):
+        self._seed("failed", table="demo.a")
+        self._seed("failed", table="demo.b")
+        calls = {"n": 0}
+
+        def flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boom")
+            return "ok"
+
+        with patch.object(reg, "OPENMETADATA_TOKEN", "fake"), \
+             patch.object(reg, "register_table_in_openmetadata", flaky):
+            body = client.post("/internal/reconcile-openmetadata",
+                               headers=self._hdr()).get_json()
+        assert body["still_failing"] == ["demo.a"] and body["fixed"] == ["demo.b"]
+
+    def test_已经_ok_的不会被重复处理(self, client):
+        self._seed("ok", table="demo.done")
+        with patch.object(reg, "OPENMETADATA_TOKEN", "fake"), \
+             patch.object(reg, "register_table_in_openmetadata") as om:
+            client.post("/internal/reconcile-openmetadata", headers=self._hdr())
+            om.assert_not_called()
+
+    def test_trino_都没建成的不算半成功(self, client):
+        # Trino 建表本身失败的,表压根不存在,不属于"表有但目录里没有"。
+        self._seed("skipped", table="demo.nottino", trino_status="failed")
+        with patch.object(reg, "OPENMETADATA_TOKEN", "fake"), \
+             patch.object(reg, "register_table_in_openmetadata") as om:
+            client.post("/internal/reconcile-openmetadata", headers=self._hdr())
+            om.assert_not_called()
+
+    def test_状态端点报出还有几张卡着(self, client):
+        self._seed("failed", table="demo.x")
+        self._seed("skipped", table="demo.y")
+        body = client.get("/internal/reconcile-status", headers=self._hdr()).get_json()
+        assert body["pending"] == 2
+        assert {t["table"] for t in body["tables"]} == {"demo.x", "demo.y"}

@@ -528,6 +528,19 @@ def build_approval_steps(applicant_username: str, table_owner: str, security_lev
         for role, uname in approvers:
             if uname in already_required:
                 continue
+            # **申请人永远不能是自己的审批人。**(2026-08-29 加)
+            #
+            # 这不是理论问题,有一条真实可走的路径:建表注册工具的 owner
+            # 是一个自由填写的表单字段,谁都能把自己填成某张表的负责人;
+            # 而 table_owner 在这里是第一级审批人。于是"自己建表填自己 →
+            # 之后申请这张表的权限 → 自己批自己"就成立了。组织架构里查不到
+            # 上级的人(manager 为 None),这条链上甚至只有他一个人,等于
+            # 完全自助授权。
+            #
+            # 建表那边的 owner 校验会另外收紧,但这一层是**兜底**:不管
+            # owner 是怎么变成他自己的,他都不该出现在自己的审批链里。
+            if uname == applicant_username:
+                continue
             already_required.add(uname)
             result.append((step_order, role, uname))
     return result
@@ -1287,7 +1300,8 @@ def create_table_access_request(conn, username: str, table_fqn: str, reason: str
         # 在没有任何审批人的状态,直接拒绝并说明原因。
         conn.execute(
             "UPDATE table_access_requests SET status='rejected', note=? WHERE id=?",
-            ("算不出任何审批人(申请人不在组织架构里,表也没有负责人),请联系平台管理员手动处理", request_id),
+            ("算不出任何审批人 —— 可能是申请人不在组织架构里、这张表没有负责人,"
+             "或者负责人就是申请人自己(自己不能批自己)。请联系平台管理员手动处理", request_id),
         )
     else:
         activate_next_step(conn, request_id)

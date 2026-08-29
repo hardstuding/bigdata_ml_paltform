@@ -206,7 +206,7 @@ def ensure_om_hierarchy_and_tags():
     try:
         om_request("PUT", "/api/v1/classifications", {
             "name": "SecurityLevel",
-            "description": "建表注册工具录入的数据安全等级(1/2/3),对应 ADR-040 未来分级审批链路。",
+            "description": "数据安全等级(1/2/3)。等级决定申请这张表的权限要走几级审批,也决定敏感字段对谁脱敏。",   # 这段会显示在 OpenMetadata 界面上给使用者看,所以说的是"它有什么用",不是内部的 ADR 编号
         })
     except requests.HTTPError:
         pass  # 已存在时某些版本会 4xx,忽略,后面 tag 创建/引用不受影响
@@ -281,7 +281,13 @@ TEMPLATE = """
 </style></head>
 <body>
 <h1>建表注册工具</h1>
-<p>当前登录:<b>{{ username }}</b> <span class="hint">(权限 OA 审批系统 Phase 1——本次只记录负责人/安全等级,不做审批拦截,见 ADR-043)</span></p>
+<p>当前登录:<b>{{ username }}</b></p>
+{# 这里原来写着"权限 OA 审批系统 Phase 1……见 ADR-043" —— 那是给我们自己
+   看的内部术语,用这个工具建表的人不需要知道 Phase 几、也不会去翻 ADR。
+   换成对他有用的两句:建完之后会发生什么。 #}
+<p class="hint">在这里建的表会同时登记进数据目录(负责人、安全等级),
+别人才能搜到它、才能对它发起权限申请。<b>直接在 Trino 里手写 DDL 建的表
+不会被登记</b>,那样建出来的表在目录里是隐形的。</p>
 
 <h2>提交建表请求</h2>
 <form method="post" action="{{ url_for('submit') }}">
@@ -295,7 +301,10 @@ TEMPLATE = """
   </div>
   <div class="field">
     <label>负责人</label>
-    <input type="text" name="owner" value="{{ username }}" size="30" required>
+    <input type="text" value="{{ username }}" size="30" disabled>
+    <p class="hint">负责人就是你(登录身份),不能改。表负责人是这张表访问申请的
+      第一级审批人 —— 能随便填别人的话,就能给自己安排一个好说话的审批人,
+      或者干脆填自己然后批自己。要代别人建表,先联系平台组。</p>
   </div>
   <div class="field">
     <label>安全等级</label>
@@ -345,7 +354,24 @@ def submit():
         abort(401)
 
     table_fqn = request.form.get("table_fqn", "")
-    owner = request.form.get("owner", username)[:200]
+    # **负责人只能是登录者本人,表单传什么都不看。**(2026-08-29)
+    #
+    # 这里原来是 `request.form.get("owner", username)` —— 一个自由填写的
+    # 字段。而表负责人在 permission-request-app 里是**第一级审批人**
+    # (build_approval_steps 的 table_owner 角色),所以"建表时把 owner
+    # 填成自己 → 之后申请这张表的权限 → 自己批自己"这条路是通的;组织架构
+    # 里查不到上级的人,这条链上甚至只有他一个人。
+    #
+    # permission-request-app 那边也加了兜底(申请人不能出现在自己的审批链
+    # 里),两层都要有:那边防的是"不管 owner 怎么来的",这边防的是"一开始
+    # 就不该能乱填"。
+    #
+    # 代他人建表这个需求是真的(平台组帮业务方建),但它需要判断"你是不是
+    # 平台组",而那要 oauth2-proxy 传 access token + Keycloak client 加
+    # groups scope —— 加 scope 这件事在 MLflow 上炸过一次(client 没配这个
+    # scope,Keycloak 直接 invalid_scope,登录页都进不去)。所以单独做、
+    # 单独实机验证,见 roadmap。
+    owner = username[:200]
     try:
         security_level = int(request.form.get("security_level", "1"))
         if security_level not in SECURITY_LEVELS:
@@ -392,6 +418,80 @@ def submit():
     conn.commit()
     conn.close()
     return redirect(url_for("index"))
+
+
+# 对账 + 重试(roadmap P1.5「建表注册工具」的验收项之一)。
+#
+# **为什么这个半成功状态特别糟**:Trino 里表建好了、OpenMetadata 里没有,
+# 于是这张表在数据目录里查不到、**也查不到安全等级** —— 而
+# permission-request-app 查不到安全等级时会**直接拒绝**这张表的所有权限
+# 申请。也就是说:表存在,但没有任何人能通过正常流程拿到它的权限,而且
+# 谁也不会想到去建表工具的历史记录里翻那一行 `openmetadata_status=failed`。
+#
+# 触发方式和 permission-request-app 的 /internal/* 一样:共享密钥,
+# 给 CronJob 调,不走 oauth2-proxy。
+INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN", "")
+
+
+@app.route("/internal/reconcile-openmetadata", methods=["POST"])
+def reconcile_openmetadata():
+    """把所有"Trino 建好了但 OpenMetadata 没写进去"的记录重新回写一遍。
+
+    幂等:成功的记录不会被重复处理;还是失败的原样留着等下一轮,并把最新
+    的错误覆盖进 note —— 保留最新一次的失败原因,比留着第一次那条更有用。
+    """
+    if not INTERNAL_TOKEN or request.headers.get("X-Internal-Token") != INTERNAL_TOKEN:
+        abort(403)
+    if not OPENMETADATA_TOKEN:
+        return {"retried": 0, "skipped": "没配置 OPENMETADATA_TOKEN"}
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM registrations WHERE trino_status='ok' "
+        "AND openmetadata_status IN ('failed','skipped') ORDER BY id"
+    ).fetchall()
+
+    fixed, still_failing = [], []
+    for r in rows:
+        try:
+            catalog, schema, table = parse_table_fqn(r["table_fqn"])
+            columns = parse_columns(r["columns_raw"])
+            note = register_table_in_openmetadata(
+                catalog, schema, table, columns, r["owner"], r["security_level"])
+            conn.execute(
+                "UPDATE registrations SET openmetadata_status='ok', note=? WHERE id=?",
+                (f"对账时补写成功。{note}", r["id"]))
+            fixed.append(r["table_fqn"])
+        except Exception as e:   # noqa: BLE001 —— 一条失败不能影响其余的
+            conn.execute(
+                "UPDATE registrations SET openmetadata_status='failed', note=? WHERE id=?",
+                (f"对账重试仍然失败:{e}", r["id"]))
+            still_failing.append(r["table_fqn"])
+    conn.commit()
+    conn.close()
+    return {"retried": len(rows), "fixed": fixed, "still_failing": still_failing}
+
+
+@app.route("/internal/reconcile-status")
+def reconcile_status():
+    """有多少张表卡在"Trino 有、目录里没有"的半成功状态。
+
+    单独开一个只读端点,是为了能拿它做告警指标 —— 这个数字长期不为零,
+    意味着有表在目录里是隐形的,而不是"偶尔失败一次"。
+    """
+    if not INTERNAL_TOKEN or request.headers.get("X-Internal-Token") != INTERNAL_TOKEN:
+        abort(403)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT table_fqn, openmetadata_status, note FROM registrations "
+        "WHERE trino_status='ok' AND openmetadata_status IN ('failed','skipped')"
+    ).fetchall()
+    conn.close()
+    return {"pending": len(rows),
+            "tables": [{"table": r["table_fqn"], "status": r["openmetadata_status"],
+                        "note": r["note"]} for r in rows]}
 
 
 @app.route("/healthz")

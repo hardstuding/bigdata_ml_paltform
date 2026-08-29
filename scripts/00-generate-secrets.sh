@@ -387,6 +387,9 @@ ensure_secret permission-request-app permission-request-app-internal token=RANDO
 # 不报任何错,又是一个静默失败)。
 copy_secret permission-request-app platform-portal permission-request-app-internal
 
+# 建表登记的对账重试 CronJob 用的共享密钥,和上面同一个模式。
+ensure_secret table-registration-app table-registration-app-internal token=RANDOM
+
 # 建表注册工具,同一个 oauth2-proxy 模式(见 ADR-043)。
 if kubectl -n table-registration-app get secret oauth2-proxy-secret >/dev/null 2>&1; then
   echo "已存在,跳过: table-registration-app/oauth2-proxy-secret"
