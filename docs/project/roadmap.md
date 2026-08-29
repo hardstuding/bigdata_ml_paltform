@@ -17,6 +17,33 @@
 ---
 
 
+## 一件半完成的事:platform-runtime 镜像接进 CI(2026-08-29)
+
+**做完的**:`apps/platform-image` 进了 `build-images.yml` 的构建矩阵。在这
+之前它是**唯一一个靠手工在云主机上 `docker build` 的镜像** —— 一个横在
+"一键部署"路径上的手工步骤,而且手工构建出来的东西没有任何地方记录它是从
+哪个 commit 来的。
+
+它比别的镜像多两处特殊,都写在工作流的注释里:build context 必须是仓库根
+(它 COPY `platform-sdk/`),以及构建时的 pip 源要覆盖成默认 PyPI(GitHub
+runner 在境外)。`platform-sdk/**` 也进了触发路径 —— SDK 改了镜像就该重建,
+不然 notebook 和定时作业用的还是老 SDK,**而且不会有任何提示**。
+
+**还没做,而且刻意不在同一轮做**:把各处对 `local/platform-runtime:0.1.0`
+的引用切到 ACR 上带 commit SHA 的那份。原因是顺序不能颠倒 ——
+
+1. 先让 CI 真的构建成功一次,拿到一个**确实存在**的 SHA 标签;
+2. 再把这几处切过去:`scripts/render-jobs.py` 的默认 image、
+   `platform_sdk/config.py` 的 `PLATFORM_JOB_IMAGE` 默认值、JupyterHub 的
+   singleuser 镜像;
+3. 然后在集群上验一次 notebook 和一个定时作业真的能起来。
+
+同一轮做完的话,一旦 CI 构建失败或者镜像名拼错,**集群上所有 notebook 和
+定时作业会同时 ImagePullBackOff**,而这是没法在本地验证的。这个仓库已经
+因为"一次改太多、失败了分不清是哪一步"吃过亏。
+
+---
+
 ## 生产可用性缺口(2026-08-23 主动盘点,独立于下面的 P0-P5)
 
 [`docs/project/production-readiness-gaps.md`](../project/production-readiness-gaps.md) —— 六条

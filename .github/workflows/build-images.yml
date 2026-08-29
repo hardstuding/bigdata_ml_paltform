@@ -59,6 +59,11 @@ on:
       - "apps/flink-iceberg-image/Dockerfile"
       - "apps/kafka-producer-image/Dockerfile"
       - "apps/hive-metastore-image/Dockerfile"
+      - "apps/platform-image/**"
+      # platform-image 把 platform-sdk 打进镜像,SDK 改了镜像就该重建 ——
+      # 不加这一行的话,改了 SDK 之后 notebook 和定时作业用的还是老版本,
+      # 而且不会有任何提示。
+      - "platform-sdk/**"
       - ".github/workflows/build-images.yml"
 
 jobs:
@@ -92,6 +97,28 @@ jobs:
             image: flink-iceberg
           - context: apps/kafka-producer-image
             image: kafka-device-events-producer
+          # 平台统一运行时镜像(notebook / 定时作业 / platform-submit 都用它)。
+          #
+          # **2026-08-29 才接进 CI。** 在这之前它是唯一一个靠手工在云主机上
+          # `docker build` 的镜像 —— 一个"一键部署"路径上的手工步骤,而且
+          # 手工构建出来的东西没有任何地方记录它是从哪个 commit 来的。
+          #
+          # 它和别的不一样的两点:
+          #   1. **build context 必须是仓库根**,因为它 COPY 仓库根下的
+          #      platform-sdk/ 和 apps/platform-image/requirements.txt。
+          #      所以这一条带 `file`,其余的沿用 `<context>/Dockerfile`。
+          #      也因此它需要 `trigger` 显式声明触发路径 —— context 是 `.`,
+          #      拿它当前缀匹配的话什么都能匹配上(见 check-build-triggers.py)。
+          #   2. **构建时的 pip 源换成默认 PyPI**:Dockerfile 里默认用阿里云
+          #      镜像(那是给境内云主机上手工构建准备的),而 GitHub 的 runner
+          #      在境外,连阿里云反而慢/不通 —— 和 iam-sync、superset-image
+          #      当初的判断一样。用 build-arg 覆盖,不改 Dockerfile 的默认值。
+          - context: .
+            file: apps/platform-image/Dockerfile
+            image: platform-runtime
+            build_args: |
+              PIP_INDEX_URL=https://pypi.org/simple/
+            trigger: apps/platform-image
     steps:
       - uses: actions/checkout@v4
 
@@ -155,6 +182,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          # 没写 file 的沿用 <context>/Dockerfile(action 的默认行为)
+          file: ${{ matrix.file || '' }}
+          build-args: ${{ matrix.build_args || '' }}
           platforms: linux/amd64
           push: true
           tags: |
@@ -184,6 +214,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          # 没写 file 的沿用 <context>/Dockerfile(action 的默认行为)
+          file: ${{ matrix.file || '' }}
+          build-args: ${{ matrix.build_args || '' }}
           platforms: linux/amd64
           push: true
           tags: |

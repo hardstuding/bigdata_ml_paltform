@@ -26,8 +26,15 @@ def main() -> int:
     # 两种写法都兜一下,不然这个检查器自己会在某次 PyYAML 升级后静默失效。
     on = wf.get("on") or wf.get(True)
     paths = (on.get("push") or {}).get("paths") or []
-    contexts = [i["context"] for i in
-                wf["jobs"]["build-and-push"]["strategy"]["matrix"]["include"]]
+    # 判断"改哪个目录会触发这个镜像"时用 `trigger` 优先,没有才用 `context`。
+    #
+    # **为什么需要 trigger 这个字段**:platform-image 的 build context 是仓库
+    # 根(`.`),因为它 COPY 仓库根下的 platform-sdk/。而 `".github/..."`
+    # 这种路径恰好 `startswith(".")` —— 拿 `.` 当前缀去匹配,**任何一个仓库
+    # 都会误判成"有触发"**,这个检查器就变成了永远通过。这正是它自己要防的
+    # 那类问题,所以特意不让它踩。
+    entries = wf["jobs"]["build-and-push"]["strategy"]["matrix"]["include"]
+    contexts = [i.get("trigger") or i["context"] for i in entries]
 
     missing = [c for c in contexts if not any(p.startswith(c) for p in paths)]
     if missing:

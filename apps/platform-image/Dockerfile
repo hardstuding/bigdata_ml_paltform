@@ -20,7 +20,19 @@
 # 构建时 build context 必须是仓库根目录(不是这个文件所在目录),因为下面
 # `COPY platform-sdk` 引用的是仓库根下的 platform-sdk/ 目录:
 #   docker build -f apps/platform-image/Dockerfile -t local/platform-runtime:0.1.0 .
+# 构建时的 pip 源。**默认阿里云**是给"在境内云主机上手工构建"那条路径准备
+# 的;GitHub Actions 的 runner 在境外,连阿里云反而慢/不通,所以 CI 里用
+# build-arg 覆盖成默认 PyPI(见 .github/workflows/build-images.yml)。
+#
+# 注意这只影响**构建时**。容器里 /etc/pip.conf 写的运行时索引仍然是阿里云
+# + MinIO 内部包索引 —— 那是给集群里的人用的,集群在境内。
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+
 FROM quay.io/jupyterhub/k8s-singleuser-sample:4.4.1
+
+# FROM 之后要重新声明才能在 RUN 里用(ARG 的作用域被 FROM 截断,
+# 这是 Dockerfile 的规矩,不是笔误)。
+ARG PIP_INDEX_URL
 
 USER root
 
@@ -54,7 +66,7 @@ RUN printf '%s\n' \
 # 卡死探针预算,2026-08-16 真实故障:SIGKILL,5 分 44 秒整)。
 COPY apps/platform-image/requirements.txt /tmp/requirements.txt
 COPY platform-sdk /tmp/platform-sdk
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
+RUN pip install --no-cache-dir -i "${PIP_INDEX_URL}" \
         /tmp/platform-sdk[submit] \
         -r /tmp/requirements.txt \
     && rm -rf /tmp/platform-sdk /tmp/requirements.txt
