@@ -96,6 +96,12 @@ jobs:
       - name: 文档死链检查
         run: python3 scripts/check-doc-links.py
 
+      # 能力表被证伪过四次(见 capability-matrix.md 底部那节),四次的共同点
+      # 都是"标着 ✅ 但没人真的跑过"。这个检查卡的就是那个失效模式:✅ 的
+      # 行不许把验证级别写成「未验证」/「计划中」。
+      - name: 能力表自洽检查
+        run: python3 scripts/check-capability-matrix.py
+
       # 文档里的 SDK 调用示例,参数要真的能和签名对上。
       # 2026-08-29 发现 usage-guide 里写着 `submit_job("train.py")`,而真实
       # 签名第一个参数是 name —— 照着文档写必然报错,而这种错不会被任何

@@ -15,7 +15,9 @@
 3. [`docs/project/capability-matrix.md`](docs/project/capability-matrix.md) —— 五个角色今天各自真的能做什么。
    **这是"我们做到哪了"的唯一权威入口**,衡量标准是"某个岗位能不能
    独立完成一件真实工作",不是"部署了哪些组件"。判断某件事该不该做、
-   该排多前,依据是它解锁哪个角色的哪条能力(见 ADR-057)
+   该排多前,依据是它解锁哪个角色的哪条能力(见 ADR-057)。
+   **看「验证级别」那一栏,不要只看状态**——它回答的是"凭什么说它可用",
+   `demo`/`未验证` 和 `集成验证` 之间差着这个项目踩过的大部分坑
 4. 当前主线涉及的环境状态文档(比如
    [`environments/cloud-full/STATUS.md`](environments/cloud-full/STATUS.md))
 5. 主线直接引用的 ADR(索引:[`docs/decisions/README.md`](docs/decisions/README.md))
