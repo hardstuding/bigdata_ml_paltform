@@ -1,14 +1,14 @@
-# 在线推理看板(C 线「推理可观测性」)。走 kube-prometheus-stack 的 Grafana
-# sidecar 自动发现(带 grafana_dashboard 标签的 ConfigMap)。
+# 在线推理看板(C 线「推理可观测性」)。
 #
-# **指标名是在集群上 curl 出来的,不是照文档写的**。这里踩了一次:KServe
-# 官方文档讲的是它自己的 Python 模型服务器(request_predict_seconds,端口
-# 8080),而我们的推理服务是 modelFormat: mlflow,跑起来是 **MLServer**,
-# 暴露的是另一套(model_infer_request_*、rest_server_request_duration_seconds_*,
-# 端口 8082)。第一版整套写错,curl 一遍才发现。
-# 换 runtime 时这份要重新核对。
+# **每一条查询都在真集群上跑过、确认返回了数**,不是照文档抄的。踩过的两个坑:
+#   1. 指标来自 **MLServer**(modelFormat: mlflow),不是 KServe 自己的
+#      Python server——文档里的 request_predict_seconds 那套在这里不存在。
+#   2. `model_infer_request_duration` 是 **summary**(只有 _count/_sum),
+#      histogram_quantile 对它返回空。分位数只能从
+#      `rest_server_request_duration_seconds`(histogram)取。
 #
-# 抓取那一半见 apps/kserve-inference-monitoring/manifests/podmonitor.yaml。
+# 抓取那一半见 apps/kserve-inference-monitoring/manifests/podmonitor.yaml,
+# 那边也踩了四次才对。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,7 +33,7 @@ data:
           "id": 1,
           "title": "推理请求速率",
           "type": "timeseries",
-          "description": "MLServer 的 model_infer_request_{success,failure}_total。成功和失败画在一起——只看总量看不出错误率在涨。",
+          "description": "成功和失败画在一起——只看总量看不出错误率在涨。",
           "gridPos": {
             "x": 0,
             "y": 0,
@@ -67,7 +67,7 @@ data:
           "id": 2,
           "title": "推理错误率",
           "type": "timeseries",
-          "description": "clamp_min 是为了零流量时不出现 0/0 的 NaN 断线——断线和'错误率 0'在图上看起来很像,但含义完全相反。",
+          "description": "clamp_min 是为了零流量时不出现 0/0 的 NaN 断线——断线和「错误率 0」在图上很像,含义却相反。",
           "gridPos": {
             "x": 12,
             "y": 0,
@@ -94,9 +94,9 @@ data:
         },
         {
           "id": 3,
-          "title": "推理延迟 P50 / P95 / P99",
+          "title": "端到端延迟 P50 / P95 / P99(HTTP 层)",
           "type": "timeseries",
-          "description": "只有平均值是不够的:线上真正被投诉的是长尾。",
+          "description": "分位数只能从这个指标取:model_infer_request_duration 是 **summary**(只有 _count/_sum,没有 bucket),histogram_quantile 对它无效——实测返回空。只统计 200,把 500 的快速失败混进来会让延迟看着更好。",
           "gridPos": {
             "x": 0,
             "y": 7,
@@ -115,30 +115,59 @@ data:
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.5, sum by (le, model) (rate(model_infer_request_duration_bucket[5m])))",
-              "legendFormat": "P50 {{model}}",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(rest_server_request_duration_seconds_bucket{path=~\".*infer.*\",status_code=\"200\"}[5m])))",
+              "legendFormat": "P50",
               "refId": "A"
             },
             {
-              "expr": "histogram_quantile(0.95, sum by (le, model) (rate(model_infer_request_duration_bucket[5m])))",
-              "legendFormat": "P95 {{model}}",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(rest_server_request_duration_seconds_bucket{path=~\".*infer.*\",status_code=\"200\"}[5m])))",
+              "legendFormat": "P95",
               "refId": "B"
             },
             {
-              "expr": "histogram_quantile(0.99, sum by (le, model) (rate(model_infer_request_duration_bucket[5m])))",
-              "legendFormat": "P99 {{model}}",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(rest_server_request_duration_seconds_bucket{path=~\".*infer.*\",status_code=\"200\"}[5m])))",
+              "legendFormat": "P99",
               "refId": "C"
             }
           ]
         },
         {
           "id": 4,
-          "title": "HTTP 层:按状态码的请求速率",
+          "title": "模型层平均耗时",
           "type": "timeseries",
-          "description": "model_infer_* 是模型这一层的;这个是 HTTP 这一层的。两层对不上时,差额就是还没进到模型就被拒掉的请求(鉴权、请求体格式)。",
+          "description": "和上面那条 HTTP 延迟的差额 = 框架开销(反序列化、路由、鉴权)。模型本身慢还是外面慢,看这两条的距离。summary 只能给平均值。",
           "gridPos": {
             "x": 12,
             "y": 7,
+            "w": 12,
+            "h": 7
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "expr": "sum by (model) (rate(model_infer_request_duration_sum[5m]))\n/ clamp_min(sum by (model) (rate(model_infer_request_duration_count[5m])), 0.0001)",
+              "legendFormat": "{{model}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "HTTP 层:按状态码",
+          "type": "timeseries",
+          "description": "和 model_infer_* 对不上的差额,是还没进到模型就被拒掉的请求(请求体格式、鉴权)。",
+          "gridPos": {
+            "x": 0,
+            "y": 14,
             "w": 12,
             "h": 7
           },
@@ -161,15 +190,15 @@ data:
           ]
         },
         {
-          "id": 5,
+          "id": 6,
           "title": "有没有在抓(scrape 目标数)",
           "type": "timeseries",
-          "description": "**这个面板是给「看板全是空的」那一刻用的**:0 说明 PodMonitor 没生效(标签没对上 / 命名空间没匹配 / 端口写错 / 推理服务没起来),不是没有流量。第一版就把端口写成了 8080(照 KServe 文档),而实际跑的 MLServer 在 8082。",
+          "description": "**给「看板全是空的」那一刻用的**:0 说明 PodMonitor 没生效,不是没有流量。这一版之前踩了四次:port: http 匹配不到(容器没命名端口)、targetPort 已废弃、portNumber 被 keep 规则丢掉、init 容器把同一地址抓了两遍。",
           "gridPos": {
-            "x": 0,
+            "x": 12,
             "y": 14,
-            "w": 24,
-            "h": 5
+            "w": 12,
+            "h": 7
           },
           "fieldConfig": {
             "defaults": {
@@ -183,7 +212,7 @@ data:
           },
           "targets": [
             {
-              "expr": "count(up{job=\"kserve-inference\"} == 1)",
+              "expr": "count(up{job=\"monitoring/kserve-inference\"} == 1)",
               "legendFormat": "抓到的目标数",
               "refId": "A"
             }
