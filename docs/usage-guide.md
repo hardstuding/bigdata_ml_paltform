@@ -1,260 +1,325 @@
-# 开发使用指南
+# 使用指南
 
-这份文档给**用这个平台干活的人**看,不是给平台运维看的——运维相关的
-文档在 `docs/operations/`。这里只讲"我要干某件事该怎么用",不讲这些组件
-是怎么部署起来的。
+给**用这个平台干活的人**看。运维视角的文档在 [`docs/operations/`](operations/)。
 
-**按角色找你要看的部分**(角色定义见 [`docs/project/capability-matrix.md`](project/capability-matrix.md)):
+**每一节的结构都一样**:前置条件 → 操作 → 预期结果 → 常见失败。看到"预期
+结果"里那句话,才算这一步真的成了 —— 这个平台被"命令没报错就以为成了"坑过
+太多次。
 
-| 你是 | 看哪几节 |
+## 先做这两件事
+
+**1. 所有链接从门户拿,不要抄文档里的地址。** 门户会按当前环境拼出正确的
+域名和端口,还会现场探测每个工具在不在线。这份文档**不写任何具体 URL**,
+因为写了就会过期 —— 2026-08-16 真实发生过:文档和门户里的链接全部硬编码
+成一套域名,换到另一档环境后**点哪个都是 404**。
+
+**2. 确认自己在哪个组。** 所有工具共用同一个 Keycloak 账号(realm
+`platform`),登录一次全平台通用;而**你在哪个组决定你能用什么**:
+
+| 组 | 拿到什么 |
 |---|---|
-| 数据分析师 | 查数据 / 查表权限 / 看板 BI |
-| 大数据开发 | 批处理作业 / 流式作业 / Schema Registry / 作业排障 |
-| 算法工程师 | Notebook / 提交训练任务 / 模型上线 |
-| 数据治理 | 数据目录与血缘 / 建表 |
-| 平台运维 | 这份不适合你,看 [`docs/operations/`](operations/) |
+| `platform-team` | 平台管理权限;Trino 里能查审计表和全部行 |
+| `data-analysts` | SQL 工作台 + BI 看板编辑 |
+| `algorithm-team` | SQL 工作台 + 看板只读 |
+| 不在任何组 | 只能看,不能查 |
 
-看这份文档之前先确认:你要用的组件现在是不是"常驻"状态。这台机器按需
-park/unpark 组件是常态(见 `README.md`),真实状态以
-`http://portal.local-lite.test`(平台门户,登录后能看到每个工具现场探测
-的在线状态)为准,不要相信这份文档里任何"现在是不是在跑"的静态描述——
-这条本身也是这个项目吃过亏才写下的规矩(见
-`docs/operations/troubleshooting.md`)。
+不知道自己在哪个组,看 `platform/iam/memberships.csv`,或者找 `platform-team`
+的人。
 
-## 你的账号
+---
 
-所有工具共用同一个 Keycloak 账号(realm: `platform`),登录一次,后面
-打开别的工具不用重新输密码。你的账号所在的组(`platform/iam/
-groups.yaml`/`memberships.csv`)决定你能用哪些工具、审批链路怎么走——
-不知道自己在哪个组,找 `platform-team` 组的人确认。
+# 数据分析师
 
-## 查数据:Trino
+## 查数据
 
-湖仓用 Iceberg + Trino,这是这个平台目前**唯一**的交互式 SQL 入口。
+**前置条件**:你在 `data-analysts` 或 `algorithm-team` 组;要查的表已经
+申请过权限(见下一节)。
 
-- Web UI:`http://trino.local-lite.test`,浏览器打开会走 Keycloak 单点
-  登录,登录身份就是你的 Keycloak 账号。
-- CLI / JDBC:Trino 原生支持 OIDC 交互式登录(命令行工具会弹出浏览器
-  完成一次授权),也支持用户名+密码的 Basic Auth(给脚本/BI 工具这类
-  没法弹浏览器的场景用,账号是单独发的服务账号,不是你自己的 Keycloak
-  账号)。JDBC URL 形如 `jdbc:trino://trino.local-lite.test:443`,证书是
-  自签的,客户端要么信任这张自签证书,要么按各工具自己的"跳过证书校验"
-  选项配(生产环境上正式证书后这条不再需要,现在是 local-lite 阶段的
-  临时处理)。
-- 权限:能查哪些表,由**表访问分级审批**控制(见下一节)。没申请过的表
-  查不到,不是 bug。
-- 常见报错排查:先看 `docs/operations/troubleshooting.md`,这台机器的
-  Trino 有已知的资源争抢问题(colima 13GB/6vCPU 的限制下,JVM 启动期
-  偶尔会 CrashLoopBackOff,等它自己退避重启几次通常能自愈,不是配置
-  错误)。
+**操作**:从门户点「SQL 工作台」。那是 Superset 的 SQL Lab —— 编辑器、执行、
+历史、导出 CSV 都在里面([ADR-084](decisions/084-analyst-sql-workbench.md))。
 
-## 查表权限:权限申请门户
+> **不要去 Trino 的 Web UI 写 SQL,那里没有编辑器。** 它只能看查询在跑什么、
+> 执行计划、耗时。门户上曾经把它介绍成 SQL 工作台,是错的,已经改了。
 
-`http://permission-request.local-lite.test`——想查一张之前没权限的表,
-在这里发起申请,不要去找人手动改 `platform/iam/table-access-grants.csv`
-(那份文件现在是这个门户自动写的,手动改容易和门户的记录对不上)。
+**预期结果**:能选到 Trino 数据源,`SELECT` 出行。
 
-- 按表的"安全等级"(OpenMetadata 里打的 tag)走不同的审批链:等级越高,
-  审批链越长(直属上级 → 上级的上级 → 表负责人 → 指定管理员,按等级
-  逐级叠加,不是每次都要走全部四层)。
-- 审批通过后的授权记录**默认 180 天后自动过期**,到期会被自动回收
-  (ADR-050),届时需要重新申请,不是一次批准永久有效——这条是最近才
-  补上的行为,如果你发现权限"突然没了",先看是不是过期,不要当成 bug
-  报。
-- 这份门户目前只做"决策与留痕",**不做真正的 Trino 查询拦截**——批准
-  记录写进 grants.csv,但现在没有任何东西读这份数据去真的拦住你的 SQL
-  查询(Trino 层面的细粒度强制执行还没做,是明确的后续工作,ADR-028)。
-  换句话说:现在"申请-审批"这条流程本身是真实、被使用的,但"不批准就
-  真的查不到"这个技术保障还没有——目前的访问边界靠 Trino 自己的角色/
-  catalog 权限,不是这套 OA 流程本身在拦。
+**常见失败**:
 
-## 建表:建表注册工具
+- **左边看不到「SQL Lab」菜单** —— 你的组没有 `sql_lab` 角色。检查
+  `memberships.csv`,重新登录一次(角色在登录时同步)。
+- **查得到表名但查不出数据** —— 没权限,不是 bug。走下面的申请流程。
+- **某些列是 `138****5678` 或 `***MASKED***`** —— 列级脱敏在起作用
+  ([ADR-063](decisions/063-trino-column-row-level-security.md)),按你的授权等级
+  决定看到明文还是打码。**这是正常的,不要当故障报。**
+- **同一张表别人比你多几行** —— 行级过滤,按你所在部门过滤。同上。
 
-`http://table-registration.local-lite.test`——需要新建 Iceberg 表时用
-这个,不要直接手写 DDL 连 Trino 建表。它会同时把表的负责人、安全等级回写
-进 OpenMetadata,保证目录信息和实际的表同步创建,不会出现"表建了但目录
-里没有、没人知道该找谁"的情况。
+## 申请表权限
 
-## 看板 / BI:Superset
+**前置条件**:知道要哪张表(在 OpenMetadata 里搜)。
 
-`http://superset.local-lite.test`,数据源接的就是 Trino,建看板前先确认
-自己对要用的表有权限(上面"查表权限"那节)。
+**操作**:门户点「权限申请门户」发起申请。**不要手改
+`platform/iam/table-access-grants.csv`** —— 那份文件是这个门户自动写的。
 
-## 交互式开发 / Notebook
+**预期结果**:审批通过后能查到。审批链按表的安全等级逐级叠加(直属上级 →
+上级的上级 → 表负责人 → 指定管理员),等级越高链越长
+([ADR-044](decisions/044-tiered-approval-workflow.md))。
 
-JupyterHub 已部署(2026-08-19 un-park 并真实 SSO 登录验证过,见
-`apps/definitions/jupyterhub.yaml`),按组分配访问权限
-(`docs/decisions/025-jupyterhub-sso.md`)。
+> **审批不只是留痕,是真的拦得住。** Trino 接了 OPA
+> ([ADR-051](decisions/051-trino-opa-access-control.md)),没批准就是查不到 ——
+> 2026-08-26 在真集群上用真实 SQL 验过。旧版指南里"只做决策与留痕、不做
+> 真正的查询拦截"那句话是过期信息,**反了**。
 
-**"打开 notebook 自动连好 Trino/MLflow"这个曾经记录在案的缺口已经补上**
-(见 [ADR-058](decisions/058-lightweight-developer-experience.md)):
-notebook 用的是平台统一镜像,已经带了 `platform_sdk`,不用自己装
-Trino/MLflow client、不用自己填连接串:
+**常见失败**:
 
-```python
-from platform_sdk import query, mlflow_setup
+- **权限"突然没了"** —— 授权默认 180 天过期,到期自动回收
+  ([ADR-050](decisions/050-grant-expiry-reclamation.md))。重新申请,不是 bug。
+- **审批显示通过但还是查不到** —— 看申请单状态是不是
+  `approved_pending_apply`:审批决定成了,但写进 git 那一步失败了。管理员
+  跑一次 `/internal/retry-pending-applies` 补上。
 
-df = query("select * from iceberg.demo.orders limit 10")
+## 做看板
 
-mlflow = mlflow_setup("my-experiment")
-with mlflow.start_run():
-    mlflow.log_metric("acc", 0.9)
+**前置条件**:对要用的表有权限。
+
+**操作**:门户点「Superset」。
+
+**预期结果**:数据源已经接好 Trino,直接建图。
+
+**要知道的一件事**:Superset 连 Trino 走 **impersonation**
+([ADR-074](decisions/074-superset-impersonation.md)) —— 查询按**你本人**
+的权限算,不是按一个共享服务账号。所以你做的看板,别人打开时看到的行数
+可能和你不一样。**这是设计如此。**
+
+---
+
+# 大数据开发
+
+## 发一个定时批作业
+
+**前置条件**:作业是单个 Python 脚本(多文件项目还不支持,见
+[roadmap](project/roadmap.md) P1.5)。
+
+**操作**:在 `jobs/<名字>/` 下放 `job.yaml` + 脚本,`job.yaml` 里写一行
+`schedule`,push。
+
+```yaml
+schedule: "30 1 * * *"      # UTC
 ```
 
-Trino 的账号密码仍然要通过环境变量提供(`PLATFORM_TRINO_USER`/
-`PLATFORM_TRINO_PASSWORD`)——**这条明确没做**:notebook 里怎么免密拿到
-"当前登录用户"对应的 Trino 凭据,还是每个用户自己在 profile 里配一份
-服务账号凭据,这件事没有定论,现阶段用的是显式环境变量。
+**预期结果**:ArgoCD 同步后,`kubectl -n argo-workflows get cronworkflow`
+里出现同名的 CronWorkflow。照抄 `jobs/daily-order-summary/`。
 
-要把本地脚本提交到集群跑(训练任务这类),用 `submit_job()`,或者写一份
-`job.yaml` 配 `platform-submit job.yaml`——参考 `examples/hello-job/`,
-细节见 ADR-058 和 `platform-sdk/README.md`。**已知限制**:直接从
-notebook pod 里调 `submit_job()` 目前连不上 K8s API server(NetworkPolicy
-问题,`docs/project/roadmap.md` 2.6),要从终端/CI 提交,不是从 notebook 里。
+**常见失败**:
 
-如果用 Claude Code 之类的 AI 编程工具在这个仓库里干活,`.claude/skills/`
-下有 `query-data`/`submit-job`/`debug-job` 三个 skill,分别覆盖"怎么
-查数据"/"怎么提交作业"/"作业失败了怎么查"——写完还没经过真实使用验证,
-触发不准或者内容不够用的话直接回来改,不用假设它们已经调好了。
+- **`render-jobs.py --check` 在 CI 红了** —— 改了 `jobs/` 没重新渲染。跑
+  `python3 scripts/render-jobs.py` 再提交。
+- **作业起来了,一调 `query()` 就报 `MissingCredential`** —— 凭据 Secret
+  `platform-job-credentials` 不在。**注意 `envFrom` 写的是 `optional: true`,
+  Secret 不存在 Pod 照样会起来**,一路跑到 SDK 才炸。
+- **定时到点没跑** —— 云主机大部分时间是关的,撞不上就不会触发。手工提交
+  验证用 `argo submit --from cronwf/<名字>`。
 
-## 批处理作业:Spark
+## 发一个流作业
 
-跑一个读写 Iceberg 表的 Spark 作业,不用自己写 SparkApplication YAML:
+**前置条件**:数据在 Kafka topic 里,schema 登记过。
 
-```bash
-./scripts/13-run-spark-iceberg-demo.sh
-```
+**操作**:`streams/<名字>/` 下放 `stream.yaml` + PyFlink 脚本,push。
+照抄 `streams/device-events-stream/`。
 
-这个脚本本身就是一份可以照抄的样例——它提交一个真实的 SparkApplication,
-等作业跑完,然后**用 Trino 回查结果表确认数据真的落盘了**,不是只看作业
-状态。你自己的作业照着 `apps/spark-iceberg-demo/manifests/` 改。
+**预期结果**:门户「流作业」一栏出现它,状态是 RUNNING。
 
-要点:
-- **用 `apps/spark-iceberg-image/` 那个镜像**,别用官方 `apache/spark`。
-  官方镜像不带 Iceberg / S3A 的 jar,运行时去 Maven 现拉在这个网络环境下
-  会卡死(ADR-061 记过实测数据)。
-- 作业历史看 Spark History Server。**如果列表是空的**,先确认作业开了
-  `spark.eventLog.enabled` —— 这个平台上"History Server 是空的"最常见的
-  原因不是它坏了,是作业压根没写 event log。
+**常见失败**(都是这个平台实测踩过的,完整清单见
+[ADR-062](decisions/062-flink-streaming-pipeline.md)):
 
-## 流式作业:Flink
+- **表里查不到数据但作业是 RUNNING** —— Iceberg sink 靠 checkpoint 提交,
+  没到间隔就不会出现。先看时间,不是作业坏了。
+- **字段名报解析错误** —— `value` 是 Flink SQL 保留字,要加反引号。同一套
+  schema 在 Spark/SeaTunnel 那边没事,到 Flink 就炸。
+- **在两个算子之后炸出完全不相干的报错** —— 多半是开了
+  `json.ignore-parse-errors`,解析失败静默变 null。**不要开它。**
 
-```bash
-./scripts/31-run-flink-streaming-demo.sh
-```
+## 改 Kafka 消息的字段
 
-现成的链路是 Kafka topic → Flink → Iceberg(明细表 + 1 分钟滚动窗口聚合表),
-定义在 `apps/flink-streaming-demo/`。改成你自己的作业时,有几个坑是这个
-平台上实测踩过的(完整清单见 ADR-062):
+**前置条件**:无。
 
-- **`value` 是 Flink SQL 的保留字**,字段名撞上保留字要加反引号。同一套
-  schema 在 Spark/SeaTunnel 那边没问题,换到 Flink 就报解析错误。
-- **Iceberg sink 靠 checkpoint 提交**。没到 checkpoint 间隔,数据不会出现
-  在表里——查不到数据先看是不是还没到点,不是作业坏了。
-- **时间字段格式要和 Flink 的 `json.timestamp-format.standard` 对上**,
-  而且**不要开 `json.ignore-parse-errors`**:开着的话解析失败会静默变成
-  null,然后在两个算子之后以完全不相干的报错炸出来。
-
-## 改 Kafka 消息的字段?先看 Schema Registry
-
-流式 topic 的消息格式**不再是"约定俗成"**,而是登记在 Schema Registry
-(Karapace)里的([ADR-068](decisions/068-schema-registry.md))。
-
-这对你意味着一件很具体的事:**你改字段的时候,不兼容的改动会在发送那一侧
-就被拒掉**,不会等下游作业炸了才发现。
+**操作**:直接改。不兼容的改动**会在发送那一侧就被拒**,不会等下游炸了
+才发现([ADR-068](decisions/068-schema-registry.md))。
 
 ```
-加一个带默认值的可选字段   → 放行
-删一个字段                 → 放行
-改字段类型(double→string) → 409 拒绝
+加一个带默认值的可选字段    → 放行
+删一个字段                  → 放行
+改字段类型(double→string)  → 409 拒绝
 ```
 
-规则是 `BACKWARD`:**新版本的消费者要能读老数据**。这条规则是按"消费端
-先升级、生产端后升级"这个真实顺序选的——如果你的改动被拒了,先想想下游
-读老数据会不会坏,通常答案就在那里。
+**预期结果**:兼容的改动照常发送;不兼容的收到 409。
 
-看当前登记了哪些 schema(registry 没有对外的 Ingress,故意的——谁能往里
-写 schema 谁就能决定下游怎么解析数据):
+**规则是 `BACKWARD`**:新版本的消费者要能读老数据。改动被拒了,先想想下游
+读老数据会不会坏 —— 答案通常就在那里。
+
+看当前登记了哪些 schema(registry 故意没有对外 Ingress:谁能往里写 schema,
+谁就能决定下游怎么解析数据):
 
 ```bash
 kubectl -n schema-registry port-forward svc/karapace 8081:8081
-curl -s localhost:8081/subjects | python3 -m json.tool
-curl -s localhost:8081/subjects/device-events-avro-value/versions/latest | python3 -m json.tool
 ```
 
-> Karapace 兼容 Confluent Schema Registry 的 API 和 wire format,所以
-> Confluent 那套文档和客户端库直接可用:
-> https://docs.confluent.io/platform/current/schema-registry/
+## 跑一个 Spark 批处理
 
-## 从模板起步,不要从空文件起步
+**操作**:`./scripts/13-run-spark-iceberg-demo.sh`。这个脚本本身就是可以
+照抄的样例,你自己的作业照着 `apps/spark-iceberg-demo/manifests/` 改。
 
-写一个新作业之前先看一眼有什么现成的:
+**预期结果**:脚本输出 `SPARK_ICEBERG_DEMO_OK`。它**用 Trino 回查结果表**
+确认数据真的落盘,不是只看作业状态。
+
+**常见失败**:
+
+- **作业卡住不动** —— 用 `apps/spark-iceberg-image/` 那个镜像,别用官方
+  `apache/spark`。官方镜像不带 Iceberg/S3A 的 jar,运行时去 Maven 现拉在
+  这片网络下必卡死([ADR-036](decisions/036-spark-iceberg-pipeline.md))。
+- **History Server 列表是空的** —— 最常见的原因不是它坏了,是作业压根没开
+  `spark.eventLog.enabled`。
+
+## 作业排障:先看哪一层
+
+这个平台上有个反复出现的规律:**报错出现的位置和真正的根因经常隔着一到
+两层**。实测过的:
+
+- Flink checkpoint 一直失败 → 真因是 TaskManager 因为一个不存在的 ConfigMap
+  起不来,算子根本没调度上去。
+- OpenMetadata 采集显示 `Running 0/1` 看着正常 → 其实被命名空间配额拦住,
+  一个 Pod 都没建出来,只有 `kubectl describe job` 看得到。
+
+**顺序:先看 Pod 层(`kubectl get pods` / `describe`),再看应用日志。**
+不要一上来就扎进应用日志。按症状检索的完整 Runbook 在
+[`troubleshooting.md`](operations/troubleshooting.md),顶部有 59 条症状索引。
+
+---
+
+# 算法工程师
+
+## 在 Notebook 里查数
+
+**前置条件**:你在 `algorithm-team` 组。
+
+**操作**:门户点「JupyterHub」,新建 notebook:
+
+```python
+from platform_sdk import query
+df = query("select * from iceberg.demo.orders limit 10")
+```
+
+不用装 client、不用拼连接串 —— singleuser 用的是平台统一镜像,自带
+`platform_sdk`([ADR-058](decisions/058-lightweight-developer-experience.md))。
+
+**预期结果**:直接出数。
+
+**身份是你自己的,不是共享账号。** SDK 从 `JUPYTERHUB_USER` 取当前登录用户,
+用服务账号认证、以你的身份发起会话(impersonation)。所以:
+
+```sql
+SELECT current_user        -- 返回你的用户名,不是 notebook_service
+```
+
+没有 grant 的表查不到,列级脱敏对你生效 —— **和你在 SQL 工作台里看到的
+完全一致**,不会出现"notebook 里能看到明文身份证号"这种事(这正是 2026-08-29
+修掉的问题)。
+
+**常见失败**:
+
+- **`MissingCredential: PLATFORM_TRINO_USER`** —— 环境变量没注进来,找
+  `platform-team`。
+- **`current_user` 返回 `notebook_service`** —— impersonation 没生效。
+  **注意这不会报错**,只会安静地用服务账号的权限查,是个危险的静默失败。
+
+## 用公司内部的 Python 包
+
+**前置条件**:包已经放进 `packages/` 并 push 过。
+
+**操作**:直接装,**不用加任何参数**:
+
+```bash
+pip install platform-helpers
+```
+
+**预期结果**:装上、能 import。索引地址已经配在镜像的 pip 配置里
+([ADR-083](decisions/083-internal-package-registry.md))。
+
+**发布自己的包**:在 `packages/<名字>/` 下放标准的 `pyproject.toml` + 源码,
+push。集群里的 Job 会构建 wheel、传 MinIO、更新索引。
+
+**常见失败**:
+
+- **装上了但版本是 `0.0.0`** —— `pyproject.toml` 里 name/version 没写全。
+  **空的 `pyproject.toml` 不会构建失败**,会静默产出一个 0.0.0 的包。
+  现在发布脚本会显式拦住这种情况。
+- **`Could not find a version that satisfies the requirement`** —— 索引还
+  没更新,等下一轮发布 Job。
+
+> **Java/Maven 包还不支持**,是明确的待办不是遗漏。
+
+## 提交训练任务
+
+**操作**:
+
+```python
+from platform_sdk import submit_job, run_workflow_template
+submit_job(name="train-model", script="train.py")   # 把脚本丢到集群上跑
+run_workflow_template("train-demo-model")            # 触发已部署的工作流模板
+```
+
+**预期结果**:返回 workflow 对象,Argo Workflows UI 里查得到。
+
+多步骤流水线(特征物化 → 训练 → 模型门禁)的样例在
+`apps/argo-workflows-training-image/manifests/workflow-template-ml-pipeline.yaml`。
+
+## 上线一个模型
+
+**前置条件**:模型已经注册进 MLflow Model Registry,**并且被批准过**。
+
+**操作**:`scripts/11-deploy-model.sh`。
+
+**预期结果**:KServe InferenceService 就绪,V2 协议推理返回预测。
+
+**要知道的两件事**([ADR-080](decisions/080-model-approval-and-rollback.md)):
+
+- **上线单位是"注册表里被批准过的版本"**,不是"MinIO 里最新的目录"。存在
+  更新的未批准 v2 时,部署仍然只用已批准的 v1 —— 这条守卫验证过。
+- **灰度做不了,而且脚本会显式拒绝 `canaryTrafficPercent`**。KServe 在这里
+  是 RawDeployment 模式(刻意不装 Knative),那个字段会被收下但**完全不
+  生效**,新版本直接拿 100% 流量。**留一个不生效的参数比没有更糟**,所以
+  改成明确报错。
+
+---
+
+# 从模板起步,不要从空文件起步
 
 ```bash
 platform-submit --list-templates
 platform-submit --new batch-etl --into my-first-etl
 ```
 
-四个模板对应四类真实工作:
-
 | 模板 | 什么时候用 |
 |---|---|
 | `hello-job` | 第一次跑,验证连接都通了 |
 | `batch-etl` | 从 Iceberg 读、算、写回 Iceberg —— 最常见的一类 |
-| `train-model` | 取数 → 训练 → 记实验 → **注册模型**(注册 ≠ 上线,是两步) |
+| `train-model` | 取数 → 训练 → 记实验 → **注册**模型(注册 ≠ 上线) |
 | `data-quality-check` | 业务规则断言,**不合格就让作业失败** |
 
 **模板里已经写进去、你可能想不到要加的两件事**:
 
 - `batch-etl` 写完会**回查一次**再退出。这个平台反复吃过"作业显示成功但
-  数据没落盘"的亏(Iceberg 靠 commit 提交),所以模板不把这步留给你想起来加。
-- `data-quality-check` 检查不通过时**非零退出**,不是打印警告。打印的警告
-  没人看;作业挂了才会有人管。数据质量的价值在于**阻断**,不在于记录。
+  数据没落盘"的亏(Iceberg 靠 commit 提交),模板不把这步留给你想起来加。
+- `data-quality-check` 不通过时**非零退出**,不是打印警告。打印的警告没人
+  看,作业挂了才有人管。**数据质量的价值在于阻断,不在于记录。**
 
-生成出来的目录里 `job.yaml` 的字段就是 `submit_job()` 的参数,没有另一套
-schema 要学。
+---
 
-## 提交训练任务 / 跑在集群上
+# 遇到问题去哪查
 
-在 notebook 里一行提交,不用写 Argo YAML:
-
-```python
-from platform_sdk import submit_job, run_workflow_template
-submit_job(name="train-model", script="train.py")   # 把脚本丢到集群上跑
-run_workflow_template("train-demo-model")    # 触发已部署的工作流模板
-```
-
-多步骤流水线(特征物化 → 训练 → 模型门禁)的样例在
-`apps/argo-workflows-training-image/manifests/workflow-template-ml-pipeline.yaml`。
-
-## 数据目录与血缘:OpenMetadata
-
-Trino 里的表**会被自动采集进目录**(每 6 小时一次),不需要手动登记——
-打开 OpenMetadata 直接搜表名就行,能看到字段、类型和血缘。
-
-如果你新建的表在目录里搜不到,先确认是不是还没到下一次采集;要立刻同步
-可以手动触发一次(见 `scripts/29-configure-openmetadata-trino-ingestion.sh`
-的说明)。
-
-## 作业排障:先看哪一层
-
-这个平台上排作业问题有个反复出现的规律:**报错出现的位置和真正的根因
-经常隔着一到两层**。实测过的例子:
-
-- Flink 的 checkpoint 一直失败 → 真正原因是 TaskManager 因为一个不存在的
-  ConfigMap 起不来,算子根本没调度上去。
-- OpenMetadata 采集任务显示 `Running 0/1` 看着正常 → 其实是被命名空间配额
-  拦住,一个 Pod 都没建出来,只有 `kubectl describe job` 才看得到。
-
-所以顺序建议是:**先看 Pod 层(`kubectl get pods` / `describe`),再看
-应用日志**,不要一上来就扎进应用日志里找。按症状检索的完整 Runbook 在
-[`docs/operations/troubleshooting.md`](operations/troubleshooting.md),
-顶部有症状索引。
-
-## 遇到问题去哪查
-
-- 部署/网络类的坑:`docs/operations/troubleshooting.md`
-- 想知道某个组件现在到底有没有在跑:`http://portal.local-lite.test`
-  (现场探测,不是文档里的静态描述)
-- 这个平台的架构全貌和每个组件的定位:`docs/architecture.md`
-- 具体某个设计为什么这么做:`docs/decisions/`(按编号找对应的 ADR)
+| 想知道 | 去哪 |
+|---|---|
+| 某个组件现在到底在不在跑 | **门户**(现场探测,不是文档里的静态描述) |
+| 部署/网络类的坑 | [`troubleshooting.md`](operations/troubleshooting.md),顶部症状索引 |
+| 某个角色今天能做什么 | [`capability-matrix.md`](project/capability-matrix.md) |
+| 某个设计为什么这么做 | [`docs/decisions/`](decisions/) |
+| 架构全貌 | [`architecture.md`](architecture.md) |

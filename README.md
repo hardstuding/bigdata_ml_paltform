@@ -232,7 +232,8 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 - **想知道"这个平台现在到底能用来干什么" → [`docs/project/capability-matrix.md`](docs/project/capability-matrix.md)** —— 五个角色(分析师/大数据开发/算法/运维/管理)× 完整工作链路 × 每一环今天的真实状态。**这是"我们做到哪了"的唯一权威入口**,衡量标准是"某个岗位能不能独立完成一件真实工作",不是"部署了哪些组件"(见 [ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))
 - **接手这个项目的 AI/人类,先看 [`CLAUDE.md`](CLAUDE.md) 和 [`docs/project/current-work.md`](docs/project/current-work.md)**——协作规则和"现在唯一的主线任务是什么、下一步做什么",不用依赖对话记忆或者猜
 - **实际使用这套平台,先打开 `http://portal.local-lite.test`**(ADR-047)—— 统一门户,现在有哪些工具、分别是干什么的、点哪里进去,一个页面看完;各工具共用同一个 Keycloak SSO,登录一次到处能用,不用重复输密码
-- [`docs/usage-guide.md`](docs/usage-guide.md) —— 给数据分析师/算法工程师看的日常使用指南(Trino 怎么连、怎么申请表权限、Superset/建表工具怎么用、notebook 交互式开发现在的真实差距),不是运维文档
+- [`docs/usage-guide.md`](docs/usage-guide.md) —— 按角色和任务组织的使用指南,
+  每节统一成**前置条件 → 操作 → 预期结果 → 常见失败**。不是运维文档
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) —— 记下来但先不做的想法,按优先级排,不打断当前主线
 - [`docs/architecture.md`](docs/architecture.md) —— 架构总览、分层设计、组件清单、路线图(Phase 0-4)、还没定的设计决策
 - [`docs/decisions/README.md`](docs/decisions/README.md) —— **ADR 主题索引**(57 份,按平台底座/湖仓/SSO/权限治理/可观测性等分组,带验证状态)
