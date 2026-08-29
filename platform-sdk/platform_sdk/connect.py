@@ -75,26 +75,32 @@ def trino_connection(
         "trino-service-account 这个 Secret 里。",
     )
 
-    # 身份代理:让 Trino 把这次查询当成 `acting` 这个人发起的,权限也按他算。
-    # 用的是 Trino 原生的 `X-Trino-Authorization-User` 头,和 Superset 走的是
-    # 同一条路(ADR-074)。服务账号必须在 OPA 的 impersonation_allowed_accounts
-    # 里,否则 Trino 直接拒绝——**这是有意的**:能代理别人是一项特权,不该
-    # 因为某个账号"是服务账号"就自动拥有。
-    headers = {}
+    # 身份代理(impersonation):让 Trino 把这次查询当成 `acting` 这个人发起
+    # 的,权限按他算。和 Superset 走的是同一条路(ADR-074)。
+    #
+    # **机制是"认证用服务账号、会话 user 填被代理的人",不是加什么 header。**
+    # 2026-08-29 第一版按 `X-Trino-Authorization-User` 这个头写,实测
+    # `SELECT current_user` 返回的仍然是服务账号——头压根没生效,而且
+    # **不报错**,查询照常跑、权限照常按服务账号算。那正是这次要修的洞本身,
+    # 差点用一个同样静默失效的实现"修"掉它。
+    #
+    # 正确形态:HTTP Basic 认证的是服务账号(它必须在 OPA 的
+    # impersonation_allowed_accounts 里,否则 Trino 拒绝);协议里的 `user`
+    # 字段是会话身份,OPA 策略里 `input.context.identity.user` 读的就是它。
     acting = act_as or acting_user()
-    if acting and acting != user:
-        headers["X-Trino-Authorization-User"] = acting
+    session_user = acting or user
 
     return connect(
         host=config.trino_host(),
         port=config.trino_port(),
-        user=user,
+        # 会话身份 = 被代理的人(没有就是服务账号自己)
+        user=session_user,
         catalog=catalog or config.trino_catalog(),
         schema=schema or config.trino_schema(),
         http_scheme=config.trino_scheme(),
+        # 认证身份始终是服务账号,和上面的会话身份是两件事
         auth=BasicAuthentication(user, password),
         verify=config.trino_verify(),
-        http_headers=headers or None,
     )
 
 

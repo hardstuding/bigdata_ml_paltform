@@ -45,40 +45,52 @@ def test_定时作业里没有当前用户():
     assert c.acting_user() is None
 
 
-def _headers_of(**kw):
-    """跑一遍 trino_connection,把它最终传给 trino 客户端的 http_headers 抓出来。"""
+def _connect_args(**kw):
+    """跑一遍 trino_connection,把它最终传给 trino 客户端的参数抓出来。
+
+    关注两个:`user`(会话身份,OPA 按它算权限)和 auth 里的账号
+    (认证身份)。**这两个必须是分开的** —— 2026-08-29 第一版把代理写成加
+    `X-Trino-Authorization-User` 头,实测那个头压根不生效,而且不报错:
+    查询照常跑、权限照常按服务账号算。差点用一个同样静默失效的实现去"修"
+    一个静默失效的洞。
+    """
     captured = {}
+
+    class FakeAuth:
+        def __init__(self, u, p):
+            captured["auth_user"] = u
 
     def fake_connect(**kwargs):
         captured.update(kwargs)
         return object()
 
     with patch("trino.dbapi.connect", fake_connect), \
-         patch("trino.auth.BasicAuthentication", lambda *a: None):
+         patch("trino.auth.BasicAuthentication", FakeAuth):
         c.trino_connection(user="notebook_service", password="x", **kw)
-    return captured.get("http_headers")
+    return captured
 
 
-def test_有当前用户时带上代理头():
+def test_有当前用户时会话身份是那个人():
     os.environ["JUPYTERHUB_USER"] = "analyst001"
-    h = _headers_of()
-    assert h == {"X-Trino-Authorization-User": "analyst001"}
+    a = _connect_args()
+    assert a["user"] == "analyst001", "会话身份必须是被代理的人,OPA 按它算权限"
+    assert a["auth_user"] == "notebook_service", "认证身份必须还是服务账号"
 
 
-def test_没有当前用户时不带代理头():
-    # **不要退化成"带一个空头"或者"带服务账号自己"** —— 那会让 Trino 收到
-    # 一个语义不明的请求。没有就是不带。
-    assert _headers_of() is None
+def test_没有当前用户时会话身份就是服务账号():
+    a = _connect_args()
+    assert a["user"] == "notebook_service"
+    assert a["auth_user"] == "notebook_service"
 
 
-def test_代理目标就是自己时不带头():
-    # 服务账号代表自己查,不需要走代理路径;带了反而要求它有
-    # ImpersonateUser 权限,平白多一个失败点。
-    os.environ["JUPYTERHUB_USER"] = "notebook_service"
-    assert _headers_of() is None
+def test_不再依赖任何自定义_header():
+    # 显式锁死:别再有人"顺手"把 X-Trino-Authorization-User 加回来——
+    # 它不生效,而且不生效时不报错。
+    os.environ["JUPYTERHUB_USER"] = "analyst001"
+    a = _connect_args()
+    assert not a.get("http_headers"), "impersonation 不靠 header,靠 user 字段"
 
 
 def test_act_as_参数优先于环境变量():
     os.environ["JUPYTERHUB_USER"] = "analyst001"
-    h = _headers_of(act_as="ceo001")
-    assert h == {"X-Trino-Authorization-User": "ceo001"}
+    assert _connect_args(act_as="ceo001")["user"] == "ceo001"

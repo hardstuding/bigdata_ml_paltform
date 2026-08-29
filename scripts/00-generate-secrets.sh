@@ -205,6 +205,15 @@ print(json.dumps({'data': {
 }}))
 " "$new_db" "$pw")" >/dev/null
     echo "已追加: trino/trino-service-account 里的 ${username}(密码见 ${OUT_FILE})"
+    # **必须记下来,后面要重启 Trino。** password.db 是 subPath 挂进
+    # coordinator 的,而 **subPath 挂载的 Secret/ConfigMap,Kubernetes 永远
+    # 不会更新**(不是有延迟,是根本不更新)。后果:账号写进 Secret 了、
+    # 脚本打印"已追加"、而跑着的 Trino 里那个文件还是旧的,新账号一登录
+    # 就是 `401 Access Denied: Invalid credentials`,**从任何一层都看不出
+    # 是没生效**。2026-08-29 加 notebook_service 时实测撞到。
+    # 同一类问题的第三次(Airflow DAG、Trino 密码;见
+    # docs/operations/troubleshooting.md 里 subPath 那条)。
+    TRINO_ACCOUNTS_CHANGED=1
   else
     pw="$(gen_password)"
     hash="$(htpasswd -nbBC 10 "$username" "$pw")"
@@ -527,3 +536,19 @@ copy_secret minio platform-sdk-demo minio-root
 echo
 echo "完成。新生成的凭据(如果有)已追加到: ${OUT_FILE}"
 echo "这个文件不会被提交到 git(在 .gitignore 里),自己保管好。"
+
+# ---- 新增过 Trino 账号的话,重启一次 coordinator 让它读到新的 password.db ----
+# 放在最后统一做,不是每加一个账号重启一次——一次部署可能新增好几个账号,
+# 逐个重启既慢又会让 Trino 反复中断。
+if [ "${TRINO_ACCOUNTS_CHANGED:-0}" = "1" ]; then
+  echo "==> 新增过 Trino 服务账号,重启 coordinator 让 password.db 生效"
+  if kubectl -n trino get deploy trino-coordinator >/dev/null 2>&1; then
+    kubectl -n trino rollout restart deploy/trino-coordinator
+    # 不等它起来:Trino 启动要几分钟(startupProbe 预算 610s),卡在这里
+    # 会让整个 bootstrap 变慢。但要说清楚,不要让人以为已经能用了。
+    echo "    已触发重启。**新账号要等 coordinator 起来才能用**"
+    echo "    看进度:kubectl -n trino rollout status deploy/trino-coordinator"
+  else
+    echo "    trino-coordinator 还没部署,跳过(等它第一次起来时自然会读到新文件)"
+  fi
+fi
