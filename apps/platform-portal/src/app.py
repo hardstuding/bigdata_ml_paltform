@@ -69,7 +69,8 @@ TOOLS = [
         # Trino 走 HTTPS(apps/trino-tls/ 手写的 Ingress,不是 http),之前
         # 这里写的 scheme 就是错的,2026-08-16 才发现——不是环境差异,是
         # 单纯写错了。
-        "url": "https://trino.local-lite.test",
+        "host": "trino",
+        "scheme": "https",
         "probe": "https://trino.trino.svc.cluster.local:8443/v1/info",
         "probe_verify": False,
     },
@@ -77,77 +78,77 @@ TOOLS = [
         "category": "数据",
         "name": "Airflow",
         "description": "任务调度(dbt/SeaTunnel/Feast 物化等 DAG)",
-        "url": "http://airflow.local-lite.test",
+        "host": "airflow",
         "probe": "http://airflow-api-server.airflow.svc.cluster.local:8080/api/v2/monitor/health",
     },
     {
         "category": "数据",
         "name": "Superset",
         "description": "BI 看板 / 出图",
-        "url": "http://superset.local-lite.test",
+        "host": "superset",
         "probe": "http://superset.superset.svc.cluster.local:8088/health",
     },
     {
         "category": "数据",
         "name": "OpenMetadata",
         "description": "数据目录 / 血缘 / 表安全等级标注",
-        "url": "http://openmetadata.local-lite.test",
+        "host": "openmetadata",
         "probe": "http://openmetadata.openmetadata.svc.cluster.local:8585/api/v1/system/health",
     },
     {
         "category": "AI/ML",
         "name": "JupyterHub",
         "description": "多用户 Notebook",
-        "url": "http://jupyterhub.local-lite.test",
+        "host": "jupyterhub",
         "probe": "http://hub.jupyterhub.svc.cluster.local:8081/hub/health",
     },
     {
         "category": "AI/ML",
         "name": "MLflow",
         "description": "实验跟踪 / 模型注册",
-        "url": "http://mlflow.local-lite.test",
+        "host": "mlflow",
         "probe": "http://mlflow.mlflow.svc.cluster.local:5000/health",
     },
     {
         "category": "AI/ML",
         "name": "Argo Workflows",
         "description": "训练流水线编排",
-        "url": "http://argo-workflows.local-lite.test",
+        "host": "argo-workflows",
         "probe": "http://argo-workflows-server.argo-workflows.svc.cluster.local:2746/",
     },
     {
         "category": "AI/ML",
         "name": "Spark History Server",
         "description": "Spark 作业历史 / 日志",
-        "url": "http://spark-history.local-lite.test",
+        "host": "spark-history",
         "probe": "http://spark-history-server.spark-operator.svc.cluster.local:18080/",
     },
     {
         "category": "数据",
         "name": "Schema Registry",
         "description": "Kafka 消息的 schema 契约与兼容性校验(Karapace)",
-        "url": "http://schema-registry.local-lite.test",
+        "host": "schema-registry",
         "probe": "http://karapace.kafka.svc.cluster.local:8081/subjects",
     },
     {
         "category": "治理",
         "name": "权限申请门户",
         "description": "组权限申请 / 表访问分级审批 / 权限交接 / 审计",
-        "url": "http://permission-request.local-lite.test",
+        "host": "permission-request",
         "probe": "http://permission-request-app.permission-request-app.svc.cluster.local:8080/healthz",
     },
     {
         "category": "治理",
         "name": "建表注册工具",
         "description": "建表 + 回写负责人/安全等级进 OpenMetadata",
-        "url": "http://table-registration.local-lite.test",
+        "host": "table-registration",
         "probe": "http://table-registration-app.table-registration-app.svc.cluster.local:8080/healthz",
     },
     {
         "category": "运维",
         "name": "ArgoCD",
         "description": "GitOps 持续部署,谁在跑什么、状态是否正常",
-        "url": "http://argocd.local-lite.test",
+        "host": "argocd",
         "probe": "http://argocd-server.argocd.svc.cluster.local/",
         "probe_verify": False,
     },
@@ -155,14 +156,14 @@ TOOLS = [
         "category": "运维",
         "name": "Grafana",
         "description": "监控看板 / 指标",
-        "url": "http://grafana.local-lite.test",
+        "host": "grafana",
         "probe": "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local/api/health",
     },
     {
         "category": "身份",
         "name": "Keycloak",
         "description": "统一身份 / SSO,这里的账号密码所有工具通用",
-        "url": "http://keycloak.local-lite.test",
+        "host": "keycloak",
         "probe": "http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform",
     },
 ]
@@ -187,10 +188,36 @@ def apply_port_suffix(url: str, http_suffix: str, https_suffix: str) -> str:
     return url
 
 
+# 外部访问地址由环境配置拼出来,**不写死域名**。
+#
+# 2026-08-29 之前 TOOLS 里每一项的 url 都是 `xxx.local-lite.test` 硬编码。
+# 后果是 prod 部署之后门户上每一个链接都指向一个不存在的域名 —— 而门户
+# 恰恰是新用户进平台看到的第一个页面。域名/协议/端口后缀现在都从
+# deployment.yaml 注入(那份是 templates/ 渲染的,三档环境各不相同)。
+#
+# 每个工具只声明 `host`(子域名前缀)和可选的 `scheme`(不写默认跟随环境的
+# external_scheme;Trino 例外,它自己有一份 TLS Ingress,永远是 https)。
+_DOMAIN_SUFFIX = os.environ.get("PUBLIC_DOMAIN_SUFFIX", "local-lite.test")
+_DEFAULT_SCHEME = os.environ.get("PUBLIC_SCHEME", "http")
 _HTTP_PORT_SUFFIX = os.environ.get("PUBLIC_HTTP_PORT_SUFFIX", "")
 _HTTPS_PORT_SUFFIX = os.environ.get("PUBLIC_HTTPS_PORT_SUFFIX", "")
+
+
+def build_url(tool, domain=None, scheme=None, http_suffix=None, https_suffix=None):
+    """按环境配置拼出一个工具的外部访问地址。
+
+    参数都可以显式传,是为了让测试能一次验三档环境,而不用改进程级的
+    环境变量(那种测试互相污染,而且没法并行)。
+    """
+    domain = domain if domain is not None else _DOMAIN_SUFFIX
+    sch = tool.get("scheme") or (scheme if scheme is not None else _DEFAULT_SCHEME)
+    http_suffix = http_suffix if http_suffix is not None else _HTTP_PORT_SUFFIX
+    https_suffix = https_suffix if https_suffix is not None else _HTTPS_PORT_SUFFIX
+    return apply_port_suffix(f"{sch}://{tool['host']}.{domain}", http_suffix, https_suffix)
+
+
 for _t in TOOLS:
-    _t["url"] = apply_port_suffix(_t["url"], _HTTP_PORT_SUFFIX, _HTTPS_PORT_SUFFIX)
+    _t["url"] = build_url(_t)
 
 
 def probe(tool):

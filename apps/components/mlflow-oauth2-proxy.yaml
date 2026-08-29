@@ -31,13 +31,13 @@ spec:
           existingSecret: oauth2-proxy-secret
           configFile: |
             provider = "oidc"
-            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            oidc_issuer_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform"
             skip_oidc_discovery = true
-            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
-            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
-            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
-            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
-            redirect_url = "http://mlflow.local-lite.test:32460/oauth2/callback"
+            login_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/userinfo"
+            redirect_url = "{{EXTERNAL_SCHEME}}://mlflow.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth2/callback"
             # 2026-08-19 真实故障:没显式配 scope 时,oauth2-proxy 二进制自己的
             # 默认值是 "openid email profile groups"。ADR-019 明确说过 MLflow
             # 开源版不做按组差异化的权限控制(所有登录过的人权限完全一样),这个
@@ -76,7 +76,7 @@ spec:
           enabled: true
           className: nginx
           hosts:
-            - mlflow.local-lite.test
+            - mlflow.{{DOMAIN_SUFFIX}}
         # 这个进程在**认证请求路径上**:它一重启(滚更、节点漂移、OOM),
         # 对应服务的 SSO 就断一次。prod 给 2 副本,见
         # environments/resource-profiles.yaml。

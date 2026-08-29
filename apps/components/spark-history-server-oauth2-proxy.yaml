@@ -19,13 +19,13 @@ spec:
           existingSecret: oauth2-proxy-secret
           configFile: |
             provider = "oidc"
-            oidc_issuer_url = "http://keycloak.local-lite.test:32460/auth/realms/platform"
+            oidc_issuer_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform"
             skip_oidc_discovery = true
-            login_url = "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
-            redeem_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
-            oidc_jwks_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/certs"
-            profile_url = "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
-            redirect_url = "http://spark-history.local-lite.test:32460/oauth2/callback"
+            login_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth"
+            redeem_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/token"
+            oidc_jwks_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/certs"
+            profile_url = "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/userinfo"
+            redirect_url = "{{EXTERNAL_SCHEME}}://spark-history.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth2/callback"
             # 2026-08-19:和 mlflow-oauth2-proxy 撞到的是同一个 bug——没显式配
             # scope 时二进制默认值带 groups,这个 Keycloak client 没配 groups
             # scope,Keycloak 直接 invalid_scope 拒绝。History Server 本身也没有
@@ -46,7 +46,7 @@ spec:
           enabled: true
           className: nginx
           hosts:
-            - spark-history.local-lite.test
+            - spark-history.{{DOMAIN_SUFFIX}}
         # 这个进程在**认证请求路径上**:它一重启(滚更、节点漂移、OOM),
         # 对应服务的 SSO 就断一次。prod 给 2 副本,见
         # environments/resource-profiles.yaml。

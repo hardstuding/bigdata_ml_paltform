@@ -109,8 +109,8 @@ spec:
                         "client_id": "superset",
                         "client_secret": os.environ.get("OAUTH2_CLIENT_SECRET"),
                         "client_kwargs": {"scope": "openid profile email"},
-                        "api_base_url": "http://keycloak.local-lite.test/auth/realms/platform/protocol/",
-                        "server_metadata_url": "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration",
+                        "api_base_url": "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/",
+                        "server_metadata_url": "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/.well-known/openid-configuration",
                     },
                 }
             ]
@@ -151,7 +151,7 @@ spec:
           enabled: true
           ingressClassName: nginx
           hosts:
-            - superset.local-lite.test
+            - superset.{{DOMAIN_SUFFIX}}
         init:
           # 2026-08-19:实测确认这些示例数据(birth_names/video_game_sales/
           # world_health 等)是打包在 apache-superset 这个 pip 包里的

@@ -147,8 +147,8 @@ spec:
                         "client_id": "airflow",
                         "client_secret": os.environ.get("OAUTH2_CLIENT_SECRET"),
                         "client_kwargs": {"scope": "openid profile email"},
-                        "api_base_url": "http://keycloak.local-lite.test/auth/realms/platform/protocol/",
-                        "server_metadata_url": "http://keycloak.local-lite.test/auth/realms/platform/.well-known/openid-configuration",
+                        "api_base_url": "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/",
+                        "server_metadata_url": "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/.well-known/openid-configuration",
                     },
                 }
             ]
@@ -281,7 +281,7 @@ spec:
             enabled: true
             ingressClassName: nginx
             hosts:
-              - name: airflow.local-lite.test
+              - name: airflow.{{DOMAIN_SUFFIX}}
         # KubernetesExecutor 每个任务起一个独立 pod,用的是 workers.kubernetes
         # 这份 pod 模板——不是 scheduler/dagProcessor 那份。一开始只挂了
         # scheduler/dagProcessor,任务 pod 里根本没有 DAG 文件,报

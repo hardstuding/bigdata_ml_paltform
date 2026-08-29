@@ -85,16 +85,16 @@ spec:
                 - platform-team
             GenericOAuthenticator:
               client_id: jupyterhub
-              authorize_url: "http://keycloak.local-lite.test:32460/auth/realms/platform/protocol/openid-connect/auth"
-              token_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/token"
-              userdata_url: "http://keycloak.local-lite.test/auth/realms/platform/protocol/openid-connect/userinfo"
+              authorize_url: "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/auth/realms/platform/protocol/openid-connect/auth"
+              token_url: "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/token"
+              userdata_url: "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/openid-connect/userinfo"
               login_service: "Keycloak"
               username_claim: "preferred_username"
               scope:
                 - "openid"
                 - "profile"
                 - "email"
-              oauth_callback_url: "http://jupyterhub.local-lite.test:32460/hub/oauth_callback"
+              oauth_callback_url: "{{EXTERNAL_SCHEME}}://jupyterhub.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/hub/oauth_callback"
           extraEnv:
             OAUTH_CLIENT_SECRET:
               valueFrom:
@@ -289,7 +289,7 @@ spec:
           enabled: true
           ingressClassName: nginx
           hosts:
-            - jupyterhub.local-lite.test
+            - jupyterhub.{{DOMAIN_SUFFIX}}
         scheduling:
           userPlaceholder:
             enabled: false

@@ -93,6 +93,14 @@ jobs:
       # 2026-08-29 发现 usage-guide 里写着 `submit_job("train.py")`,而真实
       # 签名第一个参数是 name —— 照着文档写必然报错,而这种错不会被任何
       # 东西发现:文档不执行,读文档的人会以为是自己环境的问题。
+      # prod 渲染产物里不能出现开发环境的域名/NodePort。
+      # 2026-08-29 第一次跑就发现:门户 16 处硬编码之外,Superset / Airflow /
+      # MLflow / Spark History 的 **SSO 配置**里也写死了
+      # keycloak.local-lite.test —— prod 部署之后这几个组件登录全是坏的,
+      # 而 ArgoCD 会是绿的、Pod 会是健康的。
+      - name: prod 渲染产物不能含开发环境域名
+        run: python3 scripts/check-prod-no-dev-domain.py
+
       - name: 文档里的 SDK 示例签名校验
         run: |
           pip install --quiet ./platform-sdk

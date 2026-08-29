@@ -393,3 +393,69 @@ class TestRenderedContent:
         ]}
         html = self._html(client, my_jobs=jobs)
         assert "SHOULD_NOT_APPEAR" not in html
+
+
+class TestUrlsComeFromConfig:
+    """**工具地址必须由环境配置拼出来,不能写死域名。**
+
+    2026-08-29 之前 TOOLS 里每一项的 url 都是 `xxx.local-lite.test` 硬编码
+    (16 处)。后果:prod 部署之后门户上**每一个链接都指向一个不存在的域名**
+    ——而门户恰恰是新用户进平台看到的第一个页面,第一印象就是全是死链。
+
+    这组测试直接用三档环境的真实配置值跑一遍。
+    """
+
+    # 和 environments/<env>/config.yaml 保持一致。写死在这里是有意的:
+    # 如果哪天那些配置变了而这里没变,测试会因为"预期值对不上"而红,
+    # 那正是要的——它逼人回来确认改动是不是有意的。
+    ENVS = {
+        "local-lite": dict(domain="local-lite.test", scheme="http",
+                           http_suffix=":32460", https_suffix=":32535"),
+        "cloud-full": dict(domain="local-lite.test", scheme="http",
+                           http_suffix=":32460", https_suffix=":32535"),
+        "prod": dict(domain="your-real-domain.example.com", scheme="https",
+                     http_suffix="", https_suffix=""),
+    }
+
+    def test_三档环境各自拼出正确的地址(self):
+        for env, cfg in self.ENVS.items():
+            for tool in portal.TOOLS:
+                url = portal.build_url(tool, **cfg)
+                assert cfg["domain"] in url, f"{env} 的 {tool['name']} 地址里没有该环境的域名:{url}"
+                assert url.startswith(("http://", "https://")), url
+
+    def test_prod_里不能出现_local_lite(self):
+        """**Codex 评审明确点名的验收条件。**"""
+        for tool in portal.TOOLS:
+            url = portal.build_url(tool, **self.ENVS["prod"])
+            assert "local-lite" not in url, f"prod 地址里还有 local-lite:{url}"
+
+    def test_prod_不带_NodePort_端口后缀(self):
+        """prod 走标准 443,带上 :32460 这种端口是错的。"""
+        for tool in portal.TOOLS:
+            url = portal.build_url(tool, **self.ENVS["prod"])
+            assert ":32460" not in url and ":32535" not in url, url
+
+    def test_trino_永远是_https(self):
+        """Trino 自己有一份 TLS Ingress(apps/trino-tls/),和环境的
+        external_scheme 无关。2026-08-16 真实踩过:这里写成 http,点开就是错的。"""
+        trino = [t for t in portal.TOOLS if t["name"] == "Trino"][0]
+        for env, cfg in self.ENVS.items():
+            assert portal.build_url(trino, **cfg).startswith("https://"), env
+
+    def test_每个工具都声明了_host(self):
+        """漏了 host 的话 build_url 会 KeyError —— 让它在测试里炸,
+        而不是在用户打开门户的时候炸。"""
+        for tool in portal.TOOLS:
+            assert tool.get("host"), f"{tool['name']} 没有 host 字段"
+
+    def test_渲染出来的页面里没有硬编码域名(self, client):
+        """跨过模板边界再验一次:页面 HTML 里出现的地址应该是配置拼的。"""
+        with patch.object(portal, "probe", return_value=True), \
+             patch.object(portal, "golden_paths", return_value={"error": None, "rows": [], "healthy": 0, "total": 0}), \
+             patch.object(portal, "queue_usage", return_value={"error": None, "rows": [], "pending_total": 0}), \
+             patch.object(portal, "my_jobs", return_value={"error": None, "rows": []}), \
+             patch.object(portal, "streams", return_value={"error": None, "rows": []}):
+            html = client.get("/").get_data(as_text=True)
+        for tool in portal.TOOLS:
+            assert tool["url"] in html, f"{tool['name']} 的链接没出现在页面上"
