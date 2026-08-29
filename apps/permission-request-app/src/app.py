@@ -325,9 +325,14 @@ def apply_to_git(username: str, group_name: str):
 def apply_grant_to_git(username: str, table_fqn: str, security_level: int):
     """审批全部通过后,把这条访问授权记录写进
     platform/iam/table-access-grants.csv——和 apply_to_git() 同一个
-    clone/改文件/commit/push 模式,复用同一套 GIT_TOKEN。这份文件现在
-    只是决策留痕,不会被任何东西读去真正拦截 Trino 查询(见模块顶部的
-    范围边界说明)。"""
+    clone/改文件/commit/push 模式,复用同一套 GIT_TOKEN。
+
+    **这份文件是真的被消费的**:`opa-grants-sync` 每 5 分钟把它推给 OPA
+    (ADR-051),所以这一行写进去之后,那个人**最多 5 分钟内**就真的能查
+    那张表了。这段注释原本写着"只是决策留痕,不会被任何东西读去真正拦截
+    Trino 查询",那是 ADR-051 之前的状态,**2026-08-29 更正** —— 这是同一
+    句过期描述在这个文件里的第三处(模块顶部、reclaim_expired、这里)。
+    """
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat()
     expires_at = (now_dt + timedelta(days=GRANT_EXPIRY_DAYS)).isoformat()
@@ -1449,6 +1454,52 @@ def reject_table_step(step_id):
 # 的话,申请人在这段时间里唯一能做的就是干等,或者线下去戳人 —— 而线下
 # 戳人这个动作是不留痕的,后面复盘"这条为什么拖了五天"就查不到。
 NUDGE_COOLDOWN_HOURS = int(os.environ.get("NUDGE_COOLDOWN_HOURS", "24"))
+
+
+@app.route("/table-access/renew", methods=["POST"])
+def renew_grant():
+    """续期一条快到期的表权限。
+
+    **续期不是"直接把到期时间往后推"。** 那样做等于把 180 天复审变成一次性
+    的形式 —— 授权设期限的意义就在于"过一段时间要有人重新看一眼这个人还
+    需不需要"。所以续期走的是**和第一次申请完全相同的审批链**。
+
+    那它比"重新申请一遍"好在哪?好在**不用等到查不到数据才想起来**:门户
+    首页会把快到期的排在最前面并标黄,点一下就发起,理由从上次那条带过来。
+    到期这件事对用户本来是完全看不见的(悄悄失效、OPA 5 分钟内生效、第二天
+    上班发现查不到还以为平台坏了),这个按钮解决的是**这个**问题,不是
+    "少一道审批"。
+    """
+    username, _ = get_current_user()
+    if not username:
+        abort(401)
+    table_fqn = request.form.get("table_fqn", "").strip()[:300]
+    if not table_fqn:
+        abort(400)
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    # 已经有一条在审的续期/申请就不要再发一条 —— 否则一个人点两下,审批人
+    # 那边就出现两条一模一样的待办。
+    existing = conn.execute(
+        "SELECT id FROM table_access_requests WHERE username=? AND table_fqn=? "
+        "AND status='pending'", (username, table_fqn)).fetchone()
+    if existing:
+        conn.close()
+        return {"error": f"这张表已经有一条在审的申请(#{existing['id']}),不用重复提交"}, 409
+
+    prev = conn.execute(
+        "SELECT reason FROM table_access_requests WHERE username=? AND table_fqn=? "
+        "ORDER BY id DESC LIMIT 1", (username, table_fqn)).fetchone()
+    reason = (request.form.get("reason", "").strip()
+              or (prev["reason"] if prev and prev["reason"] else "")
+              or "续期:此前已获批,业务仍在使用")
+    ok, err = create_table_access_request(conn, username, table_fqn, f"[续期] {reason}")
+    conn.commit()
+    conn.close()
+    if not ok:
+        return {"error": err}, 400
+    return redirect(url_for("index"))
 
 
 @app.route("/table-access/request/<int:req_id>/nudge", methods=["POST"])

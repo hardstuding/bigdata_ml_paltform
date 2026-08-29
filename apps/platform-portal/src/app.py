@@ -768,6 +768,11 @@ def index():
         streams=streams(),
         permissions=my_permissions(username),
         approvals=my_approvals(username),
+        # 续期链接指向权限申请门户。**从 TOOLS 里取,不另拼一遍** —— 门户上
+        # 每个链接都必须来自同一份环境配置,2026-08-16 那次"点哪个都 404"
+        # 就是各处各拼各的。
+        permission_app_url=next(
+            (t["url"] for t in TOOLS if t["name"] == "权限申请门户"), "#"),
         logos=LOGOS,
         tool_count=len(shown),
         tool_up=sum(1 for v in up.values() if v),

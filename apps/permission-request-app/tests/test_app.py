@@ -1381,3 +1381,82 @@ class TestGroupsDiagnosis:
                     {"preferred_username": "admin", "groups": ["platform-team"]})}):
             _, groups = perm.get_current_user()
             assert perm.is_approver(groups) is True
+
+
+class TestRenew:
+    """续期(roadmap P1.5「审批体验」最后一项)。
+
+    **续期不是把到期时间往后推。** 那样等于把 180 天复审变成形式 —— 授权
+    设期限的意义就在于"过一段时间要有人重新看一眼这个人还需不需要"。所以
+    续期走的是和第一次申请完全相同的审批链;它省的不是审批,是"等到查不到
+    数据才想起来"。
+    """
+
+    def _first_request(self, client, monkeypatch, reason="季度对账要看订单明细"):
+        return _create_table_request("engineer1", "iceberg.demo.orders", 1, "manager1",
+                                     monkeypatch, client, reason=reason)
+
+    def _approve_all(self, request_id):
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.execute("UPDATE approval_steps SET status='approved' WHERE request_id=?",
+                     (request_id,))
+        conn.execute("UPDATE table_access_requests SET status='approved' WHERE id=?",
+                     (request_id,))
+        conn.commit(); conn.close()
+
+    def test_续期会新建一条走完整审批链的申请(self, client, monkeypatch):
+        row = self._first_request(client, monkeypatch)
+        self._approve_all(row["id"])
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (1, "manager1"))
+        resp = client.post("/table-access/renew",
+                           data={"table_fqn": "iceberg.demo.orders"},
+                           headers=auth("engineer1"))
+        assert resp.status_code == 302
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        new = conn.execute("SELECT * FROM table_access_requests ORDER BY id DESC LIMIT 1").fetchone()
+        steps = conn.execute("SELECT COUNT(*) c FROM approval_steps WHERE request_id=?",
+                             (new["id"],)).fetchone()["c"]
+        conn.close()
+        assert new["status"] == "pending"      # 不是直接生效
+        assert steps > 0                       # 真的建了审批链
+
+    def test_理由从上一条带过来_并标明是续期(self, client, monkeypatch):
+        row = self._first_request(client, monkeypatch, reason="季度对账要看订单明细")
+        self._approve_all(row["id"])
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (1, "manager1"))
+        client.post("/table-access/renew", data={"table_fqn": "iceberg.demo.orders"},
+                    headers=auth("engineer1"))
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        new = conn.execute("SELECT reason FROM table_access_requests ORDER BY id DESC LIMIT 1").fetchone()
+        conn.close()
+        assert new["reason"].startswith("[续期]")
+        assert "季度对账" in new["reason"]
+
+    def test_已经有在审的就不重复提交(self, client, monkeypatch):
+        # 一个人点两下,审批人那边不该出现两条一模一样的待办。
+        self._first_request(client, monkeypatch)
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (1, "manager1"))
+        resp = client.post("/table-access/renew",
+                           data={"table_fqn": "iceberg.demo.orders"},
+                           headers=auth("engineer1"))
+        assert resp.status_code == 409
+        assert "已经有一条在审的申请" in resp.get_json()["error"]
+
+    def test_没登录不给续期(self, client):
+        assert client.post("/table-access/renew",
+                           data={"table_fqn": "x.y.z"}).status_code == 401
+
+    def test_不带表名拒绝(self, client):
+        assert client.post("/table-access/renew", data={},
+                           headers=auth("engineer1")).status_code == 400
+
+    def test_高等级表续期仍然要够长的理由(self, client, monkeypatch):
+        # 续期不是绕过校验的旁路。之前没写过理由的话,自动生成的那句话
+        # 也要能过 2 级表的长度要求。
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (2, "manager1"))
+        resp = client.post("/table-access/renew",
+                           data={"table_fqn": "iceberg.demo.users"},
+                           headers=auth("engineer1"))
+        assert resp.status_code == 302
