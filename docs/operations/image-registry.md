@@ -73,7 +73,13 @@ gh secret set ACR_PASSWORD --repo hardstuding/bigdata_ml_paltform
 ### 1. 集群侧的拉取凭据
 
 ```bash
-read -s -p "ACR 密码: " ACR_PASSWORD && export ACR_PASSWORD && echo
+# zsh(macOS 默认):
+read -s "ACR_PASSWORD?ACR password: " && export ACR_PASSWORD && echo
+# bash 的话是:read -rsp "ACR password: " ACR_PASSWORD && export ACR_PASSWORD && echo
+#
+# 两边语法不通用:zsh 里 `read -p` 是"从协程读",写 bash 那套会报
+# `read: -p: no coprocess`。提示语用英文,中文在某些终端里会乱码。
+
 export ACR_REGISTRY=crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com
 export ACR_USERNAME=<阿里云账号名>
 export ACR_NAMESPACE=<命名空间>

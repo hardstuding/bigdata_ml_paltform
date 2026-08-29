@@ -9,14 +9,22 @@
 # **凭据从哪来**:这个脚本**不接受命令行传密码**,只从环境变量读,而且不落
 # 任何文件、不进日志。密码是 ACR 控制台「访问凭证」里设的固定密码。
 #
-#   read -s -p "ACR 密码: " ACR_PASSWORD && export ACR_PASSWORD && echo
+# **zsh(macOS 默认 shell)**:
+#   read -s "ACR_PASSWORD?ACR password: " && export ACR_PASSWORD && echo
+#
+# **bash**:
+#   read -rsp "ACR password: " ACR_PASSWORD && export ACR_PASSWORD && echo
+#
+# 然后:
 #   export ACR_REGISTRY=crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com
 #   export ACR_USERNAME=<你的阿里云账号名>
 #   export ACR_NAMESPACE=<命名空间>
 #   ./scripts/45-configure-acr-pull.sh
 #   unset ACR_PASSWORD
 #
-# `read -s` 不回显、也不进 shell 历史。
+# 两种写法都不回显、也不进 shell 历史。**两边语法不通用**:zsh 的 `read -p`
+# 是"从协程读",在 zsh 里写 bash 那套会报 `read: -p: no coprocess`
+# ——2026-08-29 实测踩到,提示语要用英文,中文提示在某些终端里会乱码。
 #
 # **幂等**:Secret 已存在就更新(不是跳过——密码可能轮换过)。
 set -euo pipefail
