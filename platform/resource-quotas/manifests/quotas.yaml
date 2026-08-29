@@ -75,9 +75,26 @@ metadata:
   namespace: airflow
 spec:
   hard:
-    requests.cpu: "2"
-    requests.memory: 4Gi
-    limits.memory: 6Gi
+    # 2026-08-29 调大(6Gi → 12Gi,requests 4Gi → 8Gi)。
+    #
+    # **Airflow 的任务并发是被这个配额悄悄卡住的**,而且超了不是排队,是
+    # 任务**直接失败**:KubernetesExecutor 每个任务要在 airflow 命名空间起
+    # 一个 worker pod,起不出来就
+    # `exceeded quota: compute-quota ... Forbidden`,DAG Run 变红。
+    # 实测:三条 DAG 同时被解除暂停各跑一次,常驻组件占掉约 4Gi 之后,
+    # seatunnel 那条的 worker pod 只要 512Mi 都建不出来。
+    #
+    # **这个坑这个仓库栽第四次了**(2026-08-19 MLflow 改 resources、
+    # 08-23 OpenMetadata 采集 Job 要 4Gi、08-28 OpenMetadata 命名空间、
+    # 这次)。表现每次都不完全一样,但根子是同一个:配额是按"当时跑着的
+    # 东西"配的,而任何新增的按需 pod 都从同一个池子里扣。
+    #
+    # 12Gi = 常驻约 4Gi + 同时跑 4~6 个任务 pod 的余量。真要上生产,worker
+    # 的规格和这个上限要一起重新算(见 environments/resource-profiles.yaml
+    # 的 airflow_worker_pod_*)。
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.memory: 12Gi
 ---
 apiVersion: v1
 kind: ResourceQuota
