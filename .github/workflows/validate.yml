@@ -98,6 +98,12 @@ jobs:
       # MLflow / Spark History 的 **SSO 配置**里也写死了
       # keycloak.local-lite.test —— prod 部署之后这几个组件登录全是坏的,
       # 而 ArgoCD 会是绿的、Pod 会是健康的。
+      # Superset 的 configOverrides 和 JupyterHub 的 extraConfig 是"把 Python
+      # 当配置塞进 YAML",**只在组件启动时才执行** —— 写错一个括号的表现是
+      # pod CrashLoopBackOff,而 push 和 ArgoCD 全是绿的。
+      - name: YAML 里内嵌的 Python 语法校验
+        run: python3 scripts/check-embedded-python-syntax.py
+
       - name: prod 渲染产物不能含开发环境域名
         run: python3 scripts/check-prod-no-dev-domain.py
 

@@ -108,7 +108,12 @@ spec:
                     "remote_app": {
                         "client_id": "superset",
                         "client_secret": os.environ.get("OAUTH2_CLIENT_SECRET"),
-                        "client_kwargs": {"scope": "openid profile email"},
+                        # **必须请求 groups**,否则拿不到用户在 Keycloak
+                        # 里的组,下面的 AUTH_ROLES_MAPPING 永远匹配不上,
+                        # 所有人都会落到 AUTH_USER_REGISTRATION_ROLE。
+                        # (scripts/03 里给 superset client 挂了 groups
+                        # 这个 default client scope,两边缺一不可。)
+                        "client_kwargs": {"scope": "openid profile email groups"},
                         "api_base_url": "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/protocol/",
                         "server_metadata_url": "{{EXTERNAL_SCHEME}}://keycloak.{{DOMAIN_SUFFIX}}/auth/realms/platform/.well-known/openid-configuration",
                     },
@@ -117,7 +122,59 @@ spec:
             AUTH_ROLE_ADMIN = "Admin"
             AUTH_ROLE_PUBLIC = "Public"
             AUTH_USER_REGISTRATION = True
-            AUTH_USER_REGISTRATION_ROLE = "Admin"
+
+            # **按 Keycloak 的组分配 Superset 角色,不再是"人人 Admin"。**
+            #
+            # 2026-08-29 之前这里是 AUTH_USER_REGISTRATION_ROLE = "Admin",
+            # 注释里自己写着"local-lite 简化,以后要换成按组映射"。后果是
+            # **任何能登录平台的人在 Superset 里都是管理员** —— 能改数据源
+            # 连接串(那里面是 Trino 服务账号的凭据)、能删别人的看板、能进
+            # Security 菜单改所有人的权限。数据层有 OPA 挡着(ADR-074),
+            # 但产品层是全开的。
+            #
+            # **两层权限的分工要说清楚,否则很容易配重或配漏**:
+            #   - 数据层(能看到哪张表、哪些列):Trino + OPA,按登录用户判,
+            #     和 Superset 的角色**无关**。分析师在 Superset 里是 Alpha,
+            #     也一样看不到没 grant 的表。
+            #   - 产品层(能不能建看板、能不能改数据源):就是下面这张表。
+            AUTH_ROLES_SYNC_AT_LOGIN = True
+            AUTH_ROLES_MAPPING = {
+                # 平台组:维护这套东西的人,需要改数据源、装插件
+                "platform-team": ["Admin"],
+                # 分析师:建看板、用 SQL Lab 是他们的本职工作
+                "data-analysts": ["Alpha", "sql_lab"],
+                # 算法工程组:主要在 notebook 里干活,这里只需要看板 + 查数
+                "algorithm-team": ["Gamma", "sql_lab"],
+                # 只读访客:只能看别人做好的看板
+                "viewers": ["Gamma"],
+            }
+            # 不在上面任何一个组里的人,落到最小权限,**不是 Admin**。
+            # Gamma 在 Superset 里本身看不到任何数据源,要显式授权才行 ——
+            # 对一个"没被分进任何组"的账号,这是正确的默认。
+            AUTH_USER_REGISTRATION_ROLE = "Gamma"
+
+            def _superset_groups(sm, provider, response=None):
+                """从 id_token 里取 groups —— Superset 的通用 OAuth provider
+                默认只认 userinfo 端点返回的字段,而 Keycloak 的
+                oidc-group-membership-mapper 把 groups 放进 token。
+                不取的话 AUTH_ROLES_MAPPING 拿不到东西可匹配。"""
+                me = sm.oauth_remotes[provider].get("userinfo")
+                data = me.json() if hasattr(me, "json") else me
+                return {
+                    "username": data.get("preferred_username") or data.get("sub"),
+                    "email": data.get("email", ""),
+                    "first_name": data.get("given_name", ""),
+                    "last_name": data.get("family_name", ""),
+                    "role_keys": data.get("groups", []) or [],
+                }
+
+            from superset.security import SupersetSecurityManager
+
+            class PlatformSecurityManager(SupersetSecurityManager):
+                def oauth_user_info(self, provider, response=None):
+                    return _superset_groups(self, provider, response)
+
+            CUSTOM_SECURITY_MANAGER = PlatformSecurityManager
           examples_db: |
             # 2026-08-19:load_examples 默认的 examples 连接不配就落到 pod
             # 本地 SQLite(见 apps/superset/manifests/create-db-job.yaml 的
