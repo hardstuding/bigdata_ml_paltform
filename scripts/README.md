@@ -48,6 +48,7 @@
 | `09-train-demo-model.sh` | AI/ML:训练 sklearn 模型 → MLflow 注册 |
 | `11-deploy-demo-inference-service.sh` | AI/ML:MLflow 模型 → KServe 上线推理 |
 | `10-install-kserve-serving-runtimes.sh` | 上面那条的前置(装 ClusterServingRuntime) |
+| `46-verify-p15.sh` | **产品层那一批的回归验收**:groups claim / 门户按角色显示 / 建表新表单 / 作业多文件+补数 / 审批体验。一条一条报 ✅❌,**全跳过退出码 2**(不把"什么都没验"当成通过) |
 
 **下面三个是 pod 里跑的载荷,不是给人直接执行的**(通过 ConfigMap 挂进
 容器,内容和 `apps/*/manifests/script-configmap.yaml` 保持同步):
