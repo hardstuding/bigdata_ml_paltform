@@ -147,7 +147,7 @@ jobs:
       # 流作业同理。checkpoint_interval 写错的表现特别隐蔽:JobManager 起不来,
       # 而从 FlinkDeployment 的状态上看只是「一直在 DEPLOYING」。
       - name: 流作业定义校验 + 生成物不漂移
-        run: python3 scripts/render-streams.py --check
+        run: python3 scripts/render-streams.py cloud-full --check
 
       # 三档都要能渲染出来。只校验 cloud-full 的话,prod/local-lite 缺一个
       # RES 键要等到真去部署那一档才会发现——而那时候人已经在等着上生产了。

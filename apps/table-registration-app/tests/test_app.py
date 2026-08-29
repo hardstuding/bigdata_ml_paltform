@@ -40,6 +40,16 @@ def client():
         yield c
 
 
+def _token(groups):
+    """伪造一个 oauth2-proxy 会传下来的 access token(不验签,见
+    shared/flask_identity.py 里说明为什么不验)。"""
+    import base64 as b64, json as js
+    payload = b64.urlsafe_b64encode(
+        js.dumps({"preferred_username": "zhenghe", "groups": groups}).encode()
+    ).decode().rstrip("=")
+    return f"eyJhbGciOiJub25lIn0.{payload}."
+
+
 class TestParseColumns:
     def test_valid_single_column(self):
         assert reg.parse_columns("order_id BIGINT") == [("order_id", "BIGINT", None)]
@@ -202,18 +212,21 @@ class TestSubmitRoute:
             resp = client.post(
                 "/submit",
                 data={"table_fqn": "demo.orders", "columns": "id BIGINT", "security_level": "2", "owner": "someone"},
-                headers={"X-Forwarded-User": "zhenghe"},
+                # 2026-08-29 起 2 级表要先审批,平台组除外 —— 这条测的是
+                # "建成之后会发生什么",所以用平台组身份跳过审批那一层。
+                headers={"X-Forwarded-User": "zhenghe",
+                         "X-Forwarded-Access-Token": _token(["platform-team"])},
             )
         assert resp.status_code == 302
         mock_create.assert_called_once()
-        # 2026-08-29:这条断言之前写的是 "someone" —— 也就是**在断言那个漏洞**。
-        # 表单里的 owner 现在完全不看,负责人一律是登录者本人,原因见
-        # app.py 里 submit() 那段注释(表负责人是审批链的第一级审批人)。
-        mock_om.assert_called_once_with("iceberg", "demo", "orders", [("id", "BIGINT", None)], "zhenghe", 2)
+        # 这里用的是 platform-team 身份(见上面 headers),所以表单里的
+        # owner 生效 —— 代他人建表是平台组才有的能力。非平台组填了无效那条
+        # 由 TestOwnerOverrideNeedsPlatformTeam 覆盖。
+        mock_om.assert_called_once_with("iceberg", "demo", "orders", [("id", "BIGINT", None)], "someone", 2)
         row = sqlite3.connect(reg.DB_PATH).execute(
             "SELECT trino_status, openmetadata_status, security_level, owner FROM registrations ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        assert row == ("ok", "ok", 2, "zhenghe")   # 同上:落库的负责人也是登录者
+        assert row == ("ok", "ok", 2, "someone")   # 同上:平台组代建,负责人是表单里那个
 
     def test_invalid_security_level_defaults_to_1(self, client):
         with patch.object(reg, "create_table_in_trino"), patch.object(reg, "OPENMETADATA_TOKEN", ""):
@@ -232,16 +245,6 @@ def test_healthz(client):
     resp = client.get("/healthz")
     assert resp.status_code == 200
     assert resp.get_json() == {"status": "ok"}
-
-
-def _token(groups):
-    """伪造一个 oauth2-proxy 会传下来的 access token(不验签,见
-    shared/flask_identity.py 里说明为什么不验)。"""
-    import base64 as b64, json as js
-    payload = b64.urlsafe_b64encode(
-        js.dumps({"preferred_username": "zhenghe", "groups": groups}).encode()
-    ).decode().rstrip("=")
-    return f"eyJhbGciOiJub25lIn0.{payload}."
 
 
 class TestOwnerOverrideNeedsPlatformTeam:
@@ -585,3 +588,70 @@ class TestQualityRules:
         assert sent[0]["testDefinition"] == "columnValuesToBeUnique"
         # body 里不能带 testSuite —— 带上 1.13.3 一律 400,套件从 entityLink 推断
         assert "testSuite" not in sent[0]
+
+
+class TestApprovalGate:
+    """哪些角色可直接建表、哪些要审批(roadmap P1.5 验收项)。
+
+    **规则按安全等级切,不按人切**:1 级表谁都能建 —— 建表是日常工作,卡在
+    审批上只会逼人绕过平台直接连 Trino 写 DDL,那样建出来的表在数据目录里
+    是隐形的,比"没有审批"糟得多。
+    """
+
+    def _post(self, client, level, groups=None):
+        headers = {"X-Forwarded-User": "zhenghe"}
+        if groups is not None:
+            headers["X-Forwarded-Access-Token"] = _token(groups)
+        with patch.object(reg, "create_table_in_trino") as create, \
+             patch.object(reg, "OPENMETADATA_TOKEN", ""):
+            client.post("/submit",
+                        data={"table_fqn": f"demo.t{level}", "columns": "id BIGINT",
+                              "security_level": str(level)},
+                        headers=headers)
+        return create
+
+    def _row(self, table):
+        conn = reg.sqlite3.connect(reg.DB_PATH)
+        r = conn.execute("SELECT trino_status, note FROM registrations WHERE table_fqn=?",
+                         (table,)).fetchone()
+        conn.close()
+        return r
+
+    def test_一级表谁都能直接建(self, client):
+        create = self._post(client, 1, ["data-analysts"])
+        create.assert_called_once()
+
+    def test_二级表非平台组建不了_而且没真的碰_trino(self, client):
+        create = self._post(client, 2, ["data-analysts"])
+        create.assert_not_called()
+        status, note = self._row("demo.t2")
+        assert status == "rejected" and "先审批" in note
+
+    def test_被挡住时留下的记录说清楚该去哪(self, client):
+        # 静默拒绝或者假装建成了都更糟 —— 人得知道下一步做什么。
+        self._post(client, 3, ["data-analysts"])
+        _, note = self._row("demo.t3")
+        assert "权限申请门户" in note and "platform-team" in note
+
+    def test_平台组不受这条限制(self, client):
+        # 他们本来就能直连 Trino,在这里拦只是让他们绕路。
+        create = self._post(client, 3, ["platform-team"])
+        create.assert_called_once()
+
+    def test_拿不到组信息时按需要审批处理(self, client):
+        # 和门户"拿不到就显示全部"相反,和 owner 覆盖那条一致:错的那一边
+        # 代价大的时候,选保守。
+        create = self._post(client, 2, None)
+        create.assert_not_called()
+
+    def test_不是平台组的人看得到这条规则(self, client):
+        html = client.get("/", headers={"X-Forwarded-User": "zhenghe",
+                                        "X-Forwarded-Access-Token": _token(["data-analysts"])}
+                          ).get_data(as_text=True)
+        assert "要先在权限申请门户" in html
+
+    def test_平台组不显示那句提示(self, client):
+        html = client.get("/", headers={"X-Forwarded-User": "zhenghe",
+                                        "X-Forwarded-Access-Token": _token(["platform-team"])}
+                          ).get_data(as_text=True)
+        assert "要先在权限申请门户" not in html

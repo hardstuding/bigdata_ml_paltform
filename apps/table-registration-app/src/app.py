@@ -102,6 +102,24 @@ def init_db():
 # 当负责人"= 能安排审批人,不该是所有人都有的能力。
 OWNER_OVERRIDE_GROUP = os.environ.get("OWNER_OVERRIDE_GROUP", "platform-team")
 
+# 谁可以直接建表、什么情况下要先走审批(roadmap P1.5 的验收项之一)。
+#
+# **规则按安全等级切,不按人切**:1 级表(公开/低敏)谁都能建 —— 建表本身
+# 是日常工作,卡在审批上只会逼人绕过平台直接连 Trino 写 DDL,那样建出来的
+# 表在数据目录里是隐形的,比"没有审批"糟得多。2 级起要审批,因为那时这张表
+# 会带上真实的敏感数据。
+#
+# **平台组不受限**:他们本来就有直连 Trino 的能力,在这里拦他们没有意义,
+# 只是让他们绕路。
+DIRECT_CREATE_MAX_LEVEL = int(os.environ.get("DIRECT_CREATE_MAX_LEVEL", "1"))
+BYPASS_APPROVAL_GROUP = os.environ.get("BYPASS_APPROVAL_GROUP", "platform-team")
+
+
+def needs_approval(security_level: int, groups) -> bool:
+    if BYPASS_APPROVAL_GROUP in (groups or []):
+        return False
+    return security_level > DIRECT_CREATE_MAX_LEVEL
+
 
 def get_current_user():
     username, _, _ = identity.parse_identity(request.headers)
@@ -566,6 +584,12 @@ TEMPLATE = """
       <option value="2">2 级</option>
       <option value="3">3 级(高敏感)</option>
     </select>
+    {% if not can_bypass %}
+    <p class="hint">{{ direct_max }} 级表可以直接建;更高等级要先在权限申请门户
+      走审批,批准后由 {{ bypass_group }} 的人代建。等级决定申请这张表的权限要
+      走几级审批,也决定敏感字段对谁脱敏 —— 填低了不是"省事",是把该有的
+      保护摘掉了。</p>
+    {% endif %}
   </div>
   <div class="field">
     <button type="button" id="preview-btn">预览要执行的 SQL</button>
@@ -610,7 +634,7 @@ document.getElementById('preview-btn').addEventListener('click', function () {
 
 @app.route("/")
 def index():
-    username, _, can_override, groups_warning = get_identity()
+    username, _groups, can_override, groups_warning = get_identity()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     my_registrations = conn.execute(
@@ -620,6 +644,8 @@ def index():
     return render_template_string(
         TEMPLATE, username=username, my_registrations=my_registrations,
         can_override=can_override, override_group=OWNER_OVERRIDE_GROUP,
+        can_bypass=(BYPASS_APPROVAL_GROUP in (_groups or [])),
+        direct_max=DIRECT_CREATE_MAX_LEVEL, bypass_group=BYPASS_APPROVAL_GROUP,
         groups_warning=groups_warning)
 
 
@@ -669,7 +695,7 @@ def submit():
     # **拿不到组信息时按"不能"处理**,和门户那边"拿不到就显示全部"相反:
     # 那边多显示几个进不去的入口没有代价,这边放过去就是一个越权写入。
     # 同一个不确定状态,两处刻意选了不同方向,依据是"错的那一边代价多大"。
-    _, _, can_override, _ = get_identity()
+    _, groups, can_override, _ = get_identity()
     form_owner = request.form.get("owner", "").strip()[:200]
     owner = form_owner if (can_override and form_owner) else username[:200]
     try:
@@ -678,6 +704,27 @@ def submit():
             raise ValueError
     except ValueError:
         security_level = 1
+
+    # 2 级起要先走审批,不能直接建(平台组除外)。
+    #
+    # **这里只是不建**,不是"提交一个审批单" —— 审批流程在
+    # permission-request-app 那边,这个工具不该长出第二套审批。落一行
+    # `rejected` 的记录说清楚该去哪,比静默拒绝或者假装建成了都好。
+    if needs_approval(security_level, groups):
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO registrations (requested_by, table_fqn, owner, security_level,"
+            " columns_raw, trino_status, openmetadata_status, note, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (username, table_fqn, owner, security_level, request.form.get("columns", ""),
+             "rejected", "skipped",
+             f"{security_level} 级表要先审批才能建。请在权限申请门户发起申请,"
+             f"批准后由 {BYPASS_APPROVAL_GROUP} 的人代建 —— 或者确认这张表其实是 "
+             f"{DIRECT_CREATE_MAX_LEVEL} 级,改低等级后自己建。",
+             datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        conn.close()
+        return redirect(url_for("index"))
 
     trino_status, om_status, note = "pending", "pending", ""
     partitioning = []

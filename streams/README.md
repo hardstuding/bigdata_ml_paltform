@@ -24,7 +24,22 @@ checkpoint_interval: "30s"     # 可选,默认 30s
 jobmanager_memory: "1024m"     # 可选
 taskmanager_memory: "1792m"    # 可选
 cpu: 0.3                       # 可选,JM/TM 各自的 CPU
+environments:                  # 可选,不写 = 所有环境
+  - cloud-full
 ```
+
+**多文件和按环境晋级和 `jobs/` 是同一套语义**(2026-08-29 对齐):作业目录
+下所有 `.py` 都会被挂进容器;`environments` 里加一个环境名就是晋级。两边
+语义不一致本身就是个坑 —— 一个人在 `jobs/` 里学会的东西,到 `streams/`
+发现不认,只会以为自己写错了。
+
+生成命令也按环境给:
+
+```bash
+python3 scripts/render-streams.py cloud-full
+```
+
+**校验对所有流作业都做,不管它在不在当前环境。**
 
 **平台自动给你配好的**(不用写、也不该在脚本里重复配):
 

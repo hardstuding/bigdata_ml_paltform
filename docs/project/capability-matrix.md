@@ -90,7 +90,7 @@
 | 权限真正生效 | ✅ | 集成验证 | 2026-08-26 | Trino 接 OPA([ADR-051](../decisions/051-trino-opa-access-control.md)) |
 | 权限到期回收 | ✅ | 集成验证 | 2026-08-18 | [ADR-050](../decisions/050-grant-expiry-reclamation.md) |
 | **SQL 工作台** | 🟡 | 未验证 | — | [ADR-084](../decisions/084-analyst-sql-workbench.md)。刚从"Trino Web UI"(**那里根本没有 SQL 编辑器**)改成 Superset SQL Lab。**下次开机验**:`analyst001` 登录 → SQL Lab → `SELECT current_user` 应是他本人、查没 grant 的表应被拒 |
-| 建表 | 🟡 | demo | 2026-08-18 | [ADR-043](../decisions/043-table-registration-tool.md)。表单/预览/审批分流都还没做,见 roadmap P1.5 |
+| 建表 | 🟡 | 未验证 | — | [ADR-043](../decisions/043-table-registration-tool.md)。2026-08-29 补完:字段说明、分区、质量断言(建真的 OpenMetadata testCase)、提交前预览、按等级的审批分流、负责人不能冒充。**全部只有单元测试,没上过集群** |
 | SQL 数据转换(dbt) | 🟡 | 集成验证 | 2026-08-29 | [ADR-082](../decisions/082-dbt-lineage-ingestion.md),血缘查得到 `orders → stg_orders → daily_order_totals`。**缺**:`schedule=None`,只能手动触发 |
 | 看板 / BI | ✅ | 集成验证 | 2026-08-29 | 组映射实测:`data-analysts` → `Alpha/Gamma/sql_lab`,未分组 → `Gamma`。**修之前所有人都是 Admin**(`AUTH_USER_REGISTRATION_ROLE="Admin"` + scope 里没有 groups) |
 | 中文界面 | 🟡 | 集成验证 | 2026-08-28 | Superset 4054 条译文([ADR-077](../decisions/077-superset-chinese-ui.md))。**Airflow/Grafana/OpenMetadata 仍是英文** |

@@ -14,8 +14,8 @@ ConfigMap 怎么挂、PyFlink 那三行 jarURI/entryClass/args 的魔法,全靠�
 先校验一遍),不另造一套概念。
 
 用法:
-  python3 scripts/render-streams.py           # 生成
-  python3 scripts/render-streams.py --check   # CI:校验不漂移 + 定义合法
+  python3 scripts/render-streams.py                      # 按默认环境(cloud-full)生成
+  python3 scripts/render-streams.py cloud-full --check   # CI:校验不漂移 + 定义合法
 """
 import re
 import sys
@@ -27,6 +27,10 @@ REPO = Path(__file__).resolve().parent.parent
 STREAMS = REPO / "streams"
 OUT = REPO / "apps" / "platform-streams" / "manifests"
 NAMESPACE = "flink"
+# 和 scripts/render-jobs.py 保持一致。两边语义不同的话,一个人在
+# jobs/ 里学会的东西到 streams/ 就不成立了。
+ENVIRONMENTS = {"local-lite", "cloud-full", "prod"}
+DEFAULT_ENV = "cloud-full"
 
 NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 DURATION_RE = re.compile(r"^\d+(ms|s|min|h)$")
@@ -79,17 +83,36 @@ def load(problems: list[str]) -> list[dict]:
         p = spec.get("parallelism", 1)
         if not isinstance(p, int) or p < 1:
             problems.append(f"{where}: parallelism 要是 >=1 的整数")
+
+        # environments:和 jobs/ 那边同一套语义(2026-08-29)。**两边不一致
+        # 本身就是个坑** —— 一个人在 jobs/ 里学会了 environments,到
+        # streams/ 发现不认,只会以为自己写错了。
+        envs = spec.get("environments")
+        if envs is not None:
+            if not isinstance(envs, list) or not envs:
+                problems.append(f"{where}: environments 要写成非空列表")
+            else:
+                unknown = [e for e in envs if e not in ENVIRONMENTS]
+                if unknown:
+                    problems.append(
+                        f"{where}: environments 里有不认识的环境 {unknown},"
+                        f"只能是 {sorted(ENVIRONMENTS)}")
+
         spec["_dir"] = d
+        # 多文件:同目录下所有 .py 一起挂进去,和 jobs/ 一致。
+        spec["_files"] = sorted(f.name for f in d.iterdir()
+                                if f.is_file() and f.suffix == ".py")
         out.append(spec)
     return out
 
 
 def configmap(s: dict) -> dict:
-    script = s["script"]
+    # 每个流作业一个独立的 ConfigMap(和 jobs/ 那边共用一个不同),所以 key
+    # 直接就是文件名,不需要打平再还原。
     return {
         "apiVersion": "v1", "kind": "ConfigMap",
         "metadata": {"name": f"stream-{s['name']}-script", "namespace": NAMESPACE},
-        "data": {script: (s["_dir"] / script).read_text()},
+        "data": {f: (s["_dir"] / f).read_text() for f in s["_files"]},
     }
 
 
@@ -160,6 +183,11 @@ def flinkdeployment(s: dict) -> dict:
 
 def main() -> None:
     check = "--check" in sys.argv
+    positional = [a for a in sys.argv[1:] if not a.startswith("-")]
+    env_name = positional[0] if positional else DEFAULT_ENV
+    if env_name not in ENVIRONMENTS:
+        print(f"不认识的环境「{env_name}」,只能是 {sorted(ENVIRONMENTS)}", file=sys.stderr)
+        sys.exit(1)
     problems: list[str] = []
     streams = load(problems)
     if problems:
@@ -167,6 +195,10 @@ def main() -> None:
         for p in problems:
             print("  -", p)
         sys.exit(1)
+
+    # 校验(上面)对所有流作业都做,不管它在不在当前环境;过滤放在校验之后。
+    streams = [s for s in streams
+               if s.get("environments") is None or env_name in s["environments"]]
 
     files = {}
     if streams:
@@ -186,7 +218,7 @@ def main() -> None:
         if stale.name not in files:
             drift.append(f"{stale.relative_to(REPO)}(源已删除)") if check else stale.unlink()
 
-    print(f"{len(streams)} 个流作业。")
+    print(f"[{env_name}] {len(streams)} 个流作业在这个环境生效。")
     if drift:
         print("\n生成物和 streams/ 漂移了,跑一次 python3 scripts/render-streams.py:")
         for d in drift:
