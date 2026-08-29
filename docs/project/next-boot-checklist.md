@@ -132,3 +132,43 @@ platform-team 账号打开建表工具 → 负责人那个框可编辑
 其他账号                       → 那个框是灰的(disabled)
 非平台组的人直接 POST 一个别人的名字 → 落库的负责人仍然是他自己
 ```
+
+**12. 建表工具的新表单**(全部只有单元测试,一次都没在集群上跑过):
+
+```
+带字段说明和分区提交一张表
+→ Trino 里 SHOW CREATE TABLE 应该能看到 COMMENT 和 partitioning
+→ OpenMetadata 里字段应该带 description
+勾上质量断言
+→ OpenMetadata 的 Data Quality 里应该真的出现对应的 testCase
+点「预览要执行的 SQL」→ 显示的那段应该和实际执行的一字不差
+用非平台组账号选 2 级 → 应该被挡住,记录里写着去权限申请门户
+```
+
+**13. 作业发布那一批**(同样只有单元测试):
+
+```
+多文件:jobs/daily-order-summary 现在是 job.py + jobkit.py
+→ 手工提交一次,应该能 import jobkit 而不是 ModuleNotFoundError
+补数:argo submit --from cronwf/daily-order-summary -n argo-workflows \
+        -p run_date=2026-08-01
+→ 表里应该出现 run_date=2026-08-01 那一批,而不是今天的
+```
+
+**14. 续期和到期提醒**:
+
+```
+造一条 7 天内到期的 grant → 跑一次 /internal/reclaim-expired
+→ 企微(或 echo sink)应该收到「权限即将到期」
+门户首页那条应该标黄、排最前、带「续期」链接
+点续期 → 权限门户里出现一条 [续期] 开头的新申请,状态是等待审批
+   (**不是直接延期**)
+```
+
+---
+
+## 跑完之后
+
+把验过的项在 [`capability-matrix.md`](capability-matrix.md) 里从「未验证」
+改掉,并写上日期和证据。`scripts/check-capability-matrix.py` 会拦住"没验
+就标 ✅"。
