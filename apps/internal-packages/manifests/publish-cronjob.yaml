@@ -29,7 +29,12 @@ spec:
           priorityClassName: batch
           containers:
             - name: publish
-              image: python:3.12-slim
+              # **用 python:3.12 而不是 -slim**:slim 里没有 git,而在境内
+              # ECS 上 `apt-get update` 连 Debian 源会卡住不动(2026-08-29
+              # 实测,任务 11 分钟没过 apt 这一步)。非 slim 的官方镜像基于
+              # buildpack-deps,自带 git,省掉整个 apt 步骤。
+              # 代价是镜像大一些,但它一小时才拉一次、而且有本地缓存。
+              image: python:3.12
               env:
                 - name: MINIO_ENDPOINT
                   value: http://minio.minio.svc.cluster.local:9000
@@ -48,7 +53,6 @@ spec:
                   # 针对的是常驻服务,不是一小时一次的批任务)。
                   pip install --quiet --no-cache-dir \
                     -i https://mirrors.aliyun.com/pypi/simple/ build boto3
-                  apt-get update -qq && apt-get install -y -qq --no-install-recommends git >/dev/null
                   git clone --depth 1 "$REPO_URL" /repo
                   python3 /scripts/publish_internal_packages.py
               volumeMounts:
