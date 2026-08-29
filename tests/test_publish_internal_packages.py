@@ -28,6 +28,11 @@ def load_module(monkeypatch, repo_dir):
         def put_object(self, Bucket, Key, Body, **kw):
             stored[Key] = Body
 
+        def put_bucket_policy(self, **kw):
+            """索引要匿名可读,pip 才能不带凭据读它(ADR-083)。桩里只要
+            不报错就行,策略内容对不对由集群上的实测覆盖。"""
+            stored["__policy__"] = kw.get("Policy")
+
     fake = types.ModuleType("boto3")
     fake.client = lambda *a, **k: FakeS3()
     monkeypatch.setitem(sys.modules, "boto3", fake)
@@ -95,7 +100,7 @@ def test_没有_packages_目录时不报错(tmp_path, monkeypatch):
     """全新集群上 packages/ 可能还不存在,这个任务不该因此每小时红一次。"""
     mod, stored = load_module(monkeypatch, tmp_path)
     mod.main()
-    assert stored == {}
+    assert {k: v for k, v in stored.items() if not k.startswith("__")} == {}
 
 
 def test_没有_pyproject_的目录被跳过(tmp_path, monkeypatch):
@@ -141,3 +146,20 @@ def test_同时写了带尾斜杠的键(tmp_path, monkeypatch):
     assert "simple/demo-utils/" in stored, "包索引缺带尾斜杠的键,pip 装不到"
     # 两份内容必须一样,否则浏览器看到的和 pip 看到的不是一回事
     assert stored["simple/demo-utils/"] == stored["simple/demo-utils/index.html"]
+
+
+def test_索引设成匿名可读(tmp_path, monkeypatch):
+    """**不设的话 pip 要带凭据才能读索引** —— 而给每个 notebook 发一份 MinIO
+    凭据,比"内部包对集群内可读"这个取舍糟得多(ADR-083)。
+
+    2026-08-29 第一次实机验证时是我手动 `mc anonymous set download` 的,
+    也就是说重装一次集群这条链就断了、而且不会有任何提示。"""
+    import json as _json
+    make_pkg(tmp_path, "demo-utils")
+    mod, stored = load_module(monkeypatch, tmp_path)
+    mod.main()
+    assert "__policy__" in stored, "没有设 bucket 策略,pip 会 403"
+    pol = _json.loads(stored["__policy__"])
+    res = pol["Statement"][0]["Resource"][0]
+    assert res.endswith("/simple/*"), f"策略范围应该只到索引前缀,不是整个桶:{res}"
+    assert pol["Statement"][0]["Action"] == ["s3:GetObject"], "只该给读,不该给写"

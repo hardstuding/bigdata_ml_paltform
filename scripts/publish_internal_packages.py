@@ -11,6 +11,7 @@ PEP 503「简单索引」的全部要求就是两层 HTML:
 所以静态对象存储直接就能当索引用,不需要任何服务进程。
 """
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -91,6 +92,23 @@ def main() -> None:
     except Exception:  # noqa: BLE001
         s3.create_bucket(Bucket=BUCKET)
         print(f"已创建 bucket {BUCKET}")
+
+    # **索引必须匿名可读**,否则 pip 要带凭据才能读 —— 而给每个 notebook
+    # 发一份 MinIO 凭据,比"内部包对集群内可读"这个取舍糟得多(ADR-083)。
+    # 每次都设一遍是幂等的;不放在建 bucket 的分支里,是因为 bucket 可能
+    # 是别的途径建的、或者策略被人改过。
+    #
+    # 这不是"公网可读":MinIO 没有对外入口,而且 NetworkPolicy 限制了哪些
+    # 命名空间能连它。
+    s3.put_bucket_policy(Bucket=BUCKET, Policy=json.dumps({
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"AWS": ["*"]},
+            "Action": ["s3:GetObject"],
+            "Resource": [f"arn:aws:s3:::{BUCKET}/simple/*"],
+        }],
+    }))
 
     packages = build()
     if not packages:
