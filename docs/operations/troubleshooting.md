@@ -127,6 +127,76 @@ fail-closed 的组件配好 rollout,这次真的兜住了。
 
 ### 各组件专属故障
 
+### 改了 DAG(或任何 subPath 挂载的 ConfigMap)之后不生效,而且一切显示正常
+
+**症状**:改完 DAG、push、ArgoCD 显示 Synced/Healthy、`kubectl get cm
+airflow-dags -o yaml` 里也确实是新内容 —— 而 Airflow 的行为完全没变。
+2026-08-29 实测遇到的具体表现:给 DAG 加了 `schedule`,`airflow dags
+unpause` 成功、`is_paused=False`,而 `next_dagrun_run_after` 一直是 `None`。
+
+**定位**:进 pod 里看那个文件本身。
+
+```bash
+kubectl -n airflow exec deploy/airflow-scheduler -c scheduler -- \
+  grep -n "schedule=" /opt/airflow/dags/dbt_demo.py
+```
+
+看到的还是旧内容,就是这个问题。
+
+**原因**:**subPath 挂载的 ConfigMap,Kubernetes 永远不会更新**——不是
+「有延迟」,是根本不更新(官方文档明确写了这一条)。这里用 subPath 是有
+原因的:挂整个 ConfigMap 目录会让 Airflow 3.x 的 DAG 遍历把 `..data` 软链
+识别成递归循环直接崩溃退出。
+
+**处置(已经做成自动的,一般不用手动)**:DAG 内容的哈希写进了
+apiServer/scheduler/dagProcessor/workers 四处的 `podAnnotations`,由
+`scripts/sync-airflow-dags-configmap.py` 生成、CI 用 `--check` 校验。
+DAG 一改哈希就变 → pod 模板变 → ArgoCD 自动滚更。
+急着生效可以手动:`kubectl -n airflow rollout restart deploy/airflow-scheduler
+deploy/airflow-dag-processor`。
+
+**同类风险**:仓库里任何用 subPath 挂 ConfigMap 的地方都有这个性质。
+改那类配置之后,不要只看 ArgoCD 是不是绿的。
+
+### Airflow 任务瞬间失败,日志里是 `exceeded quota: compute-quota`
+
+**症状**:DAG Run 变红,任务 `start_date` 是空的(根本没启动),
+scheduler 日志里:
+
+```
+pods "xxx" is forbidden: exceeded quota: compute-quota,
+requested: limits.memory=512Mi, used: limits.memory=6016Mi, limited: 6Gi
+```
+
+**原因**:KubernetesExecutor 每个任务都要在 `airflow` 命名空间起一个
+worker pod,和常驻组件共用同一份 ResourceQuota。**超配额不是排队,是任务
+直接失败**——这一点和一般人对「配额」的直觉相反。
+
+**处置**:调大 `platform/resource-quotas/manifests/quotas.yaml` 里 airflow
+那份;同时看一眼 `environments/resource-profiles.yaml` 的
+`airflow_worker_pod_*`,worker 规格和配额上限要一起算。
+
+**这个坑这个仓库栽过四次**(2026-08-19 MLflow 改 resources、08-23
+OpenMetadata 采集 Job 要 4Gi、08-28 OpenMetadata 命名空间、08-29 airflow)。
+根子是同一个:配额按「当时跑着的东西」配,而任何新增的按需 pod 都从同一个
+池子里扣。**看到 Job/任务「Running 0/1 但一个 Pod 都没有」或者秒失败,
+先查配额。**
+
+### DAG 报 `Variable ... does not exist`
+
+**症状**:任务起来了但几秒内失败,栈顶是 `Variable.get(...)`。
+
+**原因**:Airflow Variable 存在元数据库里,不在 git 里。库被重建/恢复过
+之后就没了,而 `bootstrap-all.sh` 只在部署时跑一次。
+
+**处置**:`./scripts/14-configure-airflow-seatunnel-variable.sh`(幂等)。
+`airflow variables list` 能确认。
+
+**2026-08-29 的真实经过值得记一笔**:发现它是因为把 DAG 从手动触发改成了
+定时——在那之前那条 DAG 从来不自己跑,所以「Variable 全丢了」这件事一直
+没有任何人和任何东西发现。**让东西自己跑起来,本身就是一种检测手段。**
+
+
 - [Superset 报 ModuleNotFoundError: No module named 'psycopg2'(或 'authlib'、数据源驱动包)](#superset-报-modulenotfounderror-no-module-named-psycopg2或-authlib)
 - [组件重新拉起来报 "password authentication failed",Postgres 密码"变了"](#组件重新拉起来报-password-authentication-failedpostgres-密码变了)
 - [`KubernetesPodOperator` 拉起跨命名空间/自定义镜像的 Spark 任务,一路要闯好几关](#kubernetespodoperator-拉起跨命名空间自定义镜像的-spark-任务一路要闯好几关rbac日志流容器-uid模板变量)
