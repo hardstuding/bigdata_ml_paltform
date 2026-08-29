@@ -4,7 +4,7 @@
 文档在 `docs/operations/`。这里只讲"我要干某件事该怎么用",不讲这些组件
 是怎么部署起来的。
 
-**按角色找你要看的部分**(角色定义见 [`docs/roles.md`](roles.md)):
+**按角色找你要看的部分**(角色定义见 [`docs/project/capability-matrix.md`](project/capability-matrix.md)):
 
 | 你是 | 看哪几节 |
 |---|---|
@@ -110,7 +110,7 @@ Trino 的账号密码仍然要通过环境变量提供(`PLATFORM_TRINO_USER`/
 `job.yaml` 配 `platform-submit job.yaml`——参考 `examples/hello-job/`,
 细节见 ADR-058 和 `platform-sdk/README.md`。**已知限制**:直接从
 notebook pod 里调 `submit_job()` 目前连不上 K8s API server(NetworkPolicy
-问题,`docs/BACKLOG.md` 2.6),要从终端/CI 提交,不是从 notebook 里。
+问题,`docs/project/roadmap.md` 2.6),要从终端/CI 提交,不是从 notebook 里。
 
 如果用 Claude Code 之类的 AI 编程工具在这个仓库里干活,`.claude/skills/`
 下有 `query-data`/`submit-job`/`debug-job` 三个 skill,分别覆盖"怎么

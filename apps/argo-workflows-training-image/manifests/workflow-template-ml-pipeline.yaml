@@ -1,6 +1,6 @@
 # 多步骤 ML 流水线:特征物化 → 训练 → 模型门禁校验。
 #
-# 补的是 docs/roles.md"算法工程师"那一节点名的最后一个缺口:"多步骤 DAG
+# 补的是 docs/project/capability-matrix.md"算法工程师"那一节点名的最后一个缺口:"多步骤 DAG
 # (特征工程→训练→评估),现在这两个模板各自都只有训练一步"。
 # train-demo-model / train-from-feast-features 那两个模板是单步的,这份
 # 才真正用上 Argo 的 `dag` + `dependencies` 做多步骤编排。

@@ -8,7 +8,7 @@
 
 ## 背景
 
-`docs/roles.md` 的数据治理板块里,"敏感字段行列级策略"一直是 ❌:
+`docs/project/capability-matrix.md` 的数据治理板块里,"敏感字段行列级策略"一直是 ❌:
 "OPA 原生支持,没配置"。OPA 已经在 2026-08-16 正式接进 Trino 生效
 (ADR-051),但那份 ADR 自己写明了范围边界——只做"能不能读到这张表"的
 表级判断,不覆盖列级脱敏/行级过滤。这份 ADR 补上这两块。
@@ -129,7 +129,7 @@ CronJob(`apps/opa/manifests/departments-sync-cronjob.yaml`):5 分钟一次,
 - **没有改**:`platform/iam/` 下任何数据文件(`employees.csv` 本来就有
   `department` 列,不需要加字段)、`environments/*/config.yaml`、
   `environments/resource-profiles.yaml`、`scripts/bootstrap-all.sh`、
-  `docs/roles.md`——这几个是共享文件,这次故意没碰,见下面"需要额外做
+  `docs/project/capability-matrix.md`——这几个是共享文件,这次故意没碰,见下面"需要额外做
   的事"。
 
 ## 验证
@@ -190,17 +190,17 @@ YAML(`departments-sync-cronjob.yaml`/`policy-configmap.yaml`/
 
 ## 需要额外做的事(不在这次改动范围,交回去处理)
 
-- `docs/roles.md` 那一格"敏感字段行列级策略 | ❌ | OPA 原生支持,没配置"
+- `docs/project/capability-matrix.md` 那一格"敏感字段行列级策略 | ❌ | OPA 原生支持,没配置"
   要不要改成 🟡(能力已实现但没在真实集群验证过),还是等下次上云实测过
   再改成 ✅——按这个仓库一贯的"判定依据是实际验证,不是代码写完"的标准
   (ADR-062 末尾那条教训),这次应该停在 🟡,不要因为 `opa test` 全绿就
-  标成完成。`docs/roles.md` 是共享文件,这次没有改,留给之后处理这一格。
+  标成完成。`docs/project/capability-matrix.md` 是共享文件,这次没有改,留给之后处理这一格。
 - `scripts/bootstrap-all.sh` 需不需要显式提一句"`opa-departments-sync`
   这个 CronJob 是 GitOps 自动同步的一部分",按现在的模式(`opa-grants-
   sync` 当初大概率也没有单独提)应该不需要,ArgoCD 会自动发现
   `apps/opa/manifests/` 下新增的文件——但这条判断本身没有实测确认过
   `apps-root` 的发现范围是不是整个目录,值得下次上云时顺带确认一下。
-- 下次云主机开机后的验证清单(建议接进 `docs/CURRENT_WORK.md` 或者
+- 下次云主机开机后的验证清单(建议接进 `docs/project/current-work.md` 或者
   cloud-full 的 STATUS 文档,这次没有改这两个文件,留给之后处理):
   1. 手动 `curl PUT` 一次 `data.trino.user_departments`,确认
      `opa-departments-sync` 那段 Python 代码本身没有语法/逻辑错误。

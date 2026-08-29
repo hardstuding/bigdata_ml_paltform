@@ -20,7 +20,7 @@
 (cri-dockerd)起的,`/etc/rancher/k3s/registries.yaml` **根本不会被读**
 (那是 k3s 内置 containerd 的功能)。cri-dockerd 下只剩 Docker daemon 的
 `registry-mirrors`,而它**只能镜像 Docker Hub**,ghcr.io 不支持。详见
-`docs/BACKLOG.md`「镜像拉取」那条。
+`docs/project/roadmap.md`「镜像拉取」那条。
 
 ## 解法
 

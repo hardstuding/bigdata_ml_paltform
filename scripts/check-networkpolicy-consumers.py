@@ -9,7 +9,7 @@
   - 2026-08-21 SeaTunnel 写 Iceberg 连 Hive Metastore Connection refused
 每次都是"新命名空间消费了一个共享服务,但没人记得去中心化的白名单里加一行"。
 而且**往往过很久才被发现**——组件 ArgoCD 显示 Synced/Healthy,只有真的
-跑一次那条数据路径才会暴露(SeaTunnel 那次 DAG 长期暂停,`docs/roles.md`
+跑一次那条数据路径才会暴露(SeaTunnel 那次 DAG 长期暂停,`docs/project/capability-matrix.md`
 就一直写着"批量数据接入 ✅",实际从来没通过)。
 
 这个检查把"消费者列表"从人工维护变成可校验的:扫描仓库里所有引用共享

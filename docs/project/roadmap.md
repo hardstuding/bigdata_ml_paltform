@@ -1,13 +1,13 @@
 # Backlog
 
 新想法/顺手发现的问题,默认进这里,不自动打断
-[`docs/CURRENT_WORK.md`](CURRENT_WORK.md) 里的当前主线。这份文件只做索引
+[`docs/project/current-work.md`](../project/current-work.md) 里的当前主线。这份文件只做索引
 和优先级排序,不重复描述已经在别处写清楚的内容——每一项都指向权威来源
 (ADR / architecture.md),不在这里复制一遍。
 
-**排序依据(2026-08-19 起,见 [ADR-057](decisions/057-architecture-review-2026-08-19.md)):
+**排序依据(2026-08-19 起,见 [ADR-057](../decisions/057-architecture-review-2026-08-19.md)):
 按"阻塞哪个角色的哪条能力"排,不按"还有哪个组件没接"排。**
-判断某件事该排多前,先看 [`docs/roles.md`](roles.md) 的角色能力表。
+判断某件事该排多前,先看 [`docs/project/capability-matrix.md`](../project/capability-matrix.md) 的角色能力表。
 
 > 2026-08-19 重排说明:此前的 P1.5/P1.6/P1.7 不是优先级,是不同日期追加
 > 的批次(带小数的层级本身就是"一直在追加、没有重排过"的证据)。这次
@@ -19,7 +19,7 @@
 
 ## 生产可用性缺口(2026-08-23 主动盘点,独立于下面的 P0-P5)
 
-[`docs/production-readiness-gaps.md`](production-readiness-gaps.md) —— 六条
+[`docs/project/production-readiness-gaps.md`](../project/production-readiness-gaps.md) —— 六条
 "不做会出事"的缺口:数据质量断言(完全没有,最危险)、数据新鲜度 SLO
 (现在只监控组件不监控数据)、查询审计(**晚做一天就永久少一天记录**)、
 成本归属、Schema Registry、门户改工作台。挑选标准和排序依据写在文档开头。
@@ -70,7 +70,7 @@ workflows API 403(`server.sso.rbac` 需要的 ServiceAccount + 长期
 token Secret + Role/RoleBinding)都已修好,四个资源加进了
 `templates/apps-definitions/argo-workflows.yaml` 的 `extraObjects`。
 真实 curl+cookie-jar 验证过:登录→查询 workflows API 200→建一个真实
-Workflow→能查到→删除清理。详见 `docs/CURRENT_WORK.md` 归档记录。
+Workflow→能查到→删除清理。详见 `docs/project/current-work.md` 归档记录。
 
 ### 1.6 Kafka 部署 —— 已完成(2026-08-19)
 
@@ -180,7 +180,7 @@ flink CRD 那个常年 OutOfSync,理由是一样的——**常年黄灯会训练
 部署状态里**:这两套信号回答的是不同问题(部署对不对 vs 平台好不好),
 混在一起两边都变钝。
 
-细节见 [ADR-079](decisions/079-golden-path-probes.md)。
+细节见 [ADR-079](../decisions/079-golden-path-probes.md)。
 
 ---
 
@@ -205,13 +205,13 @@ CI 构建失败(**线索一开始就在**:原来的 initContainer 用的是
 ## P0(会阻断当前主线的,才有资格排这里)
 
 当前没有。如果出现真实的数据风险/持续计费异常/安全问题,加在这里,
-并在 `docs/CURRENT_WORK.md` 里注明"CURRENT 被 P0 阻断,原因是……"。
+并在 `docs/project/current-work.md` 里注明"CURRENT 被 P0 阻断,原因是……"。
 
 ---
 
 ## P1:解锁角色能力(投入产出比最高,先做这一批)
 
-依据 [`docs/roles.md`](roles.md)。**1.2/1.3/1.4 已于 2026-08-19 完成**
+依据 [`docs/project/capability-matrix.md`](../project/capability-matrix.md)。**1.2/1.3/1.4 已于 2026-08-19 完成**
 (OpenMetadata / JupyterHub+MLflow / Spark Operator+SeaTunnel+Spark
 History Server 全部部署并逐个真实登录验证过,不是只看 Pod Running)。
 过程中发现并修复了 8 个真实 bug——这些组件长期 park、从没真的走过一次
@@ -251,7 +251,7 @@ workflows API 403(`server.sso.rbac` 需要的 ServiceAccount + 长期
 token Secret + Role/RoleBinding)都已修好,四个资源加进了
 `templates/apps-definitions/argo-workflows.yaml` 的 `extraObjects`。
 真实 curl+cookie-jar 验证过:登录→查询 workflows API 200→建一个真实
-Workflow→能查到→删除清理。详见 `docs/CURRENT_WORK.md` 归档记录。
+Workflow→能查到→删除清理。详见 `docs/project/current-work.md` 归档记录。
 
 ### 1.6 Kafka 部署 —— 已完成(2026-08-19)
 
@@ -448,7 +448,7 @@ table-registration-app 29 + permission-request-app 60,后者这次从 52
 
 **危险的地方在于发现得晚**:组件 ArgoCD 显示 Synced/Healthy,只有真的
 跑一次那条数据路径才暴露。SeaTunnel 那次因为 DAG 长期暂停,
-`docs/roles.md` 里"批量数据接入 ✅"这个结论挂了好几天,实际从来没通过。
+`docs/project/capability-matrix.md` 里"批量数据接入 ✅"这个结论挂了好几天,实际从来没通过。
 
 已加 `scripts/check-networkpolicy-consumers.py` 接进 CI:扫描仓库里引用
 共享服务 DNS 的文件,推断部署命名空间,和白名单对账。**自测过它真的会
@@ -662,10 +662,10 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
 ## P4:五条面向角色的产品主线(长期,都还没开始)
 
 完整方案见 `docs/architecture.md` "Phase 4 之后"一节和原始评审
-`docs/claude-improvement-recommendations-2026-08-15.md`。
+`docs/project/reviews/2026-08-15-external-review.md`。
 
 **2026-08-28 更新**:上面那句原文是"这五条现在都还没有开始实现",已经
-不准确了——A/C/D/E 各自都推进了第一步(见 `docs/CURRENT_WORK.md` 的进度
+不准确了——A/C/D/E 各自都推进了第一步(见 `docs/project/current-work.md` 的进度
 表)。现在的实情是:
 
 | 线 | 状态 |
@@ -698,12 +698,12 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
 ### 确认要做、还没设计的引擎/组件
 
 - **Flink**:2026-08-15 zhenghe 明确"作为新的大数据平台有它的必要性",
-  从"Phase 4 按需"改成"确认要做"。**设计已完成**([ADR-056](decisions/056-flink-role-design.md)):
+  从"Phase 4 按需"改成"确认要做"。**设计已完成**([ADR-056](../decisions/056-flink-role-design.md)):
   定位成"流式计算引擎"(实时聚合/join/特征计算),不做"数据搬运"。
   引入顺序上 Kafka 现在零真实消费者、Kafka Connect + Iceberg Sink
   这条轻量路径也没搭过,这两步应先于 Flink。**只是设计,没部署任何东西。**
 - ~~**Spark 4.x 评估**~~ —— **已评估(2026-08-26)**,见
-  [ADR-076](decisions/076-spark-4-evaluation.md):结论是暂不升,但查出一个
+  [ADR-076](../decisions/076-spark-4-evaluation.md):结论是暂不升,但查出一个
   之前没意识到的联系——**Spark 4 要求 Java 17,而 Iceberg 卡在 1.10.0 的
   原因正是当前 Spark 镜像只有 Java 11**。触发条件和联动清单都写进 ADR 了。
 - **Stackable(Spark/Trino/Hive 统一 Operator 平台)**:2026-08-15 Codex
@@ -729,7 +729,7 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
   demo 脚本对开源项目是"证明平台能力可复现"的资产,不是负担(新人靠它
   判断这平台是不是真能用)。真正的问题是**可读性**:编号不等于执行顺序
   (真正的顺序由 `bootstrap-all.sh` 编排)、五类东西混在一个平坦目录里。
-  产出是 [`scripts/README.md`](../scripts/README.md) 这份按"你想干什么"
+  产出是 [`scripts/README.md`](../../scripts/README.md) 这份按"你想干什么"
   分类的导航,不是一批 `git rm`。**没有重命名/移动任何文件**——编号被
   README/ADR/journal 大量引用,重命名的破坏面远大于收益。
 - **试错留下的死代码/废弃方案痕迹**。
@@ -744,7 +744,7 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
 ## 曾经提出、明确决定不做/暂缓的
 
 - **需求追踪矩阵**(`docs/requirements.md`,给每条用户需求分配 ID 逐条
-  追踪):讨论过,判断是对当前规模过重的流程负担,ADR + BACKLOG + roles.md
+  追踪):讨论过,判断是对当前规模过重的流程负担,ADR + BACKLOG + project/capability-matrix.md
   已经覆盖"决策留痕"和"待办不丢"这两个真实需求。
 - **自建 `scripts/task-runner.sh`**(start/status/logs/stop/resume 的
   后台任务管理器):当前后台任务的规模用不上,`nohup` + 日志文件够用。

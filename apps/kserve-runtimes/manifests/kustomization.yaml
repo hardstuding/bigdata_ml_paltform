@@ -17,7 +17,7 @@
 # tensorflow-serving(2.6.2)/mlserver(1.7.1)/torchserve(0.9.0)这几个官方
 # 本来就没用 latest,没有改动版本号——是否要把这几个换成更新的推理服务
 # (比如 TF Serving 太旧、TorchServe 考虑弃用)是一个更大的"支持哪些推理
-# 框架"设计判断,不在这次"只固定 latest"的范围内,见 docs/BACKLOG.md
+# 框架"设计判断,不在这次"只固定 latest"的范围内,见 docs/project/roadmap.md
 # P1.6。**tritonserver 是例外**:这不是"固定 latest"这类问题,是单纯的
 # 版本号补丁升级(和 PostgreSQL/Trino 那几个一样的性质),2026-08-16 从
 # 23.05-py3(~3年前的版本)升到当前最新稳定版 26.07-py3,已核实

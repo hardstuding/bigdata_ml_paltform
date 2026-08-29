@@ -55,7 +55,7 @@ spec:
         # 拒绝启动,480 上不报这个错。回退到 chart 默认的 480,不再单独
         # 覆盖——教训是"渲染结果一致"不等于"运行时行为一致",发布说明/
         # 真实拉起来跑一遍才是可信的验证,纯 diff 比对不够,以后同类版本
-        # 覆盖不能只靠这一步。见 docs/BACKLOG.md P1.6。
+        # 覆盖不能只靠这一步。见 docs/project/roadmap.md P1.6。
         #
         # 2026-08-16 补:拉过 trino 官方 chart 1.42.2 源码确认根因——
         # `templates/configmap-coordinator.yaml` 里 `http-server.http.port`
@@ -68,7 +68,7 @@ spec:
         # 开关只决定 Trino 进程自己听不听)——真打开之后,集群内部会多出
         # 一个走明文 HTTP、但仍然要求 PASSWORD/OAuth2 认证凭据的可达端点。
         # 483 本身没有对应的 CVE 或安全动机(纯粹"版本最新"的审计建议,
-        # 见 docs/BACKLOG.md 483→480 那条),不值得为了这一点版本号换这个
+        # 见 docs/project/roadmap.md 483→480 那条),不值得为了这一点版本号换这个
         # 代价,维持 480。
         server:
           # 规格分档,见 environments/resource-profiles.yaml

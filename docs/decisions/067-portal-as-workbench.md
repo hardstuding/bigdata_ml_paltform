@@ -89,7 +89,7 @@ groups 头。**改那份配置有真实的登录风险**——它的注释里记
 
 ### 模板搬进 `templates/`,但仍然不引前端框架
 
-Jinja 是 Flask 自带的,和引 React 是两回事,[ADR-032](032-self-built-tools-auth.md)
+Jinja 是 Flask 自带的,和引 React 是两回事,[ADR-032](032-permission-request-app.md)
 那条"不用前端框架"的约束仍然成立。
 
 样式上补了深色模式(颜色全部走 CSS 变量,深色只重定义变量不重写规则)、

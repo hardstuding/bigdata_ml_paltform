@@ -73,7 +73,7 @@ backup_s3_secret: postgres-backup-target
 # 没有做**——所有组件的 resources/副本数目前写死的是 local-lite 那套
 # 小规格(比如 Trino coordinator 300m CPU、server.workers: 0),照搬到
 # 生产硬件上不改,等于用一台笔记本的配置跑生产。这一层是
-# `docs/BACKLOG.md` 1.1 明确押后的后半段,没做完之前 prod 只能算
+# `docs/project/roadmap.md` 1.1 明确押后的后半段,没做完之前 prod 只能算
 # "配置结构完整",不能算"可用"。
 enabled_components:
   - airflow-db-init.yaml

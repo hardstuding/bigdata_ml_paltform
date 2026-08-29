@@ -5,7 +5,7 @@
 
 ## 背景
 
-[`docs/production-readiness-gaps.md`](../production-readiness-gaps.md) 第 5 条:
+[`docs/project/production-readiness-gaps.md`](../project/production-readiness-gaps.md) 第 5 条:
 Kafka 部署了,但没有 Schema Registry,Flink 作业里的 schema **写死在 SQL
 里**。上游改一个字段名或类型,消费端只有运行时才知道——而且这个平台实测过,
 **报错位置往往离根因隔着一两层**([ADR-062](062-flink-streaming-pipeline.md)

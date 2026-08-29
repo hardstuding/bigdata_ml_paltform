@@ -1,4 +1,4 @@
-"""permission-request-app 的测试——见 docs/BACKLOG.md P1"三个自建 Flask
+"""permission-request-app 的测试——见 docs/project/roadmap.md P1"三个自建 Flask
 工具补测试"那条。这个 app 最大最复杂(1388 行),这次先覆盖最核心、最
 容易出错的一块:build_approval_steps() 这套"按 ADR-040 规则算出谁要
 审批"的业务逻辑,以及它依赖的 get_manager_chain()/load_employees()。
@@ -167,12 +167,12 @@ class TestBuildApprovalSteps:
 
 # ---------------------------------------------------------------------------
 # 下面覆盖 /request/*、/table-access/* 这些路由的完整状态机(approve/reject/
-# escalation/transfer/audit/external-callback)——docs/BACKLOG.md P1.2 里
+# escalation/transfer/audit/external-callback)——docs/project/roadmap.md P1.2 里
 # 明确标注过"还没测"的那部分。用 Flask test_client 走真实路由,不是直接
 # 调内部函数,这样能顺带验证认证头解析/HTTP 状态码这些路由层面的行为,
 # 不只是业务逻辑本身。
 #
-# 覆盖范围(2026-08-20 补完,见 docs/BACKLOG.md 2.4):默认的 client
+# 覆盖范围(2026-08-20 补完,见 docs/project/roadmap.md 2.4):默认的 client
 # fixture 场景下 GIT_TOKEN 不设置,只测到"没配置时优雅降级,不崩溃"这
 # 条路径。真正执行 git clone/commit/push 的分支(apply_to_git()/
 # apply_grant_to_git()/reclaim_expired()/transfer())现在由下面
@@ -622,7 +622,7 @@ class TestAuditAndHealthz:
 
 
 class TestGitWritePaths:
-    """补 docs/BACKLOG.md 2.4 里明确记录的缺口:apply_to_git()/
+    """补 docs/project/roadmap.md 2.4 里明确记录的缺口:apply_to_git()/
     apply_grant_to_git()/reclaim_expired()/transfer() 真正执行 git
     clone/commit/push 的分支,之前只测过"没配 GIT_TOKEN 时优雅降级"这一半。
     用 local_git_repo fixture 起一个本地裸仓库当 REPO_URL,不连真实
@@ -762,7 +762,7 @@ class TestGitWritePaths:
 
 
 class TestExternalOaWebhookDispatch:
-    """补 docs/BACKLOG.md 2.4 里另一半没测的路径:dispatch_step() 在
+    """补 docs/project/roadmap.md 2.4 里另一半没测的路径:dispatch_step() 在
     APPROVAL_BACKEND=webhook 时真的 POST 到 EXTERNAL_OA_WEBHOOK_URL——之前
     只测过 local 模式(留在 pending、发企微通知)。用 monkeypatch 替换
     perm.requests.post,不真的发网络请求。"""

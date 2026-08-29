@@ -3,7 +3,7 @@
 51 个文件,编号(`00-` 到 `26-`)**不等于执行顺序**——真正的执行顺序由
 [`bootstrap-all.sh`](bootstrap-all.sh) 编排,编号只是历史上添加的先后。
 这份导航按"你想干什么"分类,2026-08-21 的 P5 瘦身审计
-(见 [`docs/BACKLOG.md`](../docs/BACKLOG.md) P5)整理。
+(见 [`docs/project/roadmap.md`](../docs/project/roadmap.md) P5)整理。
 
 > **审计结论(如实记录)**:这次逐个核对了全部 51 个文件,**没有找到
 > 该删的死代码**——原本 BACKLOG 里的假设是"作为开源项目里面很多应该

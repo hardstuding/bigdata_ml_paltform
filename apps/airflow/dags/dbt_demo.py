@@ -149,7 +149,7 @@ with DAG(
             # boto3==1.43.72,任务#13 已经核实锁定过,这份源文件之前没跟
             # ConfigMap 同步更新——这个项目目前没有类似
             # scripts/sync-app-configmaps.py 的机制帮 Airflow DAG 源文件和
-            # ConfigMap 保持一致,是已知差距,见 docs/BACKLOG.md)。
+            # ConfigMap 保持一致,是已知差距,见 docs/project/roadmap.md)。
             # 2026-08-16 云端部署时实测:pypi.org 直连给 dbt-core 这个大
             # 依赖树反复卡到 300 秒超时(两次,一次挂了 8 分钟以上才手动
             # 中止),换成阿里云的公开 PyPI 镜像后同样的安装 25 秒完成——

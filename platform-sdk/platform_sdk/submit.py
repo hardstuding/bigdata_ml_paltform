@@ -319,7 +319,7 @@ def run_workflow_template(
     ——模板本身的镜像/资源/凭据都已经在模板里配好,调用方不需要、也不能
     改这些,只能传模板允许的 parameters(模板目前没有声明任何 parameters,
     传了不存在的 key 会被 Argo 忽略,不会报错,但也不会生效——这不是这个
-    函数的 bug,是模板本身还没加参数化,见 docs/BACKLOG.md P1.7)。
+    函数的 bug,是模板本身还没加参数化,见 docs/project/roadmap.md P1.7)。
 
     这是 BACKLOG P1.7"notebook 里触发训练"这条空白的落地:在
     JupyterHub notebook 里跑

@@ -5,7 +5,7 @@
 
 ## 背景:监控的对象错了
 
-[`docs/production-readiness-gaps.md`](../production-readiness-gaps.md) 第 2 条。
+[`docs/project/production-readiness-gaps.md`](../project/production-readiness-gaps.md) 第 2 条。
 
 平台有 kube-prometheus-stack、Grafana、Alertmanager,但监控的全部是**组件**
 ——Pod 活着吗、CPU 多少、JVM 堆多大。而数据平台对业务的承诺从来不是

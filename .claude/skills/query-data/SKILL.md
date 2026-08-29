@@ -66,7 +66,7 @@ paper over by reusing someone else's — ADR-021's whole point is per-caller iso
 
 If a query fails with a *connection* error (not `MissingCredential`, and not a SQL
 error from Trino itself) from inside a notebook specifically, don't assume Trino is
-down — check `docs/BACKLOG.md` section 2.6 first. The JupyterHub singleuser
+down — check `docs/project/roadmap.md` section 2.6 first. The JupyterHub singleuser
 NetworkPolicy has bitten this exact class of problem before (it blocks all
 cluster-internal traffic by default; Trino/MLflow/MinIO were explicitly allow-listed,
 but a newly-added target might not be yet).

@@ -4,8 +4,8 @@
 更正。**ADR 里"状态"一栏写的是验证到什么程度**(设计完成 / 已部署 /
 已实测),不是"我们决定这么做"就完了——读的时候先看状态。
 
-- 想知道**某个角色今天能做什么** → [`../roles.md`](../roles.md)
-- 想知道**现在在做什么** → [`../CURRENT_WORK.md`](../CURRENT_WORK.md)
+- 想知道**某个角色今天能做什么** → [`../project/capability-matrix.md`](../project/capability-matrix.md)
+- 想知道**现在在做什么** → [`../project/current-work.md`](../project/current-work.md)
 - 想知道**架构全貌** → [`../architecture.md`](../architecture.md)
 
 > 编号连续性:**没有 ADR-049**(编号跳过,不是文件丢失)。
@@ -48,7 +48,7 @@
 
 | # | 标题 | 状态 |
 |---|---|---|
-| [015](015-openmetadata-architecture.md) | OpenMetadata:Postgres 后端 + k8s 原生采集编排 | 已验证(**cloud-full 上未部署**,见 roles.md) |
+| [015](015-openmetadata-architecture.md) | OpenMetadata:Postgres 后端 + k8s 原生采集编排 | 已验证(**cloud-full 上未部署**,见 project/capability-matrix.md) |
 | [014](014-spark-lineage-official-agent.md) | Spark 血缘用官方 agent,不自己解析 SQL | 已采纳,**仅设计未实现** |
 | [052](052-seatunnel-lineage.md) | SeaTunnel 表级血缘推 OpenMetadata | 已实现,API 机制已验证 |
 | [012](012-dbt-analyst-platform.md) | 分析师开发平台:dbt + Cosmos + OpenMetadata | 方向已定 |

@@ -82,7 +82,7 @@ from platform_sdk import run_workflow_template
 workflow_name = run_workflow_template("train-demo-model")
 ```
 
-This is the "trigger training from a notebook cell" path (`docs/BACKLOG.md` P1.7) —
+This is the "trigger training from a notebook cell" path (`docs/project/roadmap.md` P1.7) —
 one line in a notebook, no `kubectl create`, no hand-written Workflow YAML. It creates
 a thin `Workflow` object with a `workflowTemplateRef` pointing at the named template;
 the template itself owns the image/resources/credentials, so there's nothing else to

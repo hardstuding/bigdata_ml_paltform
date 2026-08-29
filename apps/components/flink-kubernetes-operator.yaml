@@ -82,7 +82,7 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-  # 这四个 CRD 常年 OutOfSync,`docs/BACKLOG.md` 里原来猜的是"CRD 太大,
+  # 这四个 CRD 常年 OutOfSync,`docs/project/roadmap.md` 里原来猜的是"CRD 太大,
   # ArgoCD 塞不进 last-applied 注解"——**猜错了**。2026-08-26 把 chart 渲染
   # 出来的 CRD 和活对象逐字段比了一遍,差异只有 4 个字段,全部是 **API
   # server 的默认值归一化**:

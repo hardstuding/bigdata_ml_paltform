@@ -78,7 +78,7 @@ cloud-full 现在这台(16 vCPU / 64 GiB,抢占式)约 ¥4/时。3 台同规格�
 `CLOUD_VM_IP=<新机器IP> CLOUD_VM_KEY=<私钥> ./scripts/23-pull-images-remote-via-mirror.sh`,
 幂等、已有的跳过。**这一步要在 bootstrap 之前做完**,否则组件会卡在
 ImagePull 上,而 Pod 状态看不出是"在慢慢下载"还是"卡死了"
-(2026-08-22 夜真实踩过,见 `docs/BACKLOG.md` 2.10)。
+(2026-08-22 夜真实踩过,见 `docs/project/roadmap.md` 2.10)。
 
 ## 执行前的检查清单
 

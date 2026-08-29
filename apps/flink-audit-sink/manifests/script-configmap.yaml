@@ -1,5 +1,5 @@
 # 这份 ConfigMap 的内容和 scripts/flink_trino_audit_sink.py 保持同步。
-# **两处源码人工同步是已知债务**(见 docs/BACKLOG.md 2.2 和 ADR-055),
+# **两处源码人工同步是已知债务**(见 docs/project/roadmap.md 2.2 和 ADR-055),
 # 不是这次新引入的问题——flink-streaming-demo 那条链路也是这个模式。
 apiVersion: v1
 kind: ConfigMap

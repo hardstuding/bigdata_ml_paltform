@@ -13,9 +13,14 @@ Kubernetes-native 的 Data + AI 平台骨架:统一身份认证、GitOps 驱动�
 - **可插拔基础设施**:公司已经有 Postgres/Kafka/对象存储了?不强制重新部署一份,配置里标出了怎么改接现有的(见 [ADR-030](docs/decisions/030-pluggable-external-infrastructure.md))。
 - **只用官方支持的部署方式**:不用 Bitnami 或来源不明的社区 chart,没有官方 Helm chart 的组件才自己写 manifest(见 [ADR-008](docs/decisions/008-avoid-bitnami.md))。每个决策的取舍理由都留了 ADR,不是"我们就是这么做的",是"为什么这么做、还有什么后果"。
 
+## 文档
+
+不知道该看哪一份,从 **[`docs/README.md`](docs/README.md)** 进 —— 它按
+"你现在想干什么"分了四类(上手 / 使用 / 运维 / 设计取舍)。
+
 ## 第一次接触这个平台?
 
-先看 [`docs/QUICKSTART.md`](docs/QUICKSTART.md) —— 半小时亲手跑通一条
+先看 [`docs/getting-started.md`](docs/getting-started.md) —— 半小时亲手跑通一条
 "数据进来 → 能查 → 能看 → 能训练 → 能上线"的完整链路,先有整体感觉,
 再看细节。下面这段"快速上手"是**部署**用的,不是使用引导。
 
@@ -45,10 +50,19 @@ apps/
 environments/     # local-lite / cloud-full / prod 三个环境画像;每个环境的 config.yaml 里 enabled_components 列表决定这个环境要哪些组件(apps/components/ 是全部组件的源码)
 scripts/          # 一键拉起 / 常用运维 / 校验脚本 —— 51 个文件的分类导航见 scripts/README.md(编号不等于执行顺序)
 docs/
-  architecture.md   # 架构总览、组件清单、路线图
-  decisions/        # ADR——每个非显而易见的技术决策,连同踩过的坑
-  operations/       # 运维手册:排障记录、升级流程、版本清单、备份
+  README.md         # 文档索引 —— 不知道该看哪份就从这里进
+  getting-started.md  # 半小时跑通一条完整链路
+  usage-guide.md    # 按角色的使用说明(查数 / 跑作业 / 训模型 / 建表)
+  architecture.md   # 架构总览、分层、选型原则
+  reference/        # 参照类:服务目录(每个服务是什么、归谁、坏了影响谁)
+  operations/       # 运维:Runbook、备份恢复、升级、调优、入离职
+  decisions/        # ADR —— 每个非显而易见的技术决策,连同踩过的坑
+  project/          # 项目自身的过程记录(进度、待办、评审)——不是使用文档
+  journal/          # 按月的排障叙事归档
 ```
+
+> **`docs/project/` 和其它目录是刻意分开的**:它回答"我们做到哪了、
+> 接下来做什么",而不是"这个平台怎么用"。找使用说明不用进那个目录。
 
 ## 环境画像
 
@@ -196,7 +210,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 | `scripts/12-sync-iam.py` | 把 `platform/iam/` 里的组织架构/角色数据同步进 Keycloak(Group/Role/成员) | 改了 `platform/iam/` 下任意文件之后 |
 | `scripts/05-configure-airflow.sh` | 建 Airflow 初始管理员账号 | Airflow 从 `enabled_components` 里启用、Deployment 第一次起来之后 |
 | `scripts/06-configure-superset-datasources.sh` | 给 Superset 注册 Trino 数据源(服务账号认证) | Superset 或 Trino 任一个被重建之后 |
-| `scripts/07-fix-trino-liveness-probe.sh` | 修 Trino chart 里硬编码错的 livenessProbe(见 ADR-017) | 可选的立即手动修复快捷方式——`apps/trino-liveness-fix/` 这个 CronJob(2026-08-20 起)每 5 分钟自动巡检并修复,`trino-coordinator` 被重新创建后不手动跑这个脚本也会在几分钟内自愈,见 docs/BACKLOG.md 2.3 |
+| `scripts/07-fix-trino-liveness-probe.sh` | 修 Trino chart 里硬编码错的 livenessProbe(见 ADR-017) | 可选的立即手动修复快捷方式——`apps/trino-liveness-fix/` 这个 CronJob(2026-08-20 起)每 5 分钟自动巡检并修复,`trino-coordinator` 被重新创建后不手动跑这个脚本也会在几分钟内自愈,见 docs/project/roadmap.md 2.3 |
 | `scripts/10-install-kserve-serving-runtimes.sh` | 装 KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等,官方 chart 不带) | **2026-08-21 起已并入 `bootstrap-all.sh`,不用单独跑**。不装的话 KServe 起来了但一个 runtime 都没有,要等真去上线模型才发现 |
 | `scripts/20-configure-openmetadata-search-truststore.sh` | 让 OpenMetadata 信任 OpenSearch 的自签证书 | **2026-08-21 起已并入 `bootstrap-all.sh`**。不跑的话 OpenMetadata 连不上 OpenSearch,搜索/目录是坏的,但首页能打开,容易被误判成部署成功 |
 | `scripts/14-configure-airflow-seatunnel-variable.sh` | 给 `seatunnel_device_events` 这个 DAG 写 MinIO 凭据(Airflow Variable) | Airflow 从 `enabled_components` 里启用、webserver 第一次起来之后 |
@@ -215,16 +229,16 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 
 ## 文档地图
 
-- **想知道"这个平台现在到底能用来干什么" → [`docs/roles.md`](docs/roles.md)** —— 五个角色(分析师/大数据开发/算法/运维/管理)× 完整工作链路 × 每一环今天的真实状态。**这是"我们做到哪了"的唯一权威入口**,衡量标准是"某个岗位能不能独立完成一件真实工作",不是"部署了哪些组件"(见 [ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))
-- **接手这个项目的 AI/人类,先看 [`CLAUDE.md`](CLAUDE.md) 和 [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md)**——协作规则和"现在唯一的主线任务是什么、下一步做什么",不用依赖对话记忆或者猜
+- **想知道"这个平台现在到底能用来干什么" → [`docs/project/capability-matrix.md`](docs/project/capability-matrix.md)** —— 五个角色(分析师/大数据开发/算法/运维/管理)× 完整工作链路 × 每一环今天的真实状态。**这是"我们做到哪了"的唯一权威入口**,衡量标准是"某个岗位能不能独立完成一件真实工作",不是"部署了哪些组件"(见 [ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))
+- **接手这个项目的 AI/人类,先看 [`CLAUDE.md`](CLAUDE.md) 和 [`docs/project/current-work.md`](docs/project/current-work.md)**——协作规则和"现在唯一的主线任务是什么、下一步做什么",不用依赖对话记忆或者猜
 - **实际使用这套平台,先打开 `http://portal.local-lite.test`**(ADR-047)—— 统一门户,现在有哪些工具、分别是干什么的、点哪里进去,一个页面看完;各工具共用同一个 Keycloak SSO,登录一次到处能用,不用重复输密码
 - [`docs/usage-guide.md`](docs/usage-guide.md) —— 给数据分析师/算法工程师看的日常使用指南(Trino 怎么连、怎么申请表权限、Superset/建表工具怎么用、notebook 交互式开发现在的真实差距),不是运维文档
-- [`docs/BACKLOG.md`](docs/BACKLOG.md) —— 记下来但先不做的想法,按优先级排,不打断当前主线
+- [`docs/project/roadmap.md`](docs/project/roadmap.md) —— 记下来但先不做的想法,按优先级排,不打断当前主线
 - [`docs/architecture.md`](docs/architecture.md) —— 架构总览、分层设计、组件清单、路线图(Phase 0-4)、还没定的设计决策
 - [`docs/decisions/README.md`](docs/decisions/README.md) —— **ADR 主题索引**(57 份,按平台底座/湖仓/SSO/权限治理/可观测性等分组,带验证状态)
 - [`docs/decisions/`](docs/decisions/) —— ADR 原文,每个非显而易见的技术选择,包含理由、踩过的坑、后续更正(是不是验证过、验证到什么程度都写在里面,不是"我们决定这么做"就完了)
 - [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md) —— 真实踩过的坑,排障时先查这里
-- [`docs/journal/`](docs/journal/) —— 按月归档的排障与验证日志(2026-08-19 从 `CURRENT_WORK.md` 拆出来的,那份文件只留当前状态)
+- [`docs/journal/`](docs/journal/) —— 按月归档的排障与验证日志(2026-08-19 从 `project/current-work.md` 拆出来的,那份文件只留当前状态)
 - [`docs/operations/upgrade.md`](docs/operations/upgrade.md) —— 当前版本清单 + 升级流程
 - [`docs/operations/backup.md`](docs/operations/backup.md) —— 备份策略
 - [`docs/operations/tuning.md`](docs/operations/tuning.md) —— 哪些参数预期要按自己情况调,调哪个文件
@@ -235,7 +249,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 
 ## 当前状态
 
-**权威来源是 [`docs/roles.md`](docs/roles.md)**——这里不再维护第二份会
+**权威来源是 [`docs/project/capability-matrix.md`](docs/project/capability-matrix.md)**——这里不再维护第二份会
 过时的进度清单(2026-08-19 起,见
 [ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))。
 
@@ -249,6 +263,6 @@ cloud-full 上启用),管理角色的驾驶舱尚未开始。**
 ADR-044/045/050)、Trino 细粒度访问控制已正式生效(ADR-051)、指标+日志+
 告警+每日备份(含恢复演练)都在。
 
-主要债务(见 [`docs/BACKLOG.md`](docs/BACKLOG.md) P1/P2):环境抽象只做了
+主要债务(见 [`docs/project/roadmap.md`](docs/project/roadmap.md) P1/P2):环境抽象只做了
 "取值"层,"哪些组件在哪个环境启用"仍靠人工挪目录;没有镜像构建流程,
 8 个地方在容器启动时现装 Python 依赖。

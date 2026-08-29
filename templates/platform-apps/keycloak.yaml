@@ -57,7 +57,7 @@ spec:
           # Keycloak 自己,改成显式声明 hostname(带端口)+ strict=true,
           # 一处修好比逐个组件在 redirect_uri 上打补丁更对。local-lite 上
           # ingress-nginx 靠 colima 直接转发 80/443,不需要端口——这个仓库
-          # 目前没有环境 overlay 机制(见 docs/BACKLOG.md P1.3),以后谁在
+          # 目前没有环境 overlay 机制(见 docs/project/roadmap.md P1.3),以后谁在
           # local-lite 上验证登录流程,这两行要临时改回
           # KC_HOSTNAME_STRICT=false 那个版本。
           - name: KC_HOSTNAME

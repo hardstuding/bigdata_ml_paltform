@@ -6,7 +6,7 @@
 ## 背景
 
 `CLAUDE.md` 的三条核心要求里有一条是"local-lite/cloud-full/prod 未来要能
-通过改配置切换,不是维护三套手动漂移的副本"。`docs/BACKLOG.md` 1.1 把这件事
+通过改配置切换,不是维护三套手动漂移的副本"。`docs/project/roadmap.md` 1.1 把这件事
 拆成两半:
 
 - **组件选择**(这个环境要哪些组件)—— 2026-08-20 做完,`enabled_components`

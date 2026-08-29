@@ -9,7 +9,7 @@
 > Trino、看板可见性交给 Superset 自己的 RBAC 管"这个取舍,**已经被
 > [ADR-074](074-superset-impersonation.md) 推翻**。当时没算清的代价是:
 > 能在 Superset 里建 chart 的人可以绕开任何看板直接写 SQL,于是列级脱敏和
-> 行级过滤([ADR-063](063-column-masking-row-filtering.md))在 BI 这条路上
+> 行级过滤([ADR-063](063-trino-column-row-level-security.md))在 BI 这条路上
 > 完全不生效。现在改成透传登录用户身份。**照这份 ADR 的原文去配会配出那个洞。**
 
 ## 背景
@@ -237,7 +237,7 @@ zhenghe 在场,按上面"上线前必须先做的事"清单执行,过程中额�
 ### 撞上的 3 个真实 bug
 
 1. **`opa-grants-sync` CronJob 硬编码 colima 专用代理地址**,cloud-full
-   上连不上导致一直失败、被临时 suspend(`docs/BACKLOG.md` 记过这件事,
+   上连不上导致一直失败、被临时 suspend(`docs/project/roadmap.md` 记过这件事,
    但没细究是不是这个具体原因)。改成和
    `permission-request-app`/`table-registration-app` 同一套"运行时探测
    代理是否可达"模式(2 秒连不上就当作不需要),修完手动跑一次验证

@@ -104,7 +104,7 @@ daocloud 卡在 blob 不动(层全部 `Download complete` 却永远不 extract,
 90 秒,整个搬运比等镜像站快一个数量级。
 
 这件事也把"给 k3s 配 registry mirror"从"锦上添花"变成了**真实的成本项**
-——见 `docs/BACKLOG.md`。
+——见 `docs/project/roadmap.md`。
 
 ## 建议
 

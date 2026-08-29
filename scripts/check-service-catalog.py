@@ -3,7 +3,7 @@
 
 **这个检查比目录内容本身更重要**。一份手写的服务清单,如果没有任何东西
 逼它跟上现实,三个月后就会变成"看起来很全但有一半是错的",那比没有更糟
-——这个仓库已经在 roles.md、BACKLOG、ADR 里各栽过一次"文档和事实反了"。
+——这个仓库已经在 project/capability-matrix.md、BACKLOG、ADR 里各栽过一次"文档和事实反了"。
 
 规则:`environments/*/config.yaml` 的 `enabled_components` 里每一项,要么在
 `platform/service-catalog.yaml` 的 `services` 里有条目(按组件文件名去掉
@@ -80,7 +80,7 @@ def main() -> None:
     print("覆盖完整,owner 和依赖都指向真实存在的东西。")
 
 
-DOC = REPO / "docs" / "operations" / "service-catalog.md"
+DOC = REPO / "docs" / "reference" / "service-catalog.md"
 
 
 def _render(cat) -> str:

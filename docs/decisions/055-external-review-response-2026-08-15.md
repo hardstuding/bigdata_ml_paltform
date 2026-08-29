@@ -5,7 +5,7 @@
 ## 背景
 
 用户在 2026-08-15 请 Codex 对这个项目做了一轮独立评审,产出记在
-`docs/claude-improvement-recommendations-2026-08-15.md`(分两次追加,
+`docs/project/reviews/2026-08-15-external-review.md`(分两次追加,
 第一次是 P0/P1 工程问题清单,第二次追加了角色成熟度评估、5 条产品主线、
 交接规范)。用户要求判断如何优化这份文档、并在后续工作中维护好相关
 文档——这份 ADR 就是那个"判断"的记录:不是把评审内容原样照抄执行,是
@@ -79,7 +79,7 @@ backlog 层面,不属于"这次会话该做的任务"**——五条产品线每�
 - 评估结论(角色成熟度矩阵、5 条产品主线概要、路线优先级建议)已经
   摘要进 `docs/architecture.md` 的路线图部分,作为 Phase 4 之后的方向性
   参考,不是本 ADR 重复整理一遍——完整内容以
-  `docs/claude-improvement-recommendations-2026-08-15.md` 原文为准。
+  `docs/project/reviews/2026-08-15-external-review.md` 原文为准。
 - 不现在展开任何一条产品主线的具体实现,遵守评审自己给的"路线优先级
   建议":先做 P0 可靠底座,再谈产品主线。
 
@@ -101,7 +101,7 @@ backlog 层面,不属于"这次会话该做的任务"**——五条产品线每�
   出现"一个 ADR 装不下、需要拆多个可独立交接的子任务"的场景,再引入
   这个格式,不提前套用。
 
-## 原文档(`claude-improvement-recommendations-2026-08-15.md`)怎么处理
+## 原文档(`project/reviews/2026-08-15-external-review.md`)怎么处理
 
 保留,不删除,不改动原文内容——它是一份有价值的历史记录(某个时间点、
 某个独立评审者给出的完整判断),改动原文会丢失"当时到底说了什么"这个
@@ -114,7 +114,7 @@ backlog 层面,不属于"这次会话该做的任务"**——五条产品线每�
 - 改:`environments/cloud-full/STATUS.md`(修正和 scripts/22 的自相矛盾、
   补上 colima resize/本地 park 等最新进展)
 - 新增:本 ADR
-- 改:`docs/claude-improvement-recommendations-2026-08-15.md`(开头加
+- 改:`docs/project/reviews/2026-08-15-external-review.md`(开头加
   处理状态说明)
 - 改:`docs/architecture.md`(路线图部分摘要收录角色成熟度评估+5条产品
   主线方向)
@@ -128,18 +128,18 @@ Codex 又在同一份文档里追加了一节,核心诊断:这个项目已有的
 STATUS/ADR 机制解决了"信息有没有被写下来",但没解决"有没有被执行/
 读取/核对",举的例子(生产容量基线记着但没用、STATUS.md 和代码不一致)
 都是这次会话里真实发生过的事,认。建议的完整框架(仓库级 CLAUDE.md、
-`CURRENT_WORK.md`、`BACKLOG.md`、`requirements.md` 矩阵、自建
+`project/current-work.md`、`project/roadmap.md`、`requirements.md` 矩阵、自建
 task-runner、正式并行工作流调度表)偏重,按"吸取有用的、不过度设计"
 处理:
 
 **采纳并已落地:**
 - 仓库级 [`CLAUDE.md`](../../CLAUDE.md)(和私有 memory 分开,任何 AI/
   人类都能看到)
-- [`docs/CURRENT_WORK.md`](../CURRENT_WORK.md)(唯一当前主线 + 下一步
+- [`docs/project/current-work.md`](../project/current-work.md)(唯一当前主线 + 下一步
   唯一动作 + 结束工作前检查清单)
-- [`docs/BACKLOG.md`](../BACKLOG.md)(新想法默认进这里,不抢占 CURRENT)
+- [`docs/project/roadmap.md`](../project/roadmap.md)(新想法默认进这里,不抢占 CURRENT)
 
-**认可但明确不做,原因写在 `docs/BACKLOG.md` 底部"曾经提出、明确决定
+**认可但明确不做,原因写在 `docs/project/roadmap.md` 底部"曾经提出、明确决定
 不做/暂缓的"一节**:`requirements.md` 需求追踪矩阵(补建需要回溯~50篇
 ADR,工作量本身是独立任务)、自建 `task-runner.sh`(Bash 工具自带的
 后台任务追踪已经够用,重复造轮子)、正式的多工作流并行调度表(当前

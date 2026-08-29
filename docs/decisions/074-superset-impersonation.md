@@ -20,7 +20,7 @@ Superset 用**一个共享的** `superset_service` 账号连 Trino
 
 1. **任何能在 Superset 里建一个查询的人,能读到 Trino 上的任何表** ——
    不管他有没有 `platform/iam/table-access-grants.csv` 里的授权。
-2. **列级脱敏和行级过滤([ADR-063](063-column-masking-row-filtering.md))
+2. **列级脱敏和行级过滤([ADR-063](063-trino-column-row-level-security.md))
    在 Superset 上完全不生效** —— `is_exempt_from_masking` 对服务账号豁免。
 
 也就是说:这个平台在权限上最大的一笔投入(分级审批 + 列级脱敏 + 行级过滤,
@@ -28,7 +28,7 @@ Superset 用**一个共享的** `superset_service` 账号连 Trino
 
 ## 当初为什么是共享账号,以及那个理由错在哪
 
-不是疏忽,是 [ADR-051](051-opa-rollout.md) 明确选的,策略注释里也写了理由:
+不是疏忽,是 [ADR-051](051-trino-opa-access-control.md) 明确选的,策略注释里也写了理由:
 
 > 看谁能看哪个看板是 Superset 自己的 RBAC 管,不是靠 Trino 按人头发 grant;
 > 如果按人头发,以后每加一个 Superset 数据源都要手动补 grant,和 Superset

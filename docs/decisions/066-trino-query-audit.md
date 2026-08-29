@@ -5,7 +5,7 @@
 
 ## 背景:这条缺口的性质和别的不一样
 
-[`docs/production-readiness-gaps.md`](../production-readiness-gaps.md) 第 3 条:
+[`docs/project/production-readiness-gaps.md`](../project/production-readiness-gaps.md) 第 3 条:
 权限侧有 OPA 做**准入**判断(能不能查),但查询本身**没有留痕**。
 
 这一条**做不到事后补齐**。别的缺口晚做几周,补上就行;审计没记就是没记,
@@ -124,4 +124,4 @@ Superset 里建一个查询,就能借 `superset_service` 这个账号读到全�
 2. **"审计流断了"的告警**。见上面取舍 2,这是那个取舍的必要配套,不是
    可选项。
 3. 落表之后顺带能回答"哪些表其实没人用",正是
-   [`docs/BACKLOG.md`](../BACKLOG.md) P5 项目瘦身审计缺的数据。
+   [`docs/project/roadmap.md`](../project/roadmap.md) P5 项目瘦身审计缺的数据。

@@ -104,7 +104,7 @@ MLflow Model Registry 里验证过结果。本 ADR 只是把这个已验证的�
 
 algo 那套的地基是"大家共用服务器上同一批 conda 环境"。在 K8s 上,这件事
 的等价物是"大家共用同一批容器镜像"。**不是 PVC 里放一个 conda,不是
-运行时 pip install**(后者是本项目 `docs/BACKLOG.md` P2.1 点名的反模式,
+运行时 pip install**(后者是本项目 `docs/project/roadmap.md` P2.1 点名的反模式,
 2026-08-19 当天还因此修了 Superset 一次)。
 
 其余所有设计都是这条的推论。
@@ -195,7 +195,7 @@ mlflow / feast / pandas / scikit-learn)。**JupyterHub 的 singleuser pod
 已经踩平的 PyPI 限速(阿里云 mirror)和离线缓存(`image-cache-amd64/`)
 两个坑,不是从零开始。
 
-**这个镜像会继承 `docs/BACKLOG.md` P2.1 那条债,如实写明不假装没有**:
+**这个镜像会继承 `docs/project/roadmap.md` P2.1 那条债,如实写明不假装没有**:
 现在没有 CI 镜像构建、没有 registry,三个自建镜像都是人工在云主机上
 `docker build` + `docker save` 进 `image-cache-amd64/`。第一批**沿用
 这个已有模式**,不先去建 registry + GitHub Actions + digest 固定那一整套
@@ -378,5 +378,5 @@ pod 的 DAG,照抄这三份文件的模式提前把 Role+RoleBinding 加上。
 - [ADR-057](057-architecture-review-2026-08-19.md) 架构盘点,其中
   "notebook 里触发训练"这条空白由本 ADR 的第 2、3 批覆盖
 - `docs/usage-guide.md` "交互式开发 / Notebook" 一节记录的真实差距
-- `docs/BACKLOG.md` P2.1 "停止运行时 pip install"——本 ADR 的统一镜像
+- `docs/project/roadmap.md` P2.1 "停止运行时 pip install"——本 ADR 的统一镜像
   是它在开发者体验这条线上的落实

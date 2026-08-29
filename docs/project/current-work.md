@@ -2,21 +2,21 @@
 
 > 这份文档只回答三件事:**现在的主线是什么、下一步做什么、有没有还在跑
 > 的后台任务**。规则:任何时候只有一个 CURRENT,新想法默认进
-> `docs/BACKLOG.md`,不自动抢占 CURRENT。
+> `docs/project/roadmap.md`,不自动抢占 CURRENT。
 >
 > 2026-08-19 起,按日期堆叠的排障叙事**不再往这里写**,归档到
 > `docs/journal/<年-月>.md`(原因见
-> [ADR-057](decisions/057-architecture-review-2026-08-19.md))。这份文件
+> [ADR-057](../decisions/057-architecture-review-2026-08-19.md))。这份文件
 > 要一直保持"打开就能知道现在什么情况",不能再退化成日记。
 >
-> 想知道"某个角色今天能做什么" → [`docs/roles.md`](roles.md)
-> 想知道"以前某个问题怎么解决的" → [`docs/journal/`](journal/) 和
-> [`docs/operations/troubleshooting.md`](operations/troubleshooting.md)
+> 想知道"某个角色今天能做什么" → [`docs/project/capability-matrix.md`](../project/capability-matrix.md)
+> 想知道"以前某个问题怎么解决的" → [`docs/journal/`](../journal/) 和
+> [`docs/operations/troubleshooting.md`](../operations/troubleshooting.md)
 
 ## CURRENT(2026-08-28):A/C/D/E 四条主线各推进第一步
 
 六条生产可用性缺口 08-26 已补完并实机验证。这一轮转向 zhenghe 说的
-"先有整体":平台有 8 条告警、4 个看板、ArgoCD 健康、roles.md 能力表,
+"先有整体":平台有 8 条告警、4 个看板、ArgoCD 健康、project/capability-matrix.md 能力表,
 **但它们回答的全是组件层面的问题**,没有一个地方回答"一件真实的事现在
 做不做得成"。
 
@@ -27,8 +27,8 @@
 | 主线 | 做到哪 |
 |---|---|
 | A 统一开发工作台 | 🟡 4 个作业模板(`examples/`)+ `platform-submit --new` 脚手架。**CI-CD 那半没做** |
-| C 完整 MLOps | ✅ 审批/回滚闭环([ADR-080](decisions/080-model-approval-and-rollback.md)):训练→注册→审批→部署→**真实推理返回 `[0,1]`**→回滚守卫。**灰度没做** |
-| D 统一运维控制面 | ✅ 六条链路探针 + 告警 + 看板([ADR-079](decisions/079-golden-path-probes.md)) |
+| C 完整 MLOps | ✅ 审批/回滚闭环([ADR-080](../decisions/080-model-approval-and-rollback.md)):训练→注册→审批→部署→**真实推理返回 `[0,1]`**→回滚守卫。**灰度没做** |
+| D 统一运维控制面 | ✅ 六条链路探针 + 告警 + 看板([ADR-079](../decisions/079-golden-path-probes.md)) |
 | E 管理驾驶舱 | 🟡 平台总览看板;**按月聚合的前提刚补上**(见下面第 2 条) |
 
 另外:Superset 汉化实机验证通过(4054 条,`Dashboards→看板`);
@@ -39,7 +39,7 @@ hive-metastore 自建镜像。
 **都不是这次改动引入的**,共同点是**每一层都显示正常**:
 
 1. **KServe 推理链路** —— `kserve-demo` 不在 MinIO 的 NetworkPolicy 白名单里,
-   [ADR-035](decisions/035-network-policies.md) 上线之后就断了,而没人发现
+   [ADR-035](../decisions/035-network-policy.md) 上线之后就断了,而没人发现
    (从那以后没人跑过 `scripts/11`)。检查器报绿,是因为那个命名空间是脚本
    运行时建的、不在 git 里——**报绿而实际是断的,比没有检查器更糟**。
 2. **Prometheus 指标每次开机清零** —— cloud-full 用的是 `retention: 6h` +
@@ -57,7 +57,7 @@ hive-metastore 自建镜像。
    "不是……而是……"式的解释和 ADR 编号(解释挪进 `title` 悬停),加了顶部
    四个概览数字和一套统一的 design token(含深色模式)。文案规则写死在
    模板顶部注释里,免得下次又写回去。已部署,页面实测 12 KB。
-2. **Spark 3.5.9 → 4.1.3 + Iceberg 1.10.0 → 1.11.0**([ADR-076](decisions/076-spark-4-evaluation.md))。
+2. **Spark 3.5.9 → 4.1.3 + Iceberg 1.10.0 → 1.11.0**([ADR-076](../decisions/076-spark-4-evaluation.md))。
    这两条本来就是一个决定:Iceberg 锁 1.10.0 是因为 1.11.0 要 Java 17 而
    Spark 3.5 镜像自带 Java 11,而 Spark 4 本身要求 Java 17。连带 hadoop-aws
    3.3.4→3.4.2、AWS SDK v1→v2(Hadoop 3.4 起 S3A 迁到 SDK v2,最容易漏的
@@ -96,11 +96,11 @@ hive-metastore 自建镜像。
 4. **QUICKSTART 第 6 步是断的** —— 加了模型审批门禁(ADR-080)之后
    `09 → 11` 会被拒,文档还写着两步。
 5. **ADR-059 不在 ADR 索引里**;**BACKLOG 里"五条产品主线都还没开始"**
-   和 **roles.md 里几行状态**都已经和事实相反。
+   和 **project/capability-matrix.md 里几行状态**都已经和事实相反。
 
 ### 2026-08-29 凌晨这一轮
 
-1. **dbt 血缘打通并实机验证**([ADR-082](decisions/082-dbt-lineage-ingestion.md))
+1. **dbt 血缘打通并实机验证**([ADR-082](../decisions/082-dbt-lineage-ingestion.md))
    ——`orders -> stg_orders -> daily_order_totals` 两条真实的边,从血缘接口
    查出来的。过程中修掉:MinIO 的 NetworkPolicy 漏了 `openmetadata`
    (和 kserve-demo 同一个盲区)、采集顺序有硬依赖(元数据必须先跑,
@@ -115,7 +115,7 @@ hive-metastore 自建镜像。
    实测新版:我在操作时 `+188112B`,停手后 `+216B`(keepalive)。
 4. **CI 支持推阿里云 ACR**(没配 secrets 自动跳过)。境内云主机拉 GHCR
    大镜像会卡死是已经在挡路的问题,凭据只能 zhenghe 自己配,办法写在
-   [`docs/operations/image-registry.md`](operations/image-registry.md)。
+   [`docs/operations/image-registry.md`](../operations/image-registry.md)。
 5. **ADR-079 那段健康检查 Lua 挂错了对象**(更正见 ADR-079 末尾)。试过
    两条修法都撤回了,维持现状——那个黄灯下一次探针跑通就自愈。
 
@@ -125,9 +125,9 @@ hive-metastore 自建镜像。
    (都在请求路径上,prod 给 2 副本)、JupyterHub singleuser、OpenMetadata
    本体和采集。三档键 96 → 117。新增 `check-resource-profiles.py`:写死的
    必须显式登记豁免并写明理由,让「漏了」和「想清楚了不做」能区分开。
-2. **统一服务目录**(D 线最后一格,roles.md 里一直标着「完全没做」):
+2. **统一服务目录**(D 线最后一格,project/capability-matrix.md 里一直标着「完全没做」):
    `platform/service-catalog.yaml` 34 个服务 + 38 项支撑资源,生成
-   [`docs/operations/service-catalog.md`](operations/service-catalog.md)。
+   [`docs/reference/service-catalog.md`](../reference/service-catalog.md)。
    **关键是 `check-service-catalog.py`** —— 新组件没登记归属、owner 写了
    不存在的组、依赖指向不存在的服务、生成的 md 漂移,四种情况 CI 都红。
    写完当场抓到三个真问题(其中一个是我漏了 `platform/apps/` 整整一层)。
@@ -163,7 +163,7 @@ hive-metastore 自建镜像。
 ## 以前的轮次
 
 已完成的历史主线(2026-08-19 ~ 08-23 共 6 轮)搬到了
-[`docs/journal/current-work-archive-2026-08.md`](journal/current-work-archive-2026-08.md),
+[`docs/journal/current-work-archive-2026-08.md`](../journal/current-work-archive-2026-08.md),
 原文照搬。**这份文件只留当前那一轮**——它开头那条"不能再退化成日记"的规则,
 2026-08-26 之前其实已经失效了:647 行里 500 行是历史。
 
@@ -219,7 +219,7 @@ hive-metastore 自建镜像。
 - ~~`scripts/07-fix-trino-liveness-probe.sh` 必须在每次 Trino pod
   template 变更后重跑~~——**已解决(2026-08-20)**:`apps/
   trino-liveness-fix/` 这个 CronJob 每 5 分钟自动巡检并修复,不需要人
-  记得手动重跑了,见 docs/BACKLOG.md 2.3。
+  记得手动重跑了,见 docs/project/roadmap.md 2.3。
 - **cloud-full 上 Keycloak `platform` realm 的 `admin` 密码**是
   `TestLogin2026Aug`,和 `secrets/generated-credentials.txt`(那份是
   local-lite 的)不是一回事。
@@ -246,4 +246,4 @@ hive-metastore 自建镜像。
 - [ ] 这次做的事,哪些是真实验证过的、哪些只是写完代码没测,分层说清楚
 - [ ] 有没有手工改过集群但没回写 git 的操作(有的话赶紧记下来或者补写)
 - [ ] 失败但没解决的事情,写清楚现象+已经排除的原因,别人接手不用重新排查一遍
-- [ ] **能力有增减的话,`docs/roles.md` 更新了吗**(新增的一条,ADR-057)
+- [ ] **能力有增减的话,`docs/project/capability-matrix.md` 更新了吗**(新增的一条,ADR-057)

@@ -1,4 +1,4 @@
-# 见 docs/BACKLOG.md 2.3("Trino livenessProbe 的人工补丁要么固化要么
+# 见 docs/project/roadmap.md 2.3("Trino livenessProbe 的人工补丁要么固化要么
 # 消除")。之前 `scripts/07-fix-trino-liveness-probe.sh` 必须在**每次**
 # Trino coordinator Deployment 被重新创建后手动重跑,否则回退到 chart
 # 硬编码的坏默认值(打已经关掉的 http 端口,kubelet 会不停强杀重启,见

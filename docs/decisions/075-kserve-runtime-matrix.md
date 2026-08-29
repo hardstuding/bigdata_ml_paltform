@@ -5,7 +5,7 @@
 
 ## 背景
 
-`docs/BACKLOG.md` 里一直挂着一条"KServe runtime 矩阵设计",说明写得很清楚
+`docs/project/roadmap.md` 里一直挂着一条"KServe runtime 矩阵设计",说明写得很清楚
 ——2026-08-15 那次只做了"把 7 个浮动 `latest` 固定成版本号 + digest",
 **要不要精简是故意留着的更大判断,不是遗漏**。zhenghe 2026-08-26 说"要做"。
 

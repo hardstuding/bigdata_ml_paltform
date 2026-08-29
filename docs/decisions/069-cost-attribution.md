@@ -5,7 +5,7 @@
 
 ## 背景
 
-[`docs/production-readiness-gaps.md`](../production-readiness-gaps.md) 第 4 条。
+[`docs/project/production-readiness-gaps.md`](../project/production-readiness-gaps.md) 第 4 条。
 它和 [ADR-064](064-role-based-resource-quota.md) 是一体两面:
 
 - Kueue 回答**"能用多少"**(事前配额)

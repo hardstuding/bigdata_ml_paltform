@@ -21,7 +21,7 @@
 # ArgoCD 官方 Helm chart values.yaml 里的注释,Redis Ltd 在这个区间换成了
 # RSALv2/SSPLv1,8.0 起才回到 AGPLv3 开源)。8.4.5 同时修了一个 `RESTORE`
 # 命令的 use-after-free(可导致 RCE)和 RedisBloom/TDigest 越界写,是一次
-# 安全发布。见 docs/BACKLOG.md P1.6。
+# 安全发布。见 docs/project/roadmap.md P1.6。
 apiVersion: apps/v1
 kind: Deployment
 metadata:

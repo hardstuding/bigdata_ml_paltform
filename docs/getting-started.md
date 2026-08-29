@@ -160,5 +160,5 @@ DAG 样例在 `apps/airflow/dags/`。
 那部分官方文档不会有,因为它们是这套组合特有的。
 
 想知道"这个平台今天到底能支撑哪些岗位独立干活",看
-[`docs/roles.md`](roles.md):它按能力而不是按组件列,是这个项目
+[`docs/project/capability-matrix.md`](project/capability-matrix.md):它按能力而不是按组件列,是这个项目
 "做到哪了"的唯一权威入口。

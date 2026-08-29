@@ -10,9 +10,9 @@
 ## 每次开始工作,先按顺序读
 
 1. 这份 `CLAUDE.md`
-2. [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) —— 现在唯一的主线
+2. [`docs/project/current-work.md`](docs/project/current-work.md) —— 现在唯一的主线
    任务是什么、下一步做什么、有没有还在跑的后台任务
-3. [`docs/roles.md`](docs/roles.md) —— 五个角色今天各自真的能做什么。
+3. [`docs/project/capability-matrix.md`](docs/project/capability-matrix.md) —— 五个角色今天各自真的能做什么。
    **这是"我们做到哪了"的唯一权威入口**,衡量标准是"某个岗位能不能
    独立完成一件真实工作",不是"部署了哪些组件"。判断某件事该不该做、
    该排多前,依据是它解锁哪个角色的哪条能力(见 ADR-057)
@@ -60,7 +60,7 @@ Codex 那个并行项目(`bigdata_ai_platform_v2`)**和这个平台跑在同一�
 
 ## 执行纪律
 
-- 任何时候只有一个 `CURRENT` 主线(见 `docs/CURRENT_WORK.md`)。做当前
+- 任何时候只有一个 `CURRENT` 主线(见 `docs/project/current-work.md`)。做当前
   主线时冒出来的新想法,默认记进 backlog,不自动切换过去做——除非它是
   会阻断当前主线的真实 P0(数据风险、持续计费、安全问题)。
 - 顺手修一下如果会跨组件/改变架构/超过一小段时间,单独立项,不要塞进
@@ -117,7 +117,7 @@ Pod Running 不等于健康、Job Complete 不等于业务逻辑跑对)。
 
 ## 不能没头没尾地停
 
-结束一段工作前,过一遍 `docs/CURRENT_WORK.md` 底部那份检查清单。达到
+结束一段工作前,过一遍 `docs/project/current-work.md` 底部那份检查清单。达到
 下面任一条件才可以停:完成(验收标准满足,状态文档更新过)、需要用户
 才能做的决策(给出选项和推荐,不是把普通技术判断也推给用户)、卡在
 只有用户能解决的权限/凭据上、继续做下去会有不可接受的风险。"已经做了
@@ -126,7 +126,7 @@ Pod Running 不等于健康、Job Complete 不等于业务逻辑跑对)。
 ## 已知差距(如实记录,不是没人管的隐藏债务)
 
 见 [ADR-055](docs/decisions/055-external-review-response-2026-08-15.md)
-和 [`docs/BACKLOG.md`](docs/BACKLOG.md) 的完整清单,这里只点名最重要
+和 [`docs/project/roadmap.md`](docs/project/roadmap.md) 的完整清单,这里只点名最重要
 的几条:一键部署目前仍是多个手动脚本按顺序跑;三个自建 Flask 工具没有
 自动化测试、源码和 ConfigMap 靠人工同步;环境切换靠手动 `git mv` 加手调
 资源,不是声明式的。

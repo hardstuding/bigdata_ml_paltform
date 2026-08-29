@@ -34,7 +34,7 @@ spec:
           # 2026-08-16 云端要开公网访问时试过 hostNetwork(绑定宿主机
           # 80/443,绕开 kube-proxy NodePort 这层)——**行不通,已回退**:
           # 这台节点是和 Codex 的 bigdata_ai_platform_v2 共享的同一个
-          # k3s 集群(见 docs/CURRENT_WORK.md 的相关记录),Codex 那边的
+          # k3s 集群(见 docs/project/current-work.md 的相关记录),Codex 那边的
           # traefik 已经用 k3s 自带的 svclb 机制常驻占了宿主机 80/443,
           # 两边没法同时 hostNetwork 抢同一对端口。裸机+单节点没有云
           # LoadBalancer,`service: type: LoadBalancer` 实际走的是

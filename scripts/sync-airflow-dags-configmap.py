@@ -3,7 +3,7 @@
 对应的 apps/airflow/dags/*.py 重新生成——dags/*.py 是唯一的源码真相,
 ConfigMap 里的副本是生成产物,不再手动维护两份。
 
-背景见 docs/BACKLOG.md P1.2a:这个仓库已经踩过一次真实的分叉——
+背景见 docs/project/roadmap.md P1.2a:这个仓库已经踩过一次真实的分叉——
 `dbt_demo.py` 的源文件和 ConfigMap 副本不一致过(ConfigMap 里的版本
 锁定是任务#13 单独做的,源文件当时没有同步更新),当时手动改成一致,
 但没有解决"以后还会分叉"这个根本问题。这个脚本当初是仿照

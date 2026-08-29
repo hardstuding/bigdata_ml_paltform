@@ -75,11 +75,19 @@ jobs:
         run: python3 scripts/check-resource-profiles.py
 
       # 一份没有东西逼它跟上现实的服务清单,三个月后就是一份过期清单,
-      # 比没有更糟——这个仓库已经在 roles.md / BACKLOG / ADR 里各栽过一次
+      # 比没有更糟——这个仓库已经在 project/capability-matrix.md / BACKLOG / ADR 里各栽过一次
       # 「文档和事实反了」。所以目录和覆盖检查是一起加的,不是先写文档
       # 再想办法维护。
       - name: 服务目录覆盖校验(新组件必须登记归属)+ 生成的 md 不能漂移
         run: python3 scripts/check-service-catalog.py --check-doc
+
+      # 文档之间交叉引用很密(ADR 互引、README 指 getting-started、CLAUDE.md
+      # 指 current-work)。任何一次目录调整都可能留下死链,而死链不会让任何
+      # 东西报错——只会让下一个人点过去发现 404,然后不再信任这些链接。
+      # 2026-08-29 第一次跑这个检查,当场发现 14 条**在此之前就已经坏了**的
+      # 链接(ADR 文件名改过、相对路径深度不对)。
+      - name: 文档死链检查
+        run: python3 scripts/check-doc-links.py
 
       # 三档都要能渲染出来。只校验 cloud-full 的话,prod/local-lite 缺一个
       # RES 键要等到真去部署那一档才会发现——而那时候人已经在等着上生产了。
@@ -110,7 +118,7 @@ jobs:
   test-flask-apps:
     # 2026-08-16 新增:3 个自建 Flask 工具(platform-portal/permission-
     # request-app/table-registration-app)之前完全没有自动化测试,补测试
-    # 的同时顺手接进 CI——测试写了没人跑等于没测试,见 docs/BACKLOG.md
+    # 的同时顺手接进 CI——测试写了没人跑等于没测试,见 docs/project/roadmap.md
     # P1"三个自建 Flask 工具补测试"那条。
     runs-on: ubuntu-latest
     steps:

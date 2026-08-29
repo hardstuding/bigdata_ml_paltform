@@ -59,7 +59,7 @@ spec:
     # 起就是空的**。History Server 读的是 s3a://spark-logs/(见
     # apps/spark-history-server/manifests/deployment.yaml 的
     # spark.history.fs.logDirectory),但从来没有任何作业往那里写过事件日志
-    # ——bucket 2026-08-16 就建好了,一直是空的。`docs/roles.md` 当时写着
+    # ——bucket 2026-08-16 就建好了,一直是空的。`docs/project/capability-matrix.md` 当时写着
     # "作业可观测 ✅ 已部署并真实登录验证通过":能登录进去是真的,但进去
     # 看到的是一个空列表,这个能力其实一直不成立。又一个"部署了 ≠ 能用"。
     # S3A 的 endpoint/凭据上面已经配好了,这里只要打开开关 + 指目录。

@@ -1,5 +1,5 @@
 """
-多步骤 DAG 的第三步:模型上线前的门禁校验(`docs/roles.md` 算法工程师
+多步骤 DAG 的第三步:模型上线前的门禁校验(`docs/project/capability-matrix.md` 算法工程师
 那一节点名的"多步骤 DAG"缺口里的最后一步)。
 
 **为什么这一步不是"看 accuracy 达没达标"**:这个平台的 demo 数据只有

@@ -25,7 +25,7 @@
 - **云厂商/地域**:阿里云,华北6(乌兰察布),`cn-wulanchabu-a` 可用区
 - **实例 ID**:`i-0jlbped4h1959tp591pe`(**不是**最初 2026-08-15 创建的
   `i-0jl7spqzz0rfnqv2abd2`——那台已经在 2026-08-16 释放,含它的两块盘,
-  详细迁移过程见 `docs/CURRENT_WORK.md` 对应记录)
+  详细迁移过程见 `docs/project/current-work.md` 对应记录)
 - **实例规格**:ecs.g9i.4xlarge(16 vCPU / 64GiB),x86_64——2026-08-15
   确认生产环境是 x86_64,cloud-full 验证环境按生产架构对齐,不是为了
   省钱用 ARM(那样会导致验证环境和生产架构不一致)
@@ -58,7 +58,7 @@
 ArgoCD/PV/组件常驻这些都还没做——现在全部已经做完并且验证通过,清单
 本身长期没跟着改,和实际状态不一致,已经具备误导接手人的风险,这次
 一次性更正。往后这份文档只记"当前实例是什么/怎么连上",细粒度的
-"做到哪一步了"交给 `docs/CURRENT_WORK.md`(会持续更新,不会像这里一样
+"做到哪一步了"交给 `docs/project/current-work.md`(会持续更新,不会像这里一样
 过时),这里不重复维护第二份进度清单。**
 
 - [x] 阿里云 ECS 实例创建、数据盘挂载、Docker、k3s——节点 Ready
@@ -70,12 +70,12 @@ ArgoCD/PV/组件常驻这些都还没做——现在全部已经做完并且验�
       local-lite 的按需选择;2026-08-20 起改用 ADR-057 第三批的声明式
       机制,`pending-definitions/` 已退役)
 - [x] 核心链路(Trino/Superset/Airflow)端到端验证通过——详见
-      `docs/CURRENT_WORK.md` 任务 #12~#16 完成记录
+      `docs/project/current-work.md` 任务 #12~#16 完成记录
 - [x] 2026-08-16 抢占式实例迁移(省钱)+ 经济模式关机(RAM 角色 +
       看门狗自动调 `StopInstance --StoppedMode StopCharging`)
 - [ ] 按 `README.md` 资源建议表精调各组件 resources(能跑,没有针对
       抢占式实例的规格做过专门优化)
-- [ ] `docs/BACKLOG.md` P1 清单里的工程收口项(测试覆盖/CI 扩大/环境
+- [ ] `docs/project/roadmap.md` P1 清单里的工程收口项(测试覆盖/CI 扩大/环境
       overlay 重构等,明确不是"从零拉起"这一步的范围)
 
 ## 过程中做过的关键决策(带原因,方便后来者理解"为什么"不只是"是什么")
@@ -101,7 +101,7 @@ ArgoCD/PV/组件常驻这些都还没做——现在全部已经做完并且验�
   [[feedback_destructive_ops]] 这条记忆,教训是"批量删除类操作要先明确
   目标清单再执行",不是这个项目自己的文档要记的内容,不在这里重复。
 - **2026-08-15 收到 Codex 对这个项目的一轮 review**
-  (`docs/claude-improvement-recommendations-2026-08-15.md`),指出的
+  (`docs/project/reviews/2026-08-15-external-review.md`),指出的
   P0 级问题(按量资源开机门禁、破坏性操作缺防护、Trino 权限没有真正
   执行、cloud-full 基础设施脚本的具体 bug)已经采纳,处理方式和落地
   进度见 [ADR-055](../../docs/decisions/055-external-review-response-2026-08-15.md)
@@ -112,7 +112,7 @@ ArgoCD/PV/组件常驻这些都还没做——现在全部已经做完并且验�
 
 **2026-08-16 更正**:这一节之前写的是"从零搭建阶段"的下一步(镜像缓存
 灌入、装 ArgoCD),那一批早就做完了,不要照着执行一遍。真正的"现在该
-干什么"以 `docs/CURRENT_WORK.md` 顶部为准——那份文档持续更新、不会
+干什么"以 `docs/project/current-work.md` 顶部为准——那份文档持续更新、不会
 像这里一样过时。这里只留给"这台实例本身怎么连上"这类稳定信息:
 
 1. 连接前先确认实例状态和当前公网 IP(不是固定 EIP,重启后可能变):
@@ -122,5 +122,5 @@ ArgoCD/PV/组件常驻这些都还没做——现在全部已经做完并且验�
 3. 操作集群:`KUBECONFIG=~/.kube/cloud-full-config kubectl ...`(SSH 隧道
    如果已断开,需要先重新建:`ssh -f -N -L
    16443:127.0.0.1:6443 -i ~/.ssh/cloud-full-key.pem root@<当前IP>`)。
-4. 具体"接下来做什么"看 `docs/CURRENT_WORK.md` 的 CURRENT 和
-   `docs/BACKLOG.md`,不在这份文档里重复维护第二套待办。
+4. 具体"接下来做什么"看 `docs/project/current-work.md` 的 CURRENT 和
+   `docs/project/roadmap.md`,不在这份文档里重复维护第二套待办。

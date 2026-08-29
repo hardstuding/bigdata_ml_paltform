@@ -22,5 +22,5 @@
 
 ## Checklist
 
-- [ ] 遵守 [CONTRIBUTING.md](CONTRIBUTING.md) 里的硬性原则(只用官方支持的部署方式、非显而易见的决策有对应 ADR)
+- [ ] 遵守 [CONTRIBUTING.md](../CONTRIBUTING.md) 里的硬性原则(只用官方支持的部署方式、非显而易见的决策有对应 ADR)
 - [ ] 没有把敏感信息(密钥、真实域名、内部凭据)带进 diff

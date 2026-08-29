@@ -25,7 +25,7 @@
 # imageName 锁定 16.x(和旧实例的大版本一致)——不想把"换 operator"和
 # "顺带大版本升级"这两个风险叠在一起做,CNPG operator 默认拉的是 18.4,
 # 显式锁定版本。2026-08-15 版本审计后从 16.6 补丁升级到 16.15(同一
-# 大版本内的补丁,不是这里说的大版本升级,见 docs/BACKLOG.md P1.6)——
+# 大版本内的补丁,不是这里说的大版本升级,见 docs/project/roadmap.md P1.6)——
 # PostgreSQL 18 作为 major upgrade 仍然是单独评估的事,不是这次做的。
 #
 # superuserSecret 直接复用现有的 postgres-root 这个 Secret(username=

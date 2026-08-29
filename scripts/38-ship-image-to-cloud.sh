@@ -26,7 +26,7 @@
 # `brew install crane`):**直接和 registry 说话,不需要任何守护进程**,
 # 产出的 tar 可以直接 `docker load`。
 #
-# 长期解法仍然是给 k3s 配 registry mirror(见 docs/BACKLOG.md),那条做完
+# 长期解法仍然是给 k3s 配 registry mirror(见 docs/project/roadmap.md),那条做完
 # 之后这个脚本和 scripts/22 都可以退休。
 set -euo pipefail
 cd "$(dirname "$0")/.."

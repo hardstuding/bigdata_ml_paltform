@@ -17,7 +17,7 @@
 
 ## 背景
 
-`docs/roles.md` 里"大数据开发"这个角色还剩两条缺口没解锁:"流处理引擎"
+`docs/project/capability-matrix.md` 里"大数据开发"这个角色还剩两条缺口没解锁:"流处理引擎"
 (Flink 只有设计没有实现)和"流式数据接入"(Kafka 部署了但从没接进真实
 管道)。ADR-056 已经判断过这两条本质是同一条链路:先给 Kafka 接一个真实
 的生产者/消费者,再验证"Kafka 流数据能落进 Iceberg"这条基础能力,并且
@@ -279,7 +279,7 @@ GHCR 包直接被拒(`this image is not in the allowlist`)。
 digest 一致),`ghcr.linkos.org` 也返回 200 可作备选,但引入第三方代理的
 可用性不由我们控制。真正的生产解法应该是
 **把自建镜像推一份到境内 registry(比如阿里云 ACR)**,这需要用户提供
-凭据,已记进 `docs/BACKLOG.md` 2.10 等确认。
+凭据,已记进 `docs/project/roadmap.md` 2.10 等确认。
 
 **这条是多节点演练的硬前置**:3 台新机器 × 全量镜像,按当前速度不可行。
 

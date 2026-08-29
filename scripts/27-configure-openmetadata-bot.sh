@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 让"数据血缘"这条能力在部署阶段就能自动打通,不再依赖人工去 OpenMetadata
-# UI 建 bot、生成 JWT、再手动 kubectl create secret(docs/roles.md 里
+# UI 建 bot、生成 JWT、再手动 kubectl create secret(docs/project/capability-matrix.md 里
 # "血缘"长期是 ❌ 就卡在这一步)。
 #
 # 关键发现(2026-08-22 验证过,不是推断):OpenMetadata 在初始化时(见

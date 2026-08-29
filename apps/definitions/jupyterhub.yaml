@@ -206,7 +206,7 @@ spec:
               # (见 platform-sdk/platform_sdk/submit.py)都端到端成功
               # (建 Workflow→pod 里跑→Succeeded),`job_status()` 也能查到
               # 状态。**这个 known limitation 已经不存在了**,docs/
-              # BACKLOG.md 2.6 和 .claude/skills/submit-job/SKILL.md 都
+              # project/roadmap.md 2.6 和 .claude/skills/submit-job/SKILL.md 都
               # 已经同步更新。172.22.9.16 是这台 ECS 的私网 IP(VPC 内网
               # IP,和会变的公网 IP 不是一回事,`stop/start` 不会变,只有
               # 整个实例被重建才会变——如果以后真的换了新实例,这里要跟着

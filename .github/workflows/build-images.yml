@@ -1,4 +1,4 @@
-# 见 docs/BACKLOG.md 2.1("引入镜像构建流程,停止用运行时 pip install")。
+# 见 docs/project/roadmap.md 2.1("引入镜像构建流程,停止用运行时 pip install")。
 # 三个自建 Flask 工具(platform-portal/permission-request-app/
 # table-registration-app)之前是官方 python:3.12-slim 镜像 + 容器启动时
 # 现装依赖,2026-08-16 一晚因为这个模式产生过四次真实故障——这个 workflow
@@ -110,7 +110,7 @@ jobs:
       # 单独写一条"只建 amd64"的特例(apache-flink 没有 aarch64 wheel,
       # arm64 那条腿在 QEMU 下必然构建失败)。那条特例这次一起删掉了。
       # 阿里云 ACR:**没配 secrets 时这一步自动跳过**,不会让流水线变红。
-      # 为什么需要它(2026-08-28 实测,见 docs/BACKLOG.md「镜像拉取」那条):
+      # 为什么需要它(2026-08-28 实测,见 docs/project/roadmap.md「镜像拉取」那条):
       # 境内云主机拉 GHCR 的大镜像会直接卡死——`docker pull` 3.44GB 的
       # spark-iceberg 是 25 秒 0 字节,NJU 镜像站能拿 manifest 但拉 blob
       # 超时;当天只能手工搬 1.3GB 的 tar 上去,和「一键部署」直接冲突。

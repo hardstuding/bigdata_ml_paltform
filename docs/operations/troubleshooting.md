@@ -471,7 +471,7 @@ Pod 的 `imagePullPolicy: IfNotPresent` 会直接用本地这份。
     "个人化/强绑定当前环境的运维脚本不进 git"的既定政策不进这个仓库,
     细节记在 `docs/journal/2026-08.md`,这里只记录症状和修复思路,方便
     以后在另一台机器上重新实现同款看门狗时避免同一个坑。
-- **来源**:`docs/roles.md`(计费资源门禁一节)、journal 2026-08。
+- **来源**:`docs/project/capability-matrix.md`(计费资源门禁一节)、journal 2026-08。
 
 ### ArgoCD dex-server 在真实压力下 SIGSEGV,内存限制设小了
 
@@ -1242,7 +1242,7 @@ Pod 的 `imagePullPolicy: IfNotPresent` 会直接用本地这份。
 
 ### Keycloak realm 从建立起就没有任何 client 配过 groups claim mapper,按组鉴权从来没真正生效过
 
-- **背景**:2026-08-19,`docs/CURRENT_WORK.md`。
+- **背景**:2026-08-19,`docs/project/current-work.md`。
 - **症状**:直接解码拿到的 `id_token` 确认过,`admin` 明明在
   `platform-team` 组里,token 里完全没有 `groups` 字段。这意味着
   Grafana(ADR-028)/JupyterHub(ADR-025)之前"按组收紧已验证"的说法
@@ -1256,7 +1256,7 @@ Pod 的 `imagePullPolicy: IfNotPresent` 会直接用本地这份。
 
 ### K8s 1.24+ 不会自动创建 service-account-token 类型 Secret,Argo Workflows 登录成功但调 API 一直 403
 
-- **背景**:2026-08-19,`docs/CURRENT_WORK.md` / `docs/roles.md`。
+- **背景**:2026-08-19,`docs/project/current-work.md` / `docs/project/capability-matrix.md`。
   Argo Workflows 从 8-16 起就 CrashLoopBackOff,两天多没人发现,先修好
   的是 issuer 校验失败(discovery 文档拿到的 issuer 字段带端口,发起
   请求用的地址不带,读官方源码确认要用 `sso.issuerAlias` 对应
@@ -1573,7 +1573,7 @@ Pod 的 `imagePullPolicy: IfNotPresent` 会直接用本地这份。
 
 ### Trino 新建 service account 之后连接仍然报 Invalid credentials,密码看着是对的
 
-- **背景**:2026-08-20,`docs/CURRENT_WORK.md`,`platform_sdk_demo` DAG
+- **背景**:2026-08-20,`docs/project/current-work.md`,`platform_sdk_demo` DAG
   排查过程中撞到的第二个坑(第一个是上面的 RBAC 问题,第三个是下面的
   OPA 白名单问题)。
 - **症状**:DAG 报 Trino "Invalid credentials",账号密码本身没错
@@ -1682,7 +1682,7 @@ Pod 的 `imagePullPolicy: IfNotPresent` 会直接用本地这份。
 
 ### `trino:483` 收紧了配置校验,chart 生成的属性和我们的配置冲突,新版本直接拒绝启动
 
-- **背景**:2026-08-19 前后,`docs/CURRENT_WORK.md`,cloud-full 首次
+- **背景**:2026-08-19 前后,`docs/project/current-work.md`,cloud-full 首次
   拉起 Trino 时撞到。
 - **症状**:Trino 用 `trino/trino:483` 这个版本直接拒绝启动。
 - **定位**:`trino/trino:483` 对 `http-server.http.port` 收紧了配置

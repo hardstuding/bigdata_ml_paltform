@@ -5,7 +5,7 @@
 
 ## 起因
 
-`docs/BACKLOG.md` 里挂着"Spark 4.x 评估:仓库固定 Spark 3.5.9,官方已到
+`docs/project/roadmap.md` 里挂着"Spark 4.x 评估:仓库固定 Spark 3.5.9,官方已到
 4.x"。zhenghe 2026-08-26 说这条我自己看着办。
 
 ## 先把依赖链查清楚(全部是实测,不是查文档)
@@ -27,7 +27,7 @@ tag 存不存在"的判断会误报。差一点就报了个"我们钉的镜像�
 ## 关键发现:Spark 4 能解开 Iceberg 1.10.0 这个结
 
 `apps/spark-iceberg-image/Dockerfile` 里写得很清楚,Iceberg 钉在 1.10.0
-不是随便选的([ADR-036](036-iceberg-version-pinning.md) 二分定位过):
+不是随便选的([ADR-036](036-spark-iceberg-pipeline.md) 二分定位过):
 
 > 1.11.0 起改用 Java 17 编译(class file version 61),而这个 Spark 镜像
 > 自带的是 Java 11,用 1.11.0 driver 启动直接 UnsupportedClassVersionError

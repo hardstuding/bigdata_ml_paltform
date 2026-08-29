@@ -62,6 +62,6 @@ env:                      # 传给作业的环境变量
 - CI 会校验这四个模板一直可用(`scripts/check-job-examples.py`)——模板是
   最容易腐烂的东西,一旦没人跑,坏了也不会有人发现。
 
-平台整体怎么用,看 [`docs/QUICKSTART.md`](../docs/QUICKSTART.md);
+平台整体怎么用,看 [`docs/getting-started.md`](../docs/getting-started.md);
 每个工具是干什么的、归谁,看
-[`docs/operations/service-catalog.md`](../docs/operations/service-catalog.md)。
+[`docs/reference/service-catalog.md`](../docs/reference/service-catalog.md)。

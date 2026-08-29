@@ -44,7 +44,7 @@ spec:
 
                   # 2026-08-16:写死指向 192.168.5.2:1087(colima 宿主机专用
                   # 代理)在 cloud-full 上连不上,导致这个 Job 一直失败、
-                  # 被临时 suspend(见 docs/BACKLOG.md)。改成运行时探测——
+                  # 被临时 suspend(见 docs/project/roadmap.md)。改成运行时探测——
                   # 和 apps/permission-request-app、apps/table-registration-app
                   # 等已经踩过同一个坑的组件用的是同一个模式,2 秒连不上就
                   # 当作不需要代理。

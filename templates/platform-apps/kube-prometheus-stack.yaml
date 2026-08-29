@@ -50,7 +50,7 @@ spec:
     # **grafana 的 alloy/loki 两个 chart 还没有这条路可走**——Grafana 目前
     # 没有把 chart 发到 OCI 仓库(ghcr.io/grafana/{helm-charts,charts}/alloy
     # 三个路径实测全是 403/not found),那两个仍然走 index.yaml,是已知
-    # 遗留风险,记在 docs/BACKLOG.md。
+    # 遗留风险,记在 docs/project/roadmap.md。
     # repoURL 里带上 chart 名,和这个仓库已有的 OCI 来源写法保持一致
     # (apps/definitions/kserve-crd.yaml、mlflow.yaml 都是这么写的),
     # 不要只写到命名空间——`scripts/validate-charts.py` 认的是这一种。

@@ -164,7 +164,7 @@ else
   # Traefik 一直在跑,占着节点的 80/443 端口,和 ingress-nginx 自己的
   # svclb Pod 抢端口,导致 ingress-nginx 长期 Pending/OutOfSync(这个
   # 项目走 NodePort 对外访问,没有依赖裸 80/443,所以没有影响真实访问,
-  # 但白占资源、也是干扰排障的噪音源)。见 docs/BACKLOG.md 2.7。
+  # 但白占资源、也是干扰排障的噪音源)。见 docs/project/roadmap.md 2.7。
   INSTALL_K3S_MIRROR=cn INSTALL_K3S_EXEC="--docker --data-dir /data/k3s --write-kubeconfig-mode 644 --tls-san ${CLOUD_VM_IP} --disable traefik" sh /tmp/install-k3s.sh
   rm -f /tmp/install-k3s.sh
 fi

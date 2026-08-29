@@ -4,7 +4,7 @@
 > 不是收到就搁置——抽查的具体指控（数据盘选择 bug、历史误删 `data`
 > namespace 事故、`STATUS.md` 和 `scripts/22` 的自相矛盾）都核实属实并
 > 已处理。完整的采纳/延后判断和理由见
-> [ADR-055](decisions/055-external-review-response-2026-08-15.md)，
+> [ADR-055](../../decisions/055-external-review-response-2026-08-15.md)，
 > 不在这里重复。这份原文**保留不改动**（历史记录的价值在于保持原样），
 > 后续如果需要知道"当前实际状态"，去看 ADR-055 和
 > `environments/cloud-full/STATUS.md`，不要只看这份文档就以为还没处理。
@@ -576,8 +576,8 @@ CI 至少增加：
 
 ## 每次开始工作必须按顺序读取
 1. CLAUDE.md
-2. docs/CURRENT_WORK.md
-3. docs/BACKLOG.md 中 CURRENT_WORK 引用的任务
+2. docs/project/current-work.md
+3. docs/project/roadmap.md 中 CURRENT_WORK 引用的任务
 4. 当前环境 STATUS.md
 5. 当前任务直接引用的 ADR/Runbook
 
@@ -602,7 +602,7 @@ CI 至少增加：
 
 重要原则应从现有全局规则和 `project_core_requirements.md` 中去重、迁移到项目仓库，作为所有 Agent 共同规则；Claude 私有 memory 只保存个人偏好或指向仓库文档的索引，不保存唯一事实。迁移后不要保留三份互相漂移的规则正文。
 
-### 2. 增加唯一的 `docs/CURRENT_WORK.md`
+### 2. 增加唯一的 `docs/project/current-work.md`
 
 这是防失忆、防跑偏最重要的文件。任何时刻只能有一个 `CURRENT` 主目标，但一个主目标可以包含多个并行工作流。建议格式：
 
@@ -640,7 +640,7 @@ CI 至少增加：
 
 用户明确期望 Claude 在合适的时候并行工作。并行本身不是跑偏；**脱离同一个主目标、缺少依赖和资源控制的并行才是跑偏。**
 
-建议在 `CURRENT_WORK.md` 中为每个并行工作流登记：
+建议在 `project/current-work.md` 中为每个并行工作流登记：
 
 | 字段 | 含义 |
 |---|---|
@@ -692,7 +692,7 @@ CI 至少增加：
 - 并行确实缩短关键路径，而不是制造更多在制品。
 - 主目标结束时所有工作流都有明确终态：已合并、已验证、已取消或记录为 backlog；不能留下无人管理的后台任务。
 
-### 3. 建立带优先级和变更控制的 `docs/BACKLOG.md`
+### 3. 建立带优先级和变更控制的 `docs/project/roadmap.md`
 
 Claude 跑偏常常不是完全做错，而是把一个合理但不紧急的想法提前做了。Backlog 应让它“记下来但先不做”。每项至少包含：
 

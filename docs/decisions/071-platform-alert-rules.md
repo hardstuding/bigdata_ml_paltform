@@ -13,7 +13,7 @@
 只有 vendor 进来的 loki chart 自带的那几条,一条平台自己的规则都没有。
 也就是说:那套通知设施从来没有东西可以送。
 
-`docs/roles.md` 里"告警送达 ❌"那一格,一直被理解成"缺通知渠道凭据"。
+`docs/project/capability-matrix.md` 里"告警送达 ❌"那一格,一直被理解成"缺通知渠道凭据"。
 **其实缺的不只是凭据,是规则本身。** 就算现在把企微 webhook 配上,也不会
 有任何告警发出来。
 
@@ -47,7 +47,7 @@
 "Deployment 有几个副本可用"。**这个区分是刻意的**:Pod 层面的健康和作业
 层面的健康是两回事,[ADR-062](062-flink-streaming-pipeline.md) 实测过
 "JM/TM 都 Running 而作业已经 FAILED"。只监控 Pod 就是在盯错的那一层,正是
-`docs/production-readiness-gaps.md` 第 2 条批评的东西。
+`docs/project/production-readiness-gaps.md` 第 2 条批评的东西。
 
 为此加了两样:
 

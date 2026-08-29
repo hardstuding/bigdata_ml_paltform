@@ -67,7 +67,7 @@ spec:
     # 是 1.1.0(也是目前最新发布版),它的 kafka-versions.yaml 支持列表里
     # 只有 4.3.0,还没收录 4.3.1,升上去 Strimzi 会拒绝这个 CR。等 Strimzi
     # 出支持 4.3.1 的新版本再跟着升,不是这个项目选择不升级。见
-    # docs/BACKLOG.md P1.6。
+    # docs/project/roadmap.md P1.6。
     version: 4.3.0
     metadataVersion: 4.3-IV0
     listeners:

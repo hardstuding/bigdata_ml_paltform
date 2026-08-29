@@ -1,4 +1,4 @@
-"""platform-portal 的测试——见 docs/BACKLOG.md P1"三个自建 Flask 工具补
+"""platform-portal 的测试——见 docs/project/roadmap.md P1"三个自建 Flask 工具补
 测试"那条。这个 app 唯一有实际逻辑的部分是 probe()(现场探测工具是否
 在线)和 index() 路由(按 category 分组、把探测结果塞进模板),测的是
 这两块,不测 Jinja 模板渲染出的具体 HTML 细节(那属于样式,不是逻辑)。

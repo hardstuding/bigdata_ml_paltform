@@ -10,7 +10,7 @@
 `s3://lakehouse/dbt-artifacts/platform_demo/` —— 那个路径就是 OpenMetadata
 的 dbt 连接器期望的位置。
 
-**但没有任何东西去消费它们。** 这条在 `docs/roles.md` 里一直如实记着
+**但没有任何东西去消费它们。** 这条在 `docs/project/capability-matrix.md` 里一直如实记着
 ("artifacts 已经上传到连接器期望的位置了,但没有任何东西去消费它们"),
 也就是说:产物一直在生成、一直没人读,数据目录里的血缘那半一直是空的。
 

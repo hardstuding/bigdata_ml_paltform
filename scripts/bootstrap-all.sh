@@ -4,7 +4,7 @@
 # README 那份"7 步"清单当时漏记的几步(argo-workflows CRD、Trino 探针
 # 修复不只是"重建才需要",第一次拉起就需要)。
 #
-# 这不是 docs/BACKLOG.md P1.3"环境 overlay 重构"那个更大的架构性任务
+# 这不是 docs/project/roadmap.md P1.3"环境 overlay 重构"那个更大的架构性任务
 # (改配置真正切环境,不是这份脚本能替代的)——这份脚本做的是更朴素的
 # 事:把现在已经存在、已经各自验证过的一堆脚本,按正确顺序 + 正确的等待
 # 时机串起来,不需要人记住 7+ 条命令的先后关系和中间要等哪个 Application
@@ -338,7 +338,7 @@ fi
 
 step "训练 demo 模型(黄金链路的 model 探针依赖 MLflow 里有个 READY 模型)"
 # 同一个理由。而且 2026-08-27 实测过这条**真的会被漏掉**:08-22 推倒重建
-# 之后没人跑过 scripts/09,MLflow 注册表一直是空的,而 roles.md 里"模型注册"
+# 之后没人跑过 scripts/09,MLflow 注册表一直是空的,而 project/capability-matrix.md 里"模型注册"
 # 那格还写着 ✅——直到 model 探针第一次跑才发现(ADR-079)。
 if kubectl -n mlflow get deploy mlflow-mlflow >/dev/null 2>&1; then
   run_optional "scripts/09-train-demo-model.sh" ./scripts/09-train-demo-model.sh

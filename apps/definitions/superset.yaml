@@ -62,7 +62,7 @@ spec:
         # 已经装好"——见 apps/superset-image/Dockerfile 的完整说明
         # (psycopg2-binary/authlib/trino 为什么需要、构建过程踩的两个真实
         # 坑:venv 和系统 pip 不是同一个 Python 环境、构建期默认用户对
-        # site-packages 没写权限)。这解决的是 docs/BACKLOG.md P2.1 点名
+        # site-packages 没写权限)。这解决的是 docs/project/roadmap.md P2.1 点名
         # 的"运行时 pip install"反模式本身——之前只能靠调大
         # startupProbe(见下面 supersetNode.startupProbe)硬扛网络慢,
         # 现在镜像已经带齐依赖,不再需要联网。

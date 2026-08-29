@@ -4,7 +4,7 @@
 # **为什么现在才做**:`dbt_demo` 这个 Airflow DAG 从 2026-08-16 起就在往
 # `s3://lakehouse/dbt-artifacts/platform_demo/` 上传 `manifest.json` 和
 # `catalog.json`——路径就是 OpenMetadata 的 dbt 连接器期望的位置——但
-# **没有任何东西去消费它们**(`docs/roles.md` 里如实记着这条)。也就是说
+# **没有任何东西去消费它们**(`docs/project/capability-matrix.md` 里如实记着这条)。也就是说
 # 产物一直在生成、一直没人读,目录里的血缘那半一直是空的。
 #
 # 这个脚本补上消费端:在已有的 `trino` DatabaseService 上再挂一条

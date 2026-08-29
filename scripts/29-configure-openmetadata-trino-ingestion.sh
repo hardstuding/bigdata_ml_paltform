@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 让"数据资产盘点"这条能力从"人工在 OpenMetadata UI 里手动登记表"变成
 # "Trino 的 iceberg catalog 下所有 schema/表/字段自动被发现"——见
-# docs/roles.md 里数据治理角色的缺口记录。
+# docs/project/capability-matrix.md 里数据治理角色的缺口记录。
 #
 # 声明式怎么做的:不在 UI 上点。用 OpenMetadata 自己的 REST API(createOrUpdate
 # 语义的 PUT)建/更新两个实体——一个 DatabaseService(名字固定叫 "trino",

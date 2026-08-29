@@ -2,7 +2,7 @@
 
 设计边界见 docs/decisions/058-lightweight-developer-experience.md。
 **这个包只做两件事:连接封装、作业提交。** 任何"顺手加个功能"的想法
-默认拒绝,先记进 docs/BACKLOG.md 单独评估——这条边界一旦破了,它就会
+默认拒绝,先记进 docs/project/roadmap.md 单独评估——这条边界一旦破了,它就会
 长成一个小型平台,ADR-058 的全部价值就没了。这不是客套话,是这个方案
 唯一可能失败的方式。
 

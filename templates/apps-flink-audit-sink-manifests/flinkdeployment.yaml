@@ -23,7 +23,7 @@ spec:
     # 审计/流式链路能不能被告警覆盖的前提**:Pod 层面的健康(Deployment
     # 有几个副本可用)和作业层面的健康是两回事——ADR-062 实测过"JM/TM
     # 都 Running 而作业已经 FAILED"。只监控 Pod 就是在盯错的那一层
-    # (docs/production-readiness-gaps.md 第 2 条批评的正是这个)。
+    # (docs/project/production-readiness-gaps.md 第 2 条批评的正是这个)。
     # 有了 flink_jobmanager_numRunningJobs 才能告警"作业没了"。
     #
     # flink-metrics-prometheus 的 jar 在官方镜像的 /opt 里自带,不用额外装。

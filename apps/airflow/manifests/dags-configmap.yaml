@@ -8,7 +8,7 @@
 # 字节级同步,改动时用 scripts/sync-airflow-dags-configmap.py 重新生成,
 # 不要手动改这个文件——手动改会导致下次重新生成时被覆盖丢失。这个脚本
 # 是 scripts/sync-app-configmaps.py(3 个自建 Flask 工具用)在 Airflow
-# DAG 场景下的对应实现,背景见 docs/BACKLOG.md P1.2a:这个仓库已经踩过
+# DAG 场景下的对应实现,背景见 docs/project/roadmap.md P1.2a:这个仓库已经踩过
 # 一次真实的分叉(dbt_demo.py 的 image digest pin 只在这份 ConfigMap 里
 # 有,源文件那边在后续编辑时被意外丢了,靠这个脚本第一次跑起来时才发现
 # 并修复)。
@@ -741,7 +741,7 @@ data:
                 # boto3==1.43.72,任务#13 已经核实锁定过,这份源文件之前没跟
                 # ConfigMap 同步更新——这个项目目前没有类似
                 # scripts/sync-app-configmaps.py 的机制帮 Airflow DAG 源文件和
-                # ConfigMap 保持一致,是已知差距,见 docs/BACKLOG.md)。
+                # ConfigMap 保持一致,是已知差距,见 docs/project/roadmap.md)。
                 # 2026-08-16 云端部署时实测:pypi.org 直连给 dbt-core 这个大
                 # 依赖树反复卡到 300 秒超时(两次,一次挂了 8 分钟以上才手动
                 # 中止),换成阿里云的公开 PyPI 镜像后同样的安装 25 秒完成——

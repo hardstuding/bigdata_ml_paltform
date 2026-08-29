@@ -1,4 +1,4 @@
-"""table-registration-app 的测试——见 docs/BACKLOG.md P1"三个自建 Flask
+"""table-registration-app 的测试——见 docs/project/roadmap.md P1"三个自建 Flask
 工具补测试"那条。重点测两块:
 1. parse_columns()/parse_table_fqn() 这两个纯校验函数——用户输入的第一道
    关卡,错了要么放过了不合法的表名/类型直接怼给 Trino 执行,要么把合法

@@ -5,7 +5,7 @@
 
 ## 背景
 
-[`docs/production-readiness-gaps.md`](../production-readiness-gaps.md) 把
+[`docs/project/production-readiness-gaps.md`](../project/production-readiness-gaps.md) 把
 "数据质量断言完全没有"排在生产可用性缺口的第一位,理由是:**作业挂了会
 告警、有人管;数据错了不会告警**,它一路流进报表和模型训练集,几周后业务
 方发现数字不对时,已经回溯不出哪天开始错的、下游哪些结果被污染了。
@@ -69,7 +69,7 @@ dbt tests。
 ## 还没做的
 
 - **断言结果失败时没有告警通道**。现在要人主动去 OpenMetadata 看。接进
-  Alertmanager 是下一步,和 `production-readiness-gaps.md` 第 2 条(数据
+  Alertmanager 是下一步,和 `project/production-readiness-gaps.md` 第 2 条(数据
   新鲜度 SLO)是同一套出口,应该一起做,不要各接各的。
 - 只覆盖了一张 demo 表。真实使用时"哪些表需要哪些断言"应该是建表流程的
   一部分(和 `apps/table-registration-app/` 的建表申请合流),而不是事后

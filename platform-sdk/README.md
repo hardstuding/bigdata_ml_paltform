@@ -119,4 +119,4 @@ wf_name = run_workflow_template("train-demo-model")
 不做 ORM、不做 DAG 编排 DSL、不做多文件项目打包(单文件脚本走
 ConfigMap,几百 KB 内;真正的多文件项目应该走 git,这是以后要补的能力,
 见 ADR-058"实施顺序"那节)。任何"顺手加个功能"的想法,先记
-`docs/BACKLOG.md`,不要直接塞进这个包。
+`docs/project/roadmap.md`,不要直接塞进这个包。

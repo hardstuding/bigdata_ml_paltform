@@ -8,7 +8,7 @@
    SSO 登录 404/502 连环事故之后建的,背景是这几个值当时散落在 9 个文件里,
    改一处不代表其他跟着变。
 
-2. **组件选择**(2026-08-20 新增,ADR-057 第三批/`docs/BACKLOG.md` 1.1)——
+2. **组件选择**(2026-08-20 新增,ADR-057 第三批/`docs/project/roadmap.md` 1.1)——
    `apps/components/` 是所有组件定义的唯一源码(43 个,以前分散在
    `apps/definitions/`(直接常驻的)和 `environments/<env>/
    pending-definitions/`(park 着的)两处,靠人工 `git mv` 表达"这个环境

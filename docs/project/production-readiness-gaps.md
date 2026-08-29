@@ -13,7 +13,7 @@ zhenghe 2026-08-23:"有些设计可能是我没想到的,你可以给我建议�
 
 ---
 
-## 1. 数据质量断言 —— ✅ 已做(2026-08-23,见 [ADR-065](decisions/065-data-quality-on-openmetadata.md))
+## 1. 数据质量断言 —— ✅ 已做(2026-08-23,见 [ADR-065](../decisions/065-data-quality-on-openmetadata.md))
 
 复用了 OpenMetadata 自带的 Data Quality(zhenghe 提示的方向,核实后确认可行),
 三条断言已在 cloud-full 实机跑通,并用一条故意失败的探针证明了绿灯能变红。
@@ -42,7 +42,7 @@ zhenghe 2026-08-23:"有些设计可能是我没想到的,你可以给我建议�
 的数据模型),让分析师在查一张表之前就能看到"这张表昨天的质量检查过没过"
 ——只写进告警通道的话,只有运维看得到,用数据的人看不到,等于白做。
 
-## 2. 数据新鲜度 SLO —— 🟡 检测已做([ADR-070](decisions/070-data-freshness-slo.md)),告警出口未做
+## 2. 数据新鲜度 SLO —— 🟡 检测已做([ADR-070](../decisions/070-data-freshness-slo.md)),告警出口未做
 
 做法上有个转向值得记:它**不是**一个新的监控子系统,是数据质量断言再加
 一条(理由见 ADR-070)。下面是原始判断,保留。
@@ -64,7 +64,7 @@ ArgoCD Synced 不等于生效、Pod Running 不等于健康、Job Complete 不�
 提交时间,超期就告警。指标进 Prometheus,和现有 Grafana/Alertmanager 复用
 同一套通道,不另起炉灶。
 
-## 3. 查询审计 —— 🟡 第一段已做(2026-08-23,见 [ADR-066](decisions/066-trino-query-audit.md))
+## 3. 查询审计 —— 🟡 第一段已做(2026-08-23,见 [ADR-066](../decisions/066-trino-query-audit.md))
 
 事件已经在往 Kafka 里流了(这就是「不能再晚」的那部分),但**还没落到
 Iceberg**,现在只靠 Kafka 保留期兜着。下面是原始判断,保留。
@@ -82,16 +82,16 @@ event listener,**查询本身没有留痕**。
 
 **建议做法:**Trino event listener 把查询事件落到 Iceberg 表里(平台自己
 就有存储,不需要外部系统),然后这张表本身按最严格的权限管起来。顺带
-它还能回答"哪些表其实没人用"——`docs/BACKLOG.md` P5 那个"项目瘦身审计"
+它还能回答"哪些表其实没人用"——`docs/project/roadmap.md` P5 那个"项目瘦身审计"
 需要的正是这类数据。
 
-## 4. 成本归属 —— 🟡 配置完成未部署([ADR-069](decisions/069-cost-attribution.md))
+## 4. 成本归属 —— 🟡 配置完成未部署([ADR-069](../decisions/069-cost-attribution.md))
 
 ### 原始判断:和 ADR-064 是一体两面
 
 **现状:**没有任何成本可见性。
 
-**关系:**[ADR-064](decisions/064-role-based-resource-quota.md) 解决的是
+**关系:**[ADR-064](../decisions/064-role-based-resource-quota.md) 解决的是
 "**能用多少**"(事前配额),这一条解决的是"**实际用了多少、值不值**"
 (事后账单)。只有配额没有账单,配额就变成一场纯粹的办公室政治——每个组
 都说自己不够用,没有数据支撑谁该多分。
@@ -103,7 +103,7 @@ event listener,**查询本身没有留痕**。
 ——本会话已经因为空转烧掉过约 ¥25。真到多机器多团队,没有归属就是一笔
 糊涂账。
 
-## 5. Schema Registry —— 🟡 manifest 完成未部署([ADR-068](decisions/068-schema-registry.md),选的 Karapace)
+## 5. Schema Registry —— 🟡 manifest 完成未部署([ADR-068](../decisions/068-schema-registry.md),选的 Karapace)
 
 ### 原始判断:上游改字段,下游炸
 
@@ -118,7 +118,7 @@ event listener,**查询本身没有留痕**。
 **建议做法:**Kafka 侧上 Schema Registry 做兼容性校验(只允许向后兼容的
 变更),生产端和消费端都从 registry 拿 schema,不再各写一份。
 
-## 6. 门户改工作台 —— 🟡 代码完成未上集群([ADR-067](decisions/067-portal-as-workbench.md))
+## 6. 门户改工作台 —— 🟡 代码完成未上集群([ADR-067](../decisions/067-portal-as-workbench.md))
 
 ### 原始判断(zhenghe 已经指出 UI 和功能都不好)
 

@@ -3,7 +3,7 @@
 这份文件是"我们做到哪了"的**唯一权威入口**,取代 `docs/architecture.md`
 里 Phase 0-4 表格的这个作用(那张表回答的是"部署了哪些组件",保留作为
 历史记录,但它不是衡量进度的标尺——见
-[ADR-057](decisions/057-architecture-review-2026-08-19.md))。
+[ADR-057](../decisions/057-architecture-review-2026-08-19.md))。
 
 衡量标准只有一条:**某个岗位的人,能不能不靠平台维护者在旁边帮忙,
 独立完成一件他日常真实要做的工作。** 组件部署了、API 通了、demo 跑过,
@@ -17,7 +17,7 @@
 > "没部署"指组件定义写好了但不在 `environments/cloud-full/config.yaml`
 > 的 `enabled_components` 列表里,`apps-root` 不会同步它——**注意这不是
 > 资源不够**(cloud-full 是 16 vCPU / 64 GiB)。2026-08-20 起"哪些组件
-> 启用"已经改成这份声明式列表(ADR-057 第三批,`docs/BACKLOG.md` 1.1
+> 启用"已经改成这份声明式列表(ADR-057 第三批,`docs/project/roadmap.md` 1.1
 > 已完成),不再靠人工在目录之间 `git mv`。
 
 ---
@@ -71,7 +71,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 | 破坏性操作防护 | ✅ | `scripts/confirm-destructive-kubectl.sh`(历史上真误删过 namespace,见 `docs/operations/incidents.md`) |
 | 计费资源门禁 | ✅ | `cloud-full-preflight.sh` + 空闲自动关机看门狗(经济模式) |
 | 排障知识 | ✅ | 2026-08-22 改造成 Runbook:顶部 59 条**症状索引**(按人实际观察到的现象组织),下面按层次分 9 节,每条统一成"症状 → 定位 → 处置"。条目 40 → 66(新增 26 条是从 journal/ADR 搬进来的真实故障),行数 864 → 1632。内容保全做过机械核对:旧版 292 个技术片段(报错原文/命令/版本号/路径)逐个查过,没有丢 |
-| 统一服务目录 / 黄金链路告警 | 🟡 | **黄金链路那半做完并实机验证**(ADR-079):**六条**链路各一个探针 CronJob(query / streaming / catalog / authz / model / inference),做的是真实的小事而不是探进程——比如 authz 那条验证的是**拒绝**(拿不到 `PERMISSION_DENIED` 就算失败),不是能不能连上;配套 `GoldenPathBroken` 告警 + 「黄金链路」看板。实测三条全通(query 0.2s/10 行、catalog 6 个字段、streaming 5 分钟前),而且**停机 22 小时后 streaming 从「1327 分钟前」自己恢复到「5 分钟前」**。2026-08-28 实测六条全通(catalog 那条在开机瞬间失败过一次,是 OpenMetadata 还没起来,下一轮自己恢复)。门户首页顶部也直接显示 N/M。**「统一服务目录」2026-08-29 已做**:`platform/service-catalog.yaml`(34 个服务 + 37 项支撑资源,覆盖三个环境全部 71 个启用组件),生成 [`docs/operations/service-catalog.md`](operations/service-catalog.md)。**关键不是这份清单本身,是 `scripts/check-service-catalog.py`**:新组件没登记归属、owner 写了不存在的组、依赖指向不存在的服务、生成的 md 和源码漂移,四种情况 CI 都会红——没有这层约束,手写清单三个月后就会变成一份过期文档,比没有更糟 |
+| 统一服务目录 / 黄金链路告警 | 🟡 | **黄金链路那半做完并实机验证**(ADR-079):**六条**链路各一个探针 CronJob(query / streaming / catalog / authz / model / inference),做的是真实的小事而不是探进程——比如 authz 那条验证的是**拒绝**(拿不到 `PERMISSION_DENIED` 就算失败),不是能不能连上;配套 `GoldenPathBroken` 告警 + 「黄金链路」看板。实测三条全通(query 0.2s/10 行、catalog 6 个字段、streaming 5 分钟前),而且**停机 22 小时后 streaming 从「1327 分钟前」自己恢复到「5 分钟前」**。2026-08-28 实测六条全通(catalog 那条在开机瞬间失败过一次,是 OpenMetadata 还没起来,下一轮自己恢复)。门户首页顶部也直接显示 N/M。**「统一服务目录」2026-08-29 已做**:`platform/service-catalog.yaml`(34 个服务 + 37 项支撑资源,覆盖三个环境全部 71 个启用组件),生成 [`docs/reference/service-catalog.md`](../reference/service-catalog.md)。**关键不是这份清单本身,是 `scripts/check-service-catalog.py`**:新组件没登记归属、owner 写了不存在的组、依赖指向不存在的服务、生成的 md 和源码漂移,四种情况 CI 都会红——没有这层约束,手写清单三个月后就会变成一份过期文档,比没有更糟 |
 | 容量 / 成本看板 | 🟡 | **两半都有面板了**:成本 `platform/grafana-cost-dashboard/`(7 panel,PromQL 在真集群验过);容量 `platform/grafana-capacity-dashboard/`(6 panel:各组配额用量 vs 标称、排队作业区分「等资源」和「永远排不上」、节点剩余可分配)。**容量那份还没部署验证过**,所以整格还是 🟡 |
 | Argo Workflows 授权 | ✅ | **2026-08-19 已修复并验证**:之前 CrashLoopBackOff 2 天多没人发现(issuer/issuerAlias),修好登录后又发现登录成功但调 API 403——`server.sso.rbac.enabled` 不会自动建授权资源,读官方源码(`gatekeeper.go`)确认要手动建 ServiceAccount(挂 rbac-rule 注解)+ 长期 token Secret + Role/RoleBinding,四个都补上了。真实 curl+cookie-jar 验证:登录→列 workflow→建一个真实 workflow→能查到→删除清理 |
 | idle-shutdown-watchdog 开机自愈 | ✅ | **2026-08-19 修复**:停机几天后重新开机,看门狗第一次检查会用几天前的旧时间戳误判"已空闲超过阈值"立刻自动关机——机器刚开机 2-3 分钟就被自己关掉,来不及做任何事。已加开机时重置状态的机制(这个脚本本身按既定政策不进 git,细节记在 `docs/journal/2026-08.md`） |
@@ -112,7 +112,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 
 | 环节 | 状态 | 说明 |
 |---|---|---|
-| 批量数据接入 | ✅ | **2026-08-21 第一次真实端到端验证通过**:触发 `seatunnel_device_events` DAG,SeaTunnel 日志确认 `Committed snapshot ... addedRecords=20`,20 条数据真的写进了 `seatunnel.demo.device_events` 这张 Iceberg 表,DAG 三个任务(提交/等待/推血缘)全绿。**此前这一行写的 ✅ 是假的**——依据只是"已部署 + ArgoCD Synced/Healthy",而真实数据路径其实一直不通(`seatunnel` 命名空间不在 Hive Metastore 的 NetworkPolicy 白名单里),因为那个 DAG 长期暂停、没人触发过所以一直没暴露。教训见 `docs/BACKLOG.md` 2.8 |
+| 批量数据接入 | ✅ | **2026-08-21 第一次真实端到端验证通过**:触发 `seatunnel_device_events` DAG,SeaTunnel 日志确认 `Committed snapshot ... addedRecords=20`,20 条数据真的写进了 `seatunnel.demo.device_events` 这张 Iceberg 表,DAG 三个任务(提交/等待/推血缘)全绿。**此前这一行写的 ✅ 是假的**——依据只是"已部署 + ArgoCD Synced/Healthy",而真实数据路径其实一直不通(`seatunnel` 命名空间不在 Hive Metastore 的 NetworkPolicy 白名单里),因为那个 DAG 长期暂停、没人触发过所以一直没暴露。教训见 `docs/project/roadmap.md` 2.8 |
 | 流式数据接入 | ✅ | **2026-08-22 夜真实端到端验证通过**:Producer CronJob 灌 device event 进 `device-events` topic(schema 和 SeaTunnel 那条批量链路一致,不是另发明一套),Flink 消费后写进 Iceberg,Trino 查得到。这是这个平台**第一条端到端验证过的流式管道**——此前 Kafka 只验证过"能生产/消费一条消息",从没接进真实管道。剩余:SeaTunnel/Kafka Connect 这类现成接入组件还没接进流式链路(现在的 Producer 是自建 demo 应用) |
 | 湖仓存储 | ✅ | Iceberg on MinIO + Hive Metastore(ADR-002) |
 | 批处理引擎 | ✅ | **2026-08-21 真实跑通**:`spark-iceberg-demo` 作业 COMPLETED——读到 Trino 建的 `iceberg.demo.orders` 10 行、聚合后写出 `orders_by_region_spark` 新表、再读回确认真的落盘(`SPARK_ICEBERG_DEMO_OK`)。修好之前它坏了 10 天没人发现:`scripts/13` 引用的 `spark-rbac.yaml` 在 commit a7f2833 就被删了、`serviceAccount: spark` 指向不存在的 SA、运行时拉 Maven jar 在云主机上必卡死(改成构建期打进 `apps/spark-iceberg-image/`) |
@@ -167,7 +167,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 status=READY)。**Feast 特征这一段也重新验证过**(2026-08-19,全链路
 真实跑通,见上面"特征工程"一行)。**"Argo Workflows 编排训练"这段
 之前的空白也已经补上**(2026-08-19 晚些时候,见上面"训练执行"一行,
-设计取舍详见 `docs/CURRENT_WORK.md`)。
+设计取舍详见 `docs/project/current-work.md`)。
 
 **2026-08-20:整条链路已经串起来真实跑通,不再是"每段分别验证过"。**
 两件事补齐了最后的空白:①`platform_sdk.run_workflow_template()`——

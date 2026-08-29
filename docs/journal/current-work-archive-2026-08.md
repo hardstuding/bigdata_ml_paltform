@@ -1,6 +1,6 @@
 # CURRENT_WORK 历史轮次存档(2026-08)
 
-这里放的是 [`docs/CURRENT_WORK.md`](../CURRENT_WORK.md) 里**已经完成、
+这里放的是 [`docs/project/current-work.md`](../project/current-work.md) 里**已经完成、
 不再是当前主线**的那些轮次,按时间倒序,原文照搬没有改写。
 
 **为什么单独存一份而不是直接删**:每一轮里都有"当时为什么这么判断""踩了
@@ -31,7 +31,7 @@ Metastore 就绪前提交,`CREATE DATABASE` 失败,而那是**作业提交阶段
 `FLINK_STREAMING_DEMO_OK: 明细表行数从 120 增加到 440,聚合表 160 行`。
 
 **3. Trino 列级/行级策略**:Trino 已加载 4 条 `opa.policy`(URI 生效了),
-但**还没有真正验证过脱敏/过滤的实际效果**,roles.md 那一格保持 🟡。
+但**还没有真正验证过脱敏/过滤的实际效果**,project/capability-matrix.md 那一格保持 🟡。
 
 ### 验证工具本身出错了三次,这条比上面三条更值得记
 
@@ -75,11 +75,11 @@ Metastore 就绪前提交,`CREATE DATABASE` 失败,而那是**作业提交阶段
 
 **结果**:`FLINK_STREAMING_DEMO_OK: 明细表行数从 0 增加到 100,聚合表
 25 行`——判定依据是**用 Trino 独立查 Iceberg 表的实际行数**,不是看作业
-状态。`docs/roles.md` 里"流处理引擎"和"流式数据接入"两格都转 ✅,
+状态。`docs/project/capability-matrix.md` 里"流处理引擎"和"流式数据接入"两格都转 ✅,
 "大数据开发"这个角色从 🟡 升到 🟢(批和流两条链路都真实跑通了)。
 
 9 个 bug 的完整清单和三条教训见
-[ADR-062](decisions/062-flink-streaming-pipeline.md) 末尾。最值得记的一条:
+[ADR-062](../decisions/062-flink-streaming-pipeline.md) 末尾。最值得记的一条:
 **代码写完时 validate-charts / render --check / YAML 解析 / Python 语法
 检查全部通过**,然后真部署一个接一个炸出 9 个问题。
 
@@ -102,7 +102,7 @@ Metastore 就绪前提交,`CREATE DATABASE` 失败,而那是**作业提交阶段
 1. **告警外部通知渠道**(企微/飞书/邮件):等真上生产再测,现在只要
    "留好配置项、能生效"。
 2. **域名 + ICP 备案**:同上。→ 已做成 `tls_issuer_mode` 配置项,见
-   [ADR-060](decisions/060-conditional-rendering-and-tls-issuer.md)。
+   [ADR-060](../decisions/060-conditional-rendering-and-tls-issuer.md)。
 3. **OpenMetadata bot token**:**明确允许**部署阶段自动创建,测试和生产
    都一样;唯一要注意的是生产部署成功后收敛权限。→ 已做,见下。
 
@@ -140,7 +140,7 @@ Metastore 就绪前提交,`CREATE DATABASE` 失败,而那是**作业提交阶段
 ### 推倒重建验证:2026-08-22 在 cloud-full 上真的做了一次,**通过**
 
 用户明确授权(Codex 那边当时没在用)。完整记录见
-[ADR-039](decisions/039-teardown-rebuild-test.md) 末尾,这里只留结论。
+[ADR-039](../decisions/039-teardown-rebuild-test.md) 末尾,这里只留结论。
 
 **办法**:不是 `rm -rf`,而是 `mv /data/k3s /data/k3s.pre-teardown-20260822`
 ——同一文件系统内改名,瞬间完成;集群状态和 13 个 PV(含 Codex 的)完整
@@ -290,7 +290,7 @@ cloud-full 云主机上真实验证,不是只写完代码。
     airflow-worker 跨命名空间 RBAC),这次挖出并修好第 4 个(RBAC),
     重新触发后 DagRun 和 task 都是 **success**,是这条链路第一次真正
     端到端跑通的实测证据。
-  - 顺带补完 `docs/BACKLOG.md` 2.4(三个 Flask 应用测试覆盖,补了 git
+  - 顺带补完 `docs/project/roadmap.md` 2.4(三个 Flask 应用测试覆盖,补了 git
     写入路径 + OA webhook 的 mock 测试,106 个测试全绿,本地跑的,和
     云主机验证无关)。
   - 云主机(`i-0jlbped4h1959tp591pe`)这次是抢占式实例容量不足
@@ -356,7 +356,7 @@ cloud-full 云主机上真实验证,不是只写完代码。
     idle-shutdown-watchdog 开机后被自己的旧状态误杀(见下面"已知的事")、
     `scripts/03-configure-keycloak.sh` 的"client 已存在但 Secret 缺失"
     自愈逻辑
-  - `docs/roles.md`、`docs/BACKLOG.md` 已同步更新反映这些变化
+  - `docs/project/capability-matrix.md`、`docs/project/roadmap.md` 已同步更新反映这些变化
 
 ## 下一步唯一动作(2026-08-19 那一版,已过期,存档)
 
@@ -373,7 +373,7 @@ notebook 开箱即用 `query()`(连 Trino)/`mlflow_setup()`(连 MLflow),
 但**只在不受限制的环境**(本机 kubeconfig / CI)里验证通过——直接从
 notebook pod 里调 `submit_job()` 被 chart 默认的 singleuser
 NetworkPolicy 挡住连 K8s API server,根因没查清,已知限制记在
-`docs/BACKLOG.md` 2.6。过程中还顺带发现并修好一个这条 NetworkPolicy
+`docs/project/roadmap.md` 2.6。过程中还顺带发现并修好一个这条 NetworkPolicy
 本身挡掉 Trino/MLflow 的问题(默认 `privateIPs: false`,notebook 连不上
 任何集群内部服务,这个已经修好并验证)。
 
@@ -476,7 +476,7 @@ Model Registry 查询确认 `demo-rf-classifier` version 3、
 
 目前只有训练这一步(没有特征工程/评估这类多步骤 DAG,模板结构已经为
 以后扩展准备好),也没有"notebook 里触发"这条腿——这两个仍然是真实的
-未做项,记在 `docs/BACKLOG.md`。
+未做项,记在 `docs/project/roadmap.md`。
 
 **2026-08-19 当晚,重开 cloud-full 云主机给 zhenghe 现场看效果时,又发现并
 修好三个真实问题**(不是主动排查出来的,是他实际点开页面才暴露的):

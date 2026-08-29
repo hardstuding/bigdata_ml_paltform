@@ -25,7 +25,7 @@ echo "==> 应用 RBAC + 脚本 ConfigMap"
 # 2026-08-21:原本这里还 apply 一个 spark-rbac.yaml,但那个文件早在
 # 2026-08-12 的 commit a7f2833 就删掉了(改用 spark-operator chart 自带的
 # spark-operator-spark ServiceAccount),脚本这行没跟着删——**这个脚本从那天
-# 起就是坏的,第一步就退出**,而 docs/roles.md 里'批处理引擎 ✅'一直挂着。
+# 起就是坏的,第一步就退出**,而 docs/project/capability-matrix.md 里'批处理引擎 ✅'一直挂着。
 # 又一个'部署了 ≠ 能用'的例子。
 kubectl apply -f apps/spark-iceberg-demo/manifests/script-configmap.yaml
 
