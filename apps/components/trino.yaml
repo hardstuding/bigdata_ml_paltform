@@ -258,6 +258,32 @@ spec:
           # 实际在不停被杀重启,很容易被忽略过去。chart 这条路走不通,改成
           # ArgoCD 的 ignoreDifferences(见下面 spec.ignoreDifferences)+
           # 一次性手动 patch,细节和取舍见 docs/decisions/017 的更新记录。
+          # startupProbe 的预算从 chart 默认的 130 秒(initialDelay 10 +
+          # failureThreshold 60 × periodSeconds 2)放大到 610 秒。
+          #
+          # **2026-08-29 实测的真实故障**:coordinator 连续重启 9 次都起不来,
+          # `exec /usr/lib/trino/bin/health-check` 一直返回 "Server is starting",
+          # 容器在 130 秒被 kubelet 杀掉(exit 143 = SIGTERM),然后重来——
+          # 永远出不了这个循环。表现上很有迷惑性:pod 是 `Running`、
+          # `kubectl logs` 里全是正常的启动日志、没有任何 ERROR,只有
+          # `0/1` 和不断上涨的 Restart Count 能看出问题;连带六条黄金链路
+          # 里的 query/authz 都报 `Connection refused`。
+          #
+          # 为什么 130 秒不够:这台机器开机时几十个组件同时启动,Trino 要
+          # 加载 Iceberg/Hive catalog、初始化 OPA 访问控制插件、建 TLS
+          # 监听器,在满载的节点上超过两分钟很正常。**startupProbe 存在时
+          # liveness/readiness 都不会执行**,所以真正决定"给多少启动时间"
+          # 的只有它,改 livenessProbe 没用(那条另有 CronJob 在维护,
+          # 见 apps/trino-liveness-fix/)。
+          #
+          # 放大 startupProbe 的代价只有"真的起不来时多等几分钟才重启",
+          # 而对一台经常整机重启的机器,启动慢被误杀的代价大得多。
+          startupProbe:
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 120
+            successThreshold: 1
           jvm:
             maxHeapSize: "{{RES:trino_jvm_max_heap}}"
           config:
