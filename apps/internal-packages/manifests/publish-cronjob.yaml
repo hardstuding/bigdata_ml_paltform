@@ -1,0 +1,62 @@
+# 把 packages/ 下的内部包构建成 wheel,发布到 MinIO 上的 PEP 503 静态索引。
+# 见 docs/decisions/083-internal-package-registry.md。
+#
+# **为什么发布跑在集群里而不是 GitHub Actions**:MinIO 没有公网入口(有意的),
+# CI 到不了它。所以"CI 构建完上传"这条最直觉的路走不通。
+#
+# **为什么是 CronJob 而不是 webhook 触发**:少一个要暴露的入口、少一份要维护
+# 的凭据。代价是发布不是立即的(最长一小时),对内部工具库可以接受;急的话
+# 手动 `kubectl create job --from=cronjob/...`。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: internal-packages-publish
+  namespace: data
+spec:
+  schedule: "17 * * * *"          # 每小时的 17 分,和整点那批任务错开
+  concurrencyPolicy: Forbid
+  # 和调度周期同量级:这台机器大部分时间关机,太小的话每次开机都恰好错过
+  # (黄金链路探针和 OpenMetadata 采集都栽过这个)。
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          priorityClassName: batch
+          containers:
+            - name: publish
+              image: python:3.12-slim
+              env:
+                - name: MINIO_ENDPOINT
+                  value: http://minio.minio.svc.cluster.local:9000
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: {secretKeyRef: {name: minio-root, key: rootUser}}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: minio-root, key: rootPassword}}
+                - name: REPO_URL
+                  value: https://github.com/hardstuding/bigdata_ml_paltform.git
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # 构建期装依赖:这个任务每小时才跑一次,而且不在任何请求
+                  # 路径上,现装可以接受(和"运行时 pip install"那条禁令
+                  # 针对的是常驻服务,不是一小时一次的批任务)。
+                  pip install --quiet --no-cache-dir \
+                    -i https://mirrors.aliyun.com/pypi/simple/ build boto3
+                  apt-get update -qq && apt-get install -y -qq --no-install-recommends git >/dev/null
+                  git clone --depth 1 "$REPO_URL" /repo
+                  python3 /scripts/publish_internal_packages.py
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {memory: 1Gi}
+          volumes:
+            - name: script
+              configMap: {name: internal-packages-publisher}

@@ -271,6 +271,17 @@ services:
     排障: jobs/README.md;生成器是 scripts/render-jobs.py
     备注: manifest 是生成物,不要手改;CI 校验它和 jobs/ 不漂移
 
+  - name: internal-packages
+    用途: 公司内部 Python 包的共享(packages/ 下 push,一小时内能 pip install)
+    类别: 平台
+    owner: platform-team
+    面向用户: true
+    请求路径上: false
+    依赖: [minio]
+    排障: packages/README.md;设计取舍见 ADR-083
+    备注: 索引是 MinIO 上的 PEP 503 静态目录,没有包服务器进程;
+          集群内所有工作负载都能装这些包,不按组隔离——不要往里放密钥
+
   - name: iam-sync
     用途: 把 platform/iam/ 里的组织架构同步进 Keycloak
     类别: 治理

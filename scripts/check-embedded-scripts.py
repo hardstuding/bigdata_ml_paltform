@@ -53,6 +53,8 @@ PAIRS = [
     # 变了"同时成立,两边说的却不是一件事。
     # 这是 CLAUDE.md「已知差距」里"源码和 ConfigMap 靠人工同步"那条的又一例。
     ("apps/opa/manifests/policy-configmap.yaml", "trino.rego", "apps/opa/policy/trino.rego"),
+    ("apps/internal-packages/manifests/publisher-configmap.yaml", "publish_internal_packages.py",
+     "scripts/publish_internal_packages.py"),
 ]
 
 

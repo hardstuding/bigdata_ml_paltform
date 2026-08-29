@@ -131,6 +131,7 @@
 | [080](080-model-approval-and-rollback.md) | 模型上线审批 + 回滚(C 线第一步) | 未部署验证 |
 | [081](081-alert-delivery-verified-with-echo-sink.md) | 用回显接收端让「告警送得出去」持续被验证 | 未部署验证 |
 | [022](022-ci-chart-validation.md) | CI:push/PR 前跑 `helm template` | 已采纳 |
+| [083](083-internal-package-registry.md) | 内部包共享:MinIO 上的静态 PEP 503 索引,不引入包服务器 | 已实现,待实机验证 |
 | [082](082-dbt-lineage-ingestion.md) | 让 dbt 的产物真的被消费:血缘接进 OpenMetadata | 已实现,待实机验证 |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 机制已实现并在 cloud-full 验证;ACME 和告警外推两档未在真实环境验证 |

@@ -56,6 +56,13 @@ jobs:
       - name: 每个要构建的镜像都有 paths 触发(漏了的话改 Dockerfile 不会重建)
         run: python3 scripts/check-build-triggers.py
 
+      # 内部包发布逻辑(ADR-083)。产物是一个静态索引,结构写错的表现不是
+      # 报错,是 pip install 报 404,而 CronJob 本身是绿的。
+      - name: 内部包发布逻辑测试
+        run: |
+          pip install --quiet build pyyaml pytest
+          python3 -m pytest tests/test_publish_internal_packages.py -q
+
       - name: ArgoCD 自定义健康检查的 Lua 真跑一遍
         run: |
           pip install --quiet lupa pyyaml pytest

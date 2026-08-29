@@ -27,6 +27,21 @@ USER root
 # platform_sdk 本身在构建时从本仓库拷进去装(不是发布到 PyPI 再拉下来——
 # 这个项目还没有私有 PyPI registry,而且现阶段 SDK 变化会很频繁,拷源码
 # 装是最快的反馈循环;等 SDK 稳定、这个仓库开源之后,可以考虑发 PyPI)。
+# 内部包索引(ADR-083)。**配进镜像里,使用者不用记 --extra-index-url**
+# ——那种"每次都要多敲一个参数"的设计,实际结果是没人用。
+#
+# `trusted-host` 是必需的:索引走的是集群内 http(MinIO 没有对外 TLS),
+# 不加这一行 pip 会拒绝从 http 源安装。这是集群内部地址,不经过公网。
+#
+# extra-index-url 而不是 index-url:内部包找不到时**要能回退到公共源**,
+# 否则任何一个普通依赖都装不了。
+RUN printf '%s\n' \
+    '[global]' \
+    'index-url = https://mirrors.aliyun.com/pypi/simple/' \
+    'extra-index-url = http://minio.minio.svc.cluster.local:9000/packages/simple/' \
+    'trusted-host = minio.minio.svc.cluster.local' \
+    > /etc/pip.conf
+
 COPY platform-sdk /tmp/platform-sdk
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
         /tmp/platform-sdk[submit] \

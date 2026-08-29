@@ -90,6 +90,7 @@ enabled_components:
   - platform-portal.yaml
   - platform-sdk-submitter-rbac.yaml
   - postgres-backup.yaml
+  - internal-packages.yaml
   - postgres.yaml
   - resource-quotas.yaml
   - kueue.yaml
