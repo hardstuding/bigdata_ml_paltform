@@ -98,6 +98,27 @@ hive-metastore 自建镜像。
 5. **ADR-059 不在 ADR 索引里**;**BACKLOG 里"五条产品主线都还没开始"**
    和 **roles.md 里几行状态**都已经和事实相反。
 
+### 2026-08-29 凌晨这一轮
+
+1. **dbt 血缘打通并实机验证**([ADR-082](decisions/082-dbt-lineage-ingestion.md))
+   ——`orders -> stg_orders -> daily_order_totals` 两条真实的边,从血缘接口
+   查出来的。过程中修掉:MinIO 的 NetworkPolicy 漏了 `openmetadata`
+   (和 kserve-demo 同一个盲区)、采集顺序有硬依赖(元数据必须先跑,
+   否则 dbt 采集报 `Success 100%` 而血缘一条都没建)。
+2. **Trino 起不来是被 startupProbe 杀的**:chart 默认预算 130 秒,这台机器
+   开机时几十个组件同时启动,Trino 超时被 SIGTERM,重启 9 次都出不来。
+   放大到 610 秒。表现很有迷惑性:pod 是 Running、日志里全是正常启动日志、
+   没有任何 ERROR,只有 `0/1` 和上涨的 Restart Count。
+3. **看门狗第三版**:判据从"机器有没有在动"换成"有没有人在操作"
+   (SSH 上真实传输的字节数)。旧版被平台自己每 5 分钟一轮的 CronJob
+   全部打中,平台越勤快越判不出没人——2026-08-28 夜里因此空转 2.5 小时。
+   实测新版:我在操作时 `+188112B`,停手后 `+216B`(keepalive)。
+4. **CI 支持推阿里云 ACR**(没配 secrets 自动跳过)。境内云主机拉 GHCR
+   大镜像会卡死是已经在挡路的问题,凭据只能 zhenghe 自己配,办法写在
+   [`docs/operations/image-registry.md`](operations/image-registry.md)。
+5. **ADR-079 那段健康检查 Lua 挂错了对象**(更正见 ADR-079 末尾)。试过
+   两条修法都撤回了,维持现状——那个黄灯下一次探针跑通就自愈。
+
 ### 云主机状态
 
 **运行中**(2026-08-28 22:56 开机)。08-29 02:00 前后因为我这边被用量限制
