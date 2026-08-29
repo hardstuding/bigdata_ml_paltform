@@ -220,7 +220,7 @@ schema 要学。
 
 ```python
 from platform_sdk import submit_job, run_workflow_template
-submit_job("train.py")                       # 把脚本丢到集群上跑
+submit_job(name="train-model", script="train.py")   # 把脚本丢到集群上跑
 run_workflow_template("train-demo-model")    # 触发已部署的工作流模板
 ```
 

@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import contextlib
+
 import pytest
 import requests
 
@@ -315,3 +317,79 @@ class _FakeResp:
 
     def __exit__(self, *a):
         return False
+
+
+class TestRenderedContent:
+    """**渲染级测试:断言值真的出现在 HTML 里,不只是函数返回对了。**
+
+    加这组的直接原因(2026-08-29):模板里写的是 `j.status` / `j.at`,而
+    `my_jobs()` 返回的是 `phase` / `started`。**Jinja 对未定义变量渲染成空
+    字符串、不报错**,所以页面上"我的作业"的状态和时间一直是空白的,而
+    当时 30 个测试全绿——它们测的是 `my_jobs()` 这个函数,不是页面。
+
+    教训一般化:**只要模板和后端之间靠字段名约定,就必须有一条测试跨过
+    这个边界。**下面每条都是"某个真实值必须出现在最终 HTML 里"。
+    """
+
+    def _html(self, client, **patches):
+        """渲染一次首页。没显式给的那几个数据源都打桩成空,免得测试依赖集群。"""
+        defaults = {
+            "golden_paths": {"error": None, "rows": [], "healthy": 0, "total": 0},
+            "queue_usage": {"error": None, "rows": [], "pending_total": 0},
+            "my_jobs": {"error": None, "rows": []},
+            "streams": {"error": None, "rows": []},
+        }
+        defaults.update(patches)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(portal, "probe", return_value=True))
+            for name, value in defaults.items():
+                stack.enter_context(patch.object(portal, name, return_value=value))
+            return client.get("/").get_data(as_text=True)
+
+    def test_我的作业的状态和时间真的出现在页面上(self, client):
+        jobs = {"error": None, "rows": [
+            {"name": "train-abc123", "phase": "Succeeded",
+             "started": "2026-08-29T10:00:00Z", "queue": "train-model"},
+        ]}
+        html = self._html(client, my_jobs=jobs)
+        assert "train-abc123" in html
+        assert "Succeeded" in html, "作业状态没有渲染出来(模板字段名和后端对不上?)"
+        assert "2026-08-29T10:00:00Z" in html, "提交时间没有渲染出来"
+
+    def test_队列配额的数字真的出现在页面上(self, client):
+        queues = {"error": None, "pending_total": 3, "rows": [
+            {"label": "分析组", "name": "data-analysts", "cpu_quota": "2",
+             "cpu_used": "1", "cpu_borrowed": "0", "mem_quota": "8Gi", "pending": 3},
+        ]}
+        html = self._html(client, queue_usage=queues)
+        assert "data-analysts" in html
+        assert "8Gi" in html, "配额数字没渲染出来"
+
+    def test_链路状态的标签和时间真的出现在页面上(self, client):
+        golden = {"error": None, "healthy": 1, "total": 1, "rows": [
+            {"label": "查数据", "chain": "Trino → Iceberg", "state": "ok", "ago": "3 分钟前"},
+        ]}
+        html = self._html(client, golden_paths=golden)
+        assert "查数据" in html
+        assert "3 分钟前" in html, "链路的时间没渲染出来"
+
+    def test_流作业的状态真的出现在页面上(self, client):
+        st = {"error": None, "rows": [
+            {"name": "device-events-stream", "job_state": "RUNNING",
+             "jm_state": "READY", "ok": True},
+        ]}
+        html = self._html(client, streams=st)
+        assert "device-events-stream" in html
+        assert "RUNNING" in html, "流作业状态没渲染出来"
+
+    def test_后端换字段名会让测试变红(self, client):
+        """**这条是元测试**:确认上面那几条不是摆设。
+
+        故意给一个字段名不对的作业记录,页面上就不该出现那个值。如果这条
+        挂了,说明断言写得太松(比如断言的字符串恰好在页面别处出现)。
+        """
+        jobs = {"error": None, "rows": [
+            {"name": "j1", "wrong_field": "SHOULD_NOT_APPEAR", "phase": "", "started": ""},
+        ]}
+        html = self._html(client, my_jobs=jobs)
+        assert "SHOULD_NOT_APPEAR" not in html

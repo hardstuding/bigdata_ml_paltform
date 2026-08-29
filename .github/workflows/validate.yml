@@ -89,6 +89,15 @@ jobs:
       - name: 文档死链检查
         run: python3 scripts/check-doc-links.py
 
+      # 文档里的 SDK 调用示例,参数要真的能和签名对上。
+      # 2026-08-29 发现 usage-guide 里写着 `submit_job("train.py")`,而真实
+      # 签名第一个参数是 name —— 照着文档写必然报错,而这种错不会被任何
+      # 东西发现:文档不执行,读文档的人会以为是自己环境的问题。
+      - name: 文档里的 SDK 示例签名校验
+        run: |
+          pip install --quiet ./platform-sdk
+          python3 scripts/check-doc-examples.py
+
       # jobs/ 下的作业定义 → Argo CronWorkflow 的生成物不能漂移,而且作业
       # 定义本身要合法(name 能当 K8s 资源名、cron 是五段式、owner_group 是
       # platform/iam/ 里真实存在的组)。owner_group 写错的后果特别隐蔽:

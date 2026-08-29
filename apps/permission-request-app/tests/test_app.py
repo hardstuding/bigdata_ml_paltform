@@ -409,7 +409,15 @@ class TestTableAccessApprovalFlow:
         resp = client.post(f"/table-access/step/{steps['director']['id']}/approve", headers=auth("director"))
         assert resp.status_code == 302
         final = self._request_status(request_id)
-        assert final["status"] == "approved"
+        # **这条用例没有 local_git_repo fixture**,所以 apply_grant_to_git 必然
+        # 失败(没有 GIT_TOKEN)。审批链路本身走完了,但授权没写进 csv ——
+        # 正确终态是 approved_pending_apply,不是 approved。
+        #
+        # 2026-08-29 之前这里断言的是 approved,而那是**在断言一个 bug**:
+        # 旧代码无条件把状态写成 approved,把"写入失败"完全掩盖了。
+        # 真正的成功路径由 test_table_access_full_chain_approve_pushes_grant
+        # 覆盖(它带 git fixture,断言 approved + csv 里真的有那行)。
+        assert final["status"] == "approved_pending_apply"
         assert final["decided_at"] is not None
 
     def test_reject_at_any_step_rejects_whole_request_and_skips_rest(self, client, monkeypatch):
@@ -494,7 +502,9 @@ class TestExternalCallback:
         assert resp.status_code == 200
         assert resp.get_json() == {"status": "ok"}
         final = TestTableAccessApprovalFlow()._request_status(row["id"])
-        assert final["status"] == "approved"
+        # 同上:这条用例没有 git fixture,授权写不进去。这里验的是"外部回调
+        # 能让那一步通过、并推进到终态",不是"授权真的落盘"。
+        assert final["status"] == "approved_pending_apply"
 
 
 class TestEscalationCheck:
@@ -819,3 +829,103 @@ class TestExternalOaWebhookDispatch:
         # 照样发企微通知(L1 两个人各一条)。
         assert step["status"] == "pending"
         assert len(wecom_calls) == 2
+
+
+class TestApplyFailureIsNotSuccess:
+    """**授权写入失败时,绝不能标成"已批准"。**
+
+    2026-08-29 之前的代码是:
+        ok, note = apply_grant_to_git(...)      # ok 被接收,但从来不用
+        UPDATE ... SET status='approved' ...    # 无条件
+        notify("已全部批准")                     # 无条件
+
+    后果:git 写失败(没配 token、网络断、push 冲突)时,系统显示"已批准"、
+    用户收到"已批准"的通知,而 OPA 读的那个 csv 里根本没有这条授权 ——
+    用户去查数会被拒,然后来问"为什么批了还查不了",而所有界面都说一切正常。
+    **在权限系统里这是最不能有的一类 bug:它同时骗了用户和审计。**
+
+    下面四条分别锁住:失败不算成功、成功仍然算成功、重试能补回来、重复重试
+    不会写重复行。
+    """
+
+    def _approve_all(self, client, monkeypatch, request_id):
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        steps = {r["approver_username"]: r for r in conn.execute(
+            "SELECT * FROM approval_steps WHERE request_id=?", (request_id,)).fetchall()}
+        conn.close()
+        for who in ("manager1", "owner-x"):
+            client.post(f"/table-access/step/{steps[who]['id']}/approve", headers=auth(who))
+
+    def _status(self, request_id):
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        row = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (request_id,)).fetchone()
+        conn.close()
+        return row["status"], row["note"]
+
+    def test_写入失败时状态不是approved(self, client, monkeypatch, local_git_repo, tmp_path):
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "owner-x", monkeypatch, client)
+        monkeypatch.setattr(perm, "apply_grant_to_git",
+                            lambda *a, **k: (False, "模拟:push 被拒"))
+        self._approve_all(client, monkeypatch, row["id"])
+        status, note = self._status(row["id"])
+        assert status == "approved_pending_apply", f"写入失败却标成了 {status}"
+        assert "push 被拒" in note
+
+    def test_写入失败时不发已批准的通知(self, client, monkeypatch, local_git_repo, tmp_path):
+        """用户据"已批准"去查数会失败,然后来问为什么。通知必须说清真实状态。"""
+        sent = []
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "owner-x", monkeypatch, client)
+        monkeypatch.setattr(perm, "apply_grant_to_git", lambda *a, **k: (False, "模拟失败"))
+        monkeypatch.setattr(perm, "notify_wecom", lambda msg: sent.append(msg))
+        self._approve_all(client, monkeypatch, row["id"])
+        final = [m for m in sent if "申请" in m][-1]
+        assert "已全部批准" not in final, f"失败时却说已批准:{final}"
+        assert "还不能用" in final
+
+    def test_写入成功时仍然是approved(self, client, monkeypatch, local_git_repo, tmp_path):
+        """**这条防的是"为了让上面那条变绿而把成功路径也弄坏"。**"""
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "owner-x", monkeypatch, client)
+        self._approve_all(client, monkeypatch, row["id"])
+        status, _ = self._status(row["id"])
+        assert status == "approved"
+
+    def test_重试能把卡住的补回来(self, client, monkeypatch, local_git_repo, tmp_path):
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "owner-x", monkeypatch, client)
+        calls = {"n": 0}
+        real = perm.apply_grant_to_git
+
+        def flaky(*a, **k):
+            calls["n"] += 1
+            return (False, "第一次失败") if calls["n"] == 1 else real(*a, **k)
+
+        monkeypatch.setattr(perm, "apply_grant_to_git", flaky)
+        self._approve_all(client, monkeypatch, row["id"])
+        assert self._status(row["id"])[0] == "approved_pending_apply"
+
+        monkeypatch.setattr(perm, "INTERNAL_TOKEN", "internal-secret")
+        resp = client.post("/internal/retry-pending-applies",
+                           headers={"X-Internal-Token": "internal-secret"})
+        assert resp.status_code == 200
+        assert resp.get_json()["retried_ok"] == 1
+        assert self._status(row["id"])[0] == "approved"
+        content = _read_csv_from_bare(local_git_repo, tmp_path,
+                                      "platform/iam/table-access-grants.csv", "retry1")
+        assert "engineer1,iceberg.demo.orders,1," in content
+
+    def test_重复重试不会写重复行(self, client, monkeypatch, local_git_repo, tmp_path):
+        """重试机制迟早会被重复触发(CronJob 每小时一次)。不幂等的话,
+        csv 里会攒出一堆同样的授权行,而 OPA 读的就是它。"""
+        row = _create_table_request("engineer1", "iceberg.demo.orders", 1, "owner-x", monkeypatch, client)
+        self._approve_all(client, monkeypatch, row["id"])
+        monkeypatch.setattr(perm, "INTERNAL_TOKEN", "internal-secret")
+        for _ in range(3):
+            client.post("/internal/retry-pending-applies",
+                        headers={"X-Internal-Token": "internal-secret"})
+        content = _read_csv_from_bare(local_git_repo, tmp_path,
+                                      "platform/iam/table-access-grants.csv", "retry2")
+        assert content.count("engineer1,iceberg.demo.orders,1,") == 1
+
+    def test_重试端点要token(self, client):
+        assert client.post("/internal/retry-pending-applies").status_code == 403

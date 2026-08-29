@@ -50,9 +50,19 @@ spec:
                   # 直接 Connection refused(不是网络不通,是这条新 pod 的
                   # NetworkPolicy 规则有几秒生效延迟)。普通 --retry 默认不会
                   # 重试"连接被拒",要显式加这个选项才会重试。
-                  curl -fsS -m 30 --retry 5 --retry-delay 2 --retry-connrefused -X POST \
-                    -H "X-Internal-Token: ${INTERNAL_TOKEN}" \
-                    http://permission-request-app.permission-request-app.svc.cluster.local:8080/internal/escalation-check
+                  BASE=http://permission-request-app.permission-request-app.svc.cluster.local:8080
+                  CURL="curl -fsS -m 30 --retry 5 --retry-delay 2 --retry-connrefused -X POST -H X-Internal-Token:${INTERNAL_TOKEN}"
+
+                  $CURL $BASE/internal/escalation-check
+
+                  # 顺带重试"审批通过了但授权没写进 git"的那些(2026-08-29)。
+                  # 挂在这个已有的每小时任务里,而不是新建一个 CronJob:
+                  # 它要做的事只是"扫一遍卡住的、重试一次",和升级检查同一个
+                  # 节奏就够,不值得为它多一个组件、多一份服务目录条目。
+                  # **失败不让整个 Job 变红**——升级检查是主业,补写授权失败
+                  # 下一轮还会再试,不该因为它把告警噪音抬起来。
+                  $CURL $BASE/internal/retry-pending-applies || \
+                    echo "retry-pending-applies 这一轮失败了,下一轮会再试" 
               resources:
                 requests:
                   cpu: 20m

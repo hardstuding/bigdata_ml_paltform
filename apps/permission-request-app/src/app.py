@@ -22,9 +22,13 @@ docs/decisions/044-tiered-approval-workflow.md(表访问分级审批,ADR-040
 
 表访问分级审批这部分范围边界(ADR-044 详细记录):这里只做"决策与留痕"
 ——按 ADR-040 原文规则算出谁要审批、记录每一步的批准/拒绝,最终写一份
-`table-access-grants.csv` 进 git。**不做**真正的 Trino 查询拦截,那是
-Trino OPA 细粒度权限(ADR-028"后续")的独立工作,现在还没有任何执行引擎
-去消费这份 grants 数据。
+`table-access-grants.csv` 进 git。
+
+**这份 grants 数据是真的被消费的**:Trino 的访问控制走 OPA(ADR-051),
+`opa-grants-sync` 每 5 分钟把这个 csv 推给 OPA,没有 grant 的表查询会被
+`PERMISSION_DENIED` 拒掉;行级过滤和列级脱敏(ADR-063)也按同一份数据的
+`security_level` 生效。这个模块顶部原本写着"不做真正的拦截、没有任何执行
+引擎消费这份数据",那是 ADR-051 之前的状态,**2026-08-29 更正**。
 """
 import base64
 import csv
@@ -561,11 +565,30 @@ def finalize_table_request_if_done(conn, request_id: int):
     if blocking and all(s == "approved" for s in blocking):
         req = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (request_id,)).fetchone()
         ok, note = apply_grant_to_git(req["username"], req["table_fqn"], req["security_level"])
+        # **必须看 ok。** 2026-08-29 之前这里接收了 ok 却从来不用,状态无条件
+        # 写成 approved,还给用户发"已全部批准"——**授权根本没写进 git 也照样
+        # 报成功**。而 OPA 读的就是那个 csv,所以用户会拿到一个"批准了但查不了"
+        # 的结果,而系统显示一切正常。在权限系统里这是最不能有的一类 bug:
+        # 它同时骗了用户和审计。
+        #
+        # 决策(审批人点了同意)和执行(授权落到 git)是两件事,失败时要能
+        # 区分开:决策不该因为执行失败而丢掉,否则得让所有审批人重审一遍。
+        # 所以引入 approved_pending_apply 这个中间态——决策已定、执行待重试。
+        status = "approved" if ok else "approved_pending_apply"
         conn.execute(
-            "UPDATE table_access_requests SET status='approved', decided_at=?, note=? WHERE id=?",
-            (datetime.now(timezone.utc).isoformat(), note, request_id),
+            "UPDATE table_access_requests SET status=?, decided_at=?, note=? WHERE id=?",
+            (status, datetime.now(timezone.utc).isoformat(), note, request_id),
         )
-        notify_wecom(f"你的表访问申请已全部批准:{req['table_fqn']}(安全等级 {req['security_level']})")
+        if ok:
+            notify_wecom(f"你的表访问申请已全部批准:{req['table_fqn']}(安全等级 {req['security_level']})")
+        else:
+            # 通知里**不要说"已批准"** —— 用户据此去查数会失败,然后来问
+            # "为什么批了还查不了"。说清楚现在是什么状态、要等什么。
+            notify_wecom(
+                f"表访问申请已通过审批,但授权写入失败,还不能用:{req['table_fqn']}"
+                f"(安全等级 {req['security_level']})。原因:{note}。"
+                f"平台会自动重试;急的话联系平台组。"
+            )
         return
     # 还没到终态,可能前一级刚批完,看看要不要激活下一级。
     activate_next_step(conn, request_id)
@@ -735,10 +758,11 @@ h1 { font-size: 1.3em; } code { background: #f5f5f5; padding: 1px 5px; border-ra
 <p>首页"待我审批"只会显示<b>轮到你</b>的申请——比如你是某张表的二级审批人,一级还没审完之前你在这里看不到这条申请,不用自己判断"是不是该我审了"。</p>
 
 <h2>范围边界(如实说明,别误解)</h2>
-<p>这套流程现在只负责<b>决策和留痕</b>——全部批准后会把这条授权记录写进
-<code>platform/iam/table-access-grants.csv</code>,但<b>不会真的去拦截 Trino 查询</b>,
-没批准也一样能连 Trino 查数据(细粒度权限执行是 Trino OPA 的独立工作,还没做)。
-这是当前阶段刻意的范围收窄,不是 bug。</p>
+<p>审批通过后,授权会写进 <code>platform/iam/table-access-grants.csv</code>,
+Trino 的访问控制(OPA)读的就是这份数据 —— <b>批准之后才查得到,没批准会被拒绝</b>,
+不是只做个记录。行级过滤和列级脱敏也按同一份授权生效。</p>
+<p>授权同步有几十秒延迟(每 5 分钟一轮同步,通常更快)。刚批完立刻查还被拒的话,
+稍等一下再试。</p>
 </body></html>
 """
 
@@ -1218,6 +1242,55 @@ def escalation_check():
     conn.commit()
     conn.close()
     return {"reminded": reminded, "escalated": escalated}
+
+
+@app.route("/internal/retry-pending-applies", methods=["POST"])
+def retry_pending_applies():
+    """把卡在 `approved_pending_apply` 的申请重新写一次 git。
+
+    **为什么必须有这个端点**:2026-08-29 修"审批假成功"时引入了
+    `approved_pending_apply` 这个中间态(决策已定、授权写入失败)。如果只
+    加状态不加重试,结果是把一个"假成功"换成一个"永远卡住",而且通知里
+    还写着"平台会自动重试"——那就成了另一句谎话。
+
+    幂等:重试成功才改状态;失败就留在原状态、更新 note,下一轮再试。
+    重复跑不会重复写(apply_grant_to_git 内部是"读 csv → 没有才追加")。
+    """
+    if not INTERNAL_TOKEN or request.headers.get("X-Internal-Token") != INTERNAL_TOKEN:
+        abort(403)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    fixed, still_failing = 0, 0
+
+    # 表访问授权
+    for row in conn.execute(
+        "SELECT * FROM table_access_requests WHERE status='approved_pending_apply'"
+    ).fetchall():
+        ok, note = apply_grant_to_git(row["username"], row["table_fqn"], row["security_level"])
+        if ok:
+            conn.execute("UPDATE table_access_requests SET status='approved', note=? WHERE id=?",
+                         (note, row["id"]))
+            notify_wecom(f"表访问授权已补写成功,现在可以用了:{row['table_fqn']}")
+            fixed += 1
+        else:
+            conn.execute("UPDATE table_access_requests SET note=? WHERE id=?", (note, row["id"]))
+            still_failing += 1
+
+    # 加组申请(同一个状态,同一个原因)
+    for row in conn.execute(
+        "SELECT * FROM requests WHERE status='approved_pending_apply'"
+    ).fetchall():
+        ok, note = apply_to_git(row["username"], row["group_name"])
+        if ok:
+            conn.execute("UPDATE requests SET status='applied', note=? WHERE id=?", (note, row["id"]))
+            fixed += 1
+        else:
+            conn.execute("UPDATE requests SET note=? WHERE id=?", (note, row["id"]))
+            still_failing += 1
+
+    conn.commit()
+    conn.close()
+    return {"retried_ok": fixed, "still_failing": still_failing}
 
 
 @app.route("/internal/reclaim-expired", methods=["POST"])
