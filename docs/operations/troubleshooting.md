@@ -73,6 +73,58 @@ fail-closed 的组件配好 rollout,这次真的兜住了。
 - [cloud-full 这台机器的 k3s 集群不是这个项目独占的](#cloud-full-这台机器的-k3s-集群不是这个项目独占的)
 - [idle-shutdown-watchdog 开机后用旧时间戳误判空闲,几分钟内把机器自己关掉](#idle-shutdown-watchdog-开机后用旧时间戳误判空闲几分钟内把机器自己关掉)
 - [ArgoCD dex-server 在真实压力下 SIGSEGV,内存限制设小了](#argocd-dex-server-在真实压力下-sigsegv内存限制设小了)
+- [改 resources 之后 ArgoCD 全绿,流量却还在旧 pod 上](#改-resources-之后-argocd-全绿流量却还在旧-pod-上)
+- [`kubectl get pods -A` 里一大片 Error,但其实什么都没坏](#kubectl-get-pods--a-里一大片-error但其实什么都没坏)
+
+
+
+### 改 resources 之后 ArgoCD 全绿,流量却还在旧 pod 上
+
+**症状**:调大了某个 Deployment 的 memory,push、ArgoCD 显示 Synced/Healthy,
+但行为完全没变 —— 因为**流量还在旧 pod 上,新的那个根本没建出来**。
+
+**定位**:低配额命名空间 + `RollingUpdate`。滚动更新要新旧 pod **同时**占
+配额,新旧加起来一超,新 ReplicaSet 就卡在 `exceeded quota`。这个失败是
+**静默的**:Deployment 的 `.status` 里看得到,ArgoCD 的健康判断看不到。
+
+```bash
+kubectl -n <ns> describe rs | grep -i quota
+kubectl -n <ns> get resourcequota -o yaml
+```
+
+**处置**:先算一下新旧加起来会不会超配额;超了就把这个 Deployment 改成
+`strategy: Recreate`(mlflow 已经这么改了,它的命名空间只有 3Gi),或者
+先调大配额。哪些命名空间是低配额,看
+`platform/resource-quotas/manifests/quotas.yaml`。
+
+**2026-08 实测**:真实卡了一个多小时才发现,全程 ArgoCD 是绿的。
+
+### `kubectl get pods -A` 里一大片 Error,但其实什么都没坏
+
+**症状**:开机后一看,几十个 Error 的 pod,探针、采集任务全红,像是塌了。
+
+**定位**:**pods 列表里的 Error 是「过去某一刻」的快照,不是现在的状态。**
+CronJob 会保留最近几次失败的 Job pod(`failedJobsHistoryLimit`),所以一次
+短暂故障会在列表里留下一片红,而且会一直留着。
+
+判断"现在到底好没好",看的是每个 CronJob **最近一次**那个 pod:
+
+```bash
+kubectl get pods -n <ns> --sort-by=.metadata.creationTimestamp --no-headers \
+  | grep "<cronjob名>-" | tail -1
+```
+
+**处置**:最近一次是 `Completed` 就没事,清掉历史失败的即可:
+
+```bash
+kubectl delete pods -A --field-selector status.phase=Failed
+```
+
+**2026-08-29 实测**:停机前看到 50+ 个 Error(六条黄金链路探针全红、
+OpenMetadata 采集全红),查下来全是两小时前 Trino coordinator 重启循环那个
+窗口的残留 —— Trino 一倒,依赖它的探针和采集一起红;它恢复之后,下一轮
+定时执行就都绿了。**当时如果按"列表里有红的"下判断,会去排查一个已经不
+存在的故障。**
 
 ### ArgoCD / GitOps 层
 
@@ -1226,11 +1278,36 @@ Pod 的 `imagePullPolicy: IfNotPresent` 会直接用本地这份。
   - **仍然没有逐个验证到底的**:`argo-workflows`/`trino`/`superset` 也
     是自动 discovery,理论上有同一类潜在问题,但当时实测目前没有崩溃
     重启(懒验证,只在真登录时触发),如实记录不是回避。
-  - **副作用记录**:调试过程中用 `kcadm set-password` 把 cloud-full 上
-    Keycloak `platform` realm 的 `admin` 用户密码重设成了
-    `TestLogin2026Aug`(原密码丢失/不确定)——这个新密码只对 cloud-full
-    生效,和 local-lite 环境 `secrets/generated-credentials.txt` 里记的
-    值是两回事。
+  - **副作用记录**:调试过程中用 `kcadm set-password` 重设过 cloud-full 上
+    Keycloak `platform` realm 的 `admin` 密码(原密码丢失/不确定)。**密码
+    值本身不再写在文档里**,原因和取法见下面「cloud-full 的 Keycloak admin
+    密码」那一节。
+
+
+### cloud-full 的 Keycloak admin 密码
+
+**2026-08-29 发现的问题**:这个密码的明文值曾经写在 4 个文档文件里,而
+**这个 git 仓库是公开的**(`github.com/hardstuding/bigdata_ml_paltform`)。
+已从当前版本里去掉,但 **git 历史里还在,去不掉** —— 唯一真正有效的处置是
+**换掉这个密码**,不是改文档。
+
+**下次开机要做的第一件事之一**:
+
+```bash
+KC_ADMIN_PW=$(kubectl -n keycloak get secret keycloak-admin -o jsonpath='{.data.password}' | base64 -d)
+kubectl -n keycloak exec keycloak-keycloakx-0 -- /opt/keycloak/bin/kcadm.sh config credentials \
+  --server http://localhost:8080/auth --realm master --user admin --password "$KC_ADMIN_PW"
+# 换成一个新的强密码,并且**只记在本地**(比如 secrets/,那个目录不进 git)
+kubectl -n keycloak exec keycloak-keycloakx-0 -- /opt/keycloak/bin/kcadm.sh set-password \
+  -r platform --username admin --new-password '<新密码>'
+```
+
+**取当前值**:realm 里那个 `admin` 用户的密码是人工设的,集群里没有存明文
+可读的副本 —— 忘了只能按上面的步骤重设。master realm 的管理员密码则在
+`keycloak-admin` 这个 Secret 里,上面第一条命令就是取它。
+
+**教训**:"临时调试改的密码"最容易被顺手记进文档,而文档是会被提交的。
+凡是真实环境的口令,记在 `secrets/`(不进 git)或者干脆不记、需要时重设。
 
 ### Superset OAuth 登录卡在最后一步,报 "Invalid URL 'openid-connect/userinfo'"
 

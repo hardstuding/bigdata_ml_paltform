@@ -26,17 +26,16 @@
 
 1. **分析师的浏览器 SQL 入口** —— 方案已定([ADR-084](../decisions/084-analyst-sql-workbench.md)),
    门户已改。**差实机验证**:SQL Lab 里的 Trino 连接没单独验过 impersonation。
-2. **门户升级成角色工作台** —— 还没开始。依赖 permission-request-app 开一个
-   只读接口(现在没有)。
+2. **门户升级成角色工作台** —— 权限那一半做完(我的表权限 / 待我审批),
+   **差实机验证**。还没做:作业详情页(日志/参数/镜像/资源/取消/重跑)。
 3. **作业发布从单文件升级成可维护流程** —— 还没开始。
-4. **建表注册工具 / 审批体验** —— 还没开始。
+4. **建表注册工具** —— 还没开始。
 
-**同时在推的**:文档职责重构(P1.5 的一项)。已做:能力表重写成
-状态+验证级别+最后验证+证据(并加了 CI 自洽检查)、这份文件收敛回一页。
-还没做:使用指南按角色和任务拆分、Runbook 每条统一成
-触发条件/影响/前置检查/操作/验证/回滚。
+**已做完的**:文档职责重构(能力表 / 这份文件 / 使用指南 / 两份操作手册,
+详见 roadmap P1.5);审批体验 7 项里的 6 项(只剩"续期");门户角色工作台
+的权限那一半。
 
-## 下次开机要验的三件事(都写好了判据,不用现想)
+## 下次开机要验的五件事(都写好了判据,不用现想)
 
 **1. SQL Lab 的 impersonation** —— ADR-084 唯一没验的一环:
 
@@ -60,6 +59,20 @@ alice 登录门户 → 首页应出现「我的表权限」,快到期的排最�
 **3. `internal-packages` 的定时发布路径** —— 手工触发验过,CronJob 按点
 触发从没观察到过。
 
+**4. 审批体验那一批**(纯 UI/逻辑改动,本地 95 个测试全绿,但没在真实
+浏览器里看过):
+
+```
+页面上时间显示成本地时区、3 天内是"N 小时前"  ← JS 没跑起来的话会退回
+                                                显示原始 UTC 串,不会报错
+拒绝一条申请不填原因 → 应该被挡住
+2 级表不写理由提交   → 应该被挡住
+催办按钮 → 企微收到一条;24 小时内再点 → 429
+```
+
+**5. 门户「SQL 工作台」那张卡的地址对不对** —— 端口后缀要在 path 前面
+(`…superset.<域名>:32460/sqllab/`),拼反了在 local-lite 上测不出来。
+
 验过了才能把 capability-matrix 里对应那格改掉 ——
 `scripts/check-capability-matrix.py` 会拦住"没验就标 ✅"。
 
@@ -75,36 +88,26 @@ alice 登录门户 → 首页应出现「我的表权限」,快到期的排最�
 
 ### 云主机状态
 
-**已停机**(2026-08-29,经济模式 `StoppedMode=StopCharging`,不产生计算
-费用;磁盘照常保留)。开机 `scripts/32-start-cloud-vm.sh`,停机
-`scripts/26-stop-cloud-vm-economical.sh`。
+**已停机**(2026-08-29,经济模式,不产生计算费用;磁盘保留)。
+开机 `scripts/32-start-cloud-vm.sh`,停机 `scripts/26-stop-cloud-vm-economical.sh`。
+停机前核对过:77 个 ArgoCD Application 全部 Synced/Healthy,零异常 pod。
 
-停机前最后一次核对:77 个 ArgoCD Application 全部 Synced/Healthy,零异常
-pod。当时 `kubectl get pods -A` 里堆着 50+ 个 Error 看着很吓人,查下来是
-两小时前 Trino coordinator 重启循环窗口的历史残留 —— **每条黄金链路探针、
-每个采集 CronJob 的最近一次都是 Completed**。
+> 开机后如果看到一大片 Error 的 pod,先看
+> [troubleshooting 里那条](../operations/troubleshooting.md#kubectl-get-pods--a-里一大片-error但其实什么都没坏)
+> —— 多半是历史残留,不是活故障。
 
-> **判断"现在到底好没好"的方法**:pods 列表里的 Error 是**过去某一刻**的
-> 快照,不是现在的状态。要看的是每个 CronJob **最近一次**那个 pod。
-
-**这台机器不是我们独占的** —— 详见 `CLAUDE.md` 里那节:任何会让 k3s 停掉/
-重装、停机释放、或改集群级资源(CRD/ClusterRole/ingress/cert-manager)的
-操作,必须先停下来问 zhenghe。
+**这台机器不是我们独占的**,`CLAUDE.md` 里那节列了哪些操作必须先问 zhenghe。
 
 ---
 
 ## 以前的轮次
 
-全部在 [`docs/journal/`](../journal/) 里,原文照搬,一个字没删:
-2026-08-19 ~ 08-23 那 6 轮在
+全部在 [`docs/journal/`](../journal/),原文照搬:08-19 ~ 08-23 那 6 轮在
 [`current-work-archive-2026-08.md`](../journal/current-work-archive-2026-08.md),
 08-28 ~ 08-29 那 8 轮在 [`2026-08.md`](../journal/2026-08.md) 末尾。
 
-**这份文件只留"现在"。** 开头那条"不能再退化成日记"的规则失效过两次:
-2026-08-26 那次是 647 行里 500 行是历史;2026-08-29 这次是搬完不到三天
-就又堆了 8 个「这一轮」小节、203 行。规则写在文件里挡不住复发,所以
-**判断标准改成一句可执行的**:这份文件超过 ~150 行,基本就是又开始写
-日记了。
+**这份文件只留"现在"。** 判断标准:超过 ~150 行基本就是又开始写日记了
+(这条规则失效过两次,写在文件顶上挡不住复发,所以改成一个可以数的数)。
 
 ## 正在运行的后台任务
 
@@ -150,27 +153,10 @@ pod。当时 `kubectl get pods -A` 里堆着 50+ 个 Error 看着很吓人,查�
   一个旧的操作快照上不断 retry,用它缓存的旧 source 把已经修好的资源
   改回去。处置方式(本次会话实测有效)见
   `docs/journal/2026-08.md`,搜"卡住的旧操作"。
-- ~~`scripts/07-fix-trino-liveness-probe.sh` 必须在每次 Trino pod
-  template 变更后重跑~~——**已解决(2026-08-20)**:`apps/
-  trino-liveness-fix/` 这个 CronJob 每 5 分钟自动巡检并修复,不需要人
-  记得手动重跑了,见 docs/project/roadmap.md 2.3。
-- **cloud-full 上 Keycloak `platform` realm 的 `admin` 密码**是
-  `TestLogin2026Aug`,和 `secrets/generated-credentials.txt`(那份是
-  local-lite 的)不是一回事。
-- **算法链路"训练 → MLflow"和"Feast 特征"都已验证,"notebook 触发"和
-  "Argo Workflows 编排训练"是真空白**:JupyterHub/MLflow/Spark
-  Operator/Feast/Argo Workflows/Kafka 都已部署验证,
-  `scripts/09-train-demo-model.sh` 和 `scripts/19-feast-feature-pipeline.sh`
-  分别证明了这两段真实可用。剩下两段不是"没重新验证"而是从没实现过,
-  见上面"下一步唯一动作"里的说明。
-- **低配额命名空间改 resources 字段要格外小心**:mlflow 命名空间的
-  ResourceQuota 只有 3Gi,RollingUpdate 需要新旧 pod 同时占配额,改大
-  resources 时如果新旧加起来超配额,新 ReplicaSet 会静默卡在
-  "exceeded quota",ArgoCD 显示 Synced/Healthy 但实际流量还在旧 pod
-  上——这次真实卡了一个多小时才发现。mlflow 已经改成 `Recreate` 策略
-  规避,其它低配额命名空间(检查 `platform/resource-quotas/manifests/
-  quotas.yaml`)如果也要改 resources,先算一下新旧加起来会不会超配额,
-  或者一并考虑改成 Recreate。
+- **cloud-full 的 Keycloak admin 密码要换掉**(2026-08-29 发现):它的明文
+  值曾经写在 4 个文档文件里,而这个 git 仓库是**公开**的。当前版本已经去掉,
+  但 **git 历史里去不掉** —— 唯一有效的处置是换密码。步骤在
+  [troubleshooting](../operations/troubleshooting.md#cloud-full-的-keycloak-admin-密码)。
 
 ## 结束一段工作前必须确认(照着过一遍,不要跳)
 
