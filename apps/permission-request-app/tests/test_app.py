@@ -1014,13 +1014,57 @@ class TestReadOnlyApi:
         assert body["expiring_soon"] == []
         assert body["grants"][0]["days_left"] is None
 
-    def test_读不到_grants_返回空而不是报错(self, client, monkeypatch):
-        # 门户首页每次刷新都会调它,数据源缺失时整页 500 是不可接受的。
+    def _no_sources(self, monkeypatch):
+        """把三条数据源全掐掉。**包括那个 raw URL** —— 不掐的话这条测试会
+        真的去打 GitHub,既慢又看网络脸色。"""
         monkeypatch.setenv("GRANTS_CSV_PATH", "/nonexistent/grants.csv")
         monkeypatch.setattr(perm, "GIT_TOKEN", "")
+        monkeypatch.setattr(perm, "GRANTS_RAW_URL", "http://127.0.0.1:1/nope.csv")
+        perm._GRANTS_CACHE.update(rows=None, at=0)
+
+    def test_读不到_grants_返回空而不是报错(self, client, monkeypatch):
+        # 门户首页每次刷新都会调它,数据源缺失时整页 500 是不可接受的。
+        self._no_sources(monkeypatch)
         r = client.get("/api/my-permissions?user=alice", headers=self._hdr())
         assert r.status_code == 200
         assert r.get_json()["grants"] == []
+
+    def test_读不到_和_这个人没权限_必须能区分开(self, client, monkeypatch, tmp_path):
+        """**这条是 2026-08-30 开机验收当场抓到的 bug 的回归测试。**
+
+        第一版只有"本地文件 → git clone(要 GIT_TOKEN)"两条路,而 GIT_TOKEN
+        是人手工配的、集群上根本没配 —— 于是这个接口永远返回空 grants,门户上
+        「我的表权限」永远不显示。而"没有权限"和"读不到"返回的是**一模一样的
+        空列表**,从外面完全看不出区别。
+        """
+        self._no_sources(monkeypatch)
+        unavailable = client.get("/api/my-permissions?user=alice",
+                                 headers=self._hdr()).get_json()
+        assert unavailable["available"] is False
+        assert unavailable["source"] == "unavailable"
+
+        # 读得到、但这个人确实没有 grant
+        self._grants_file(tmp_path, monkeypatch, [
+            {"username": "bob", "table_fqn": "t.x", "security_level": "1", "expires_at": ""}])
+        got = client.get("/api/my-permissions?user=alice", headers=self._hdr()).get_json()
+        assert got["available"] is True and got["grants"] == []
+
+    def test_没有本地文件时走公开_raw_不需要凭据(self, client, monkeypatch, tmp_path):
+        # 和 opa-grants-sync 那个 CronJob 同一条路:仓库是公开的,拉这个
+        # 文件不需要任何 token。
+        monkeypatch.setenv("GRANTS_CSV_PATH", "/nonexistent/grants.csv")
+        monkeypatch.setattr(perm, "GIT_TOKEN", "")
+        perm._GRANTS_CACHE.update(rows=None, at=0)
+        csv_text = ("username,table_fqn,security_level,granted_at,expires_at\n"
+                    "alice,iceberg.demo.orders,1,2026-01-01T00:00:00+00:00,\n")
+        import io
+        monkeypatch.setattr(perm.urllib.request, "urlopen",
+                            lambda *a, **k: io.BytesIO(csv_text.encode()))
+        if True:
+            body = client.get("/api/my-permissions?user=alice",
+                              headers=self._hdr()).get_json()
+        assert body["source"] == "raw"
+        assert [g["table"] for g in body["grants"]] == ["iceberg.demo.orders"]
 
     def test_待我审批只返回轮到我的那一步(self, client):
         # 分级审批链里,后面几步的审批人在轮到之前不该看到这条申请。

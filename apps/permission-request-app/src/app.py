@@ -39,6 +39,7 @@ import sqlite3
 import subprocess
 import tempfile
 import time
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1807,20 +1808,53 @@ _GRANTS_CACHE = {"rows": None, "at": 0.0}
 _GRANTS_CACHE_TTL = 60
 
 
-def _read_grants_rows():
-    """读 grants.csv。**优先读本地副本**(挂进来的话),读不到再退回 git。
+# grants.csv 的只读来源。**和 opa-grants-sync 那个 CronJob 用同一个 URL**
+# (apps/opa/manifests/grants-sync-cronjob.yaml)—— 仓库是公开的,拉这个文件
+# 不需要任何凭据。
+#
+# 2026-08-30 实测踩到:第一版只有"本地文件 → git clone(要 GIT_TOKEN)"两条
+# 路,而 GIT_TOKEN 是要人手工配的、集群上根本没配 —— 于是
+# `/api/my-permissions` **永远返回空 grants**,门户上「我的表权限」那一栏
+# 永远不显示。而"这个人没有权限"和"读不到数据"返回的是**一模一样的空列表**,
+# 从外面完全看不出区别。开机验收脚本第一次跑就抓到了这条。
+GRANTS_RAW_URL = os.environ.get(
+    "GRANTS_RAW_URL",
+    "https://raw.githubusercontent.com/hardstuding/bigdata_ml_paltform/main/"
+    "platform/iam/table-access-grants.csv")
 
-    读不到就返回空列表,不抛错:门户上少一块内容,好过整页 500。
+
+def _read_grants_rows():
+    """读 grants.csv,返回 (行列表, 来源)。
+
+    来源取值:`local` / `raw` / `git` / `cache` / `unavailable`。
+    **`unavailable` 和"读到了但这个人没有 grant"必须能被区分开** —— 这正是
+    这个函数第一版栽的地方。
+
+    读不到不抛错:门户上少一块内容,好过整页 500;但**要说出来**。
     """
     local = Path(os.environ.get("GRANTS_CSV_PATH", "/data/table-access-grants.csv"))
     if local.exists():
         with open(local, newline="") as f:
-            return list(csv.DictReader(f))
-    if not GIT_TOKEN:
-        return []
+            return list(csv.DictReader(f)), "local"
+
     now = time.time()
     if _GRANTS_CACHE["rows"] is not None and now - _GRANTS_CACHE["at"] < _GRANTS_CACHE_TTL:
-        return _GRANTS_CACHE["rows"]
+        return _GRANTS_CACHE["rows"], "cache"
+
+    # 公开仓库的 raw 文件,不需要凭据 —— 和 opa-grants-sync 同一条路。
+    try:
+        req = urllib.request.Request(GRANTS_RAW_URL,
+                                     headers={"User-Agent": "permission-request-app"})
+        text = urllib.request.urlopen(req, timeout=8).read().decode("utf-8")
+        rows = list(csv.DictReader(text.splitlines()))
+        _GRANTS_CACHE.update(rows=rows, at=now)
+        return rows, "raw"
+    except Exception:
+        pass
+
+    if not GIT_TOKEN:
+        return (_GRANTS_CACHE["rows"] or []), (
+            "cache" if _GRANTS_CACHE["rows"] else "unavailable")
     tmpdir = tempfile.mkdtemp()
     try:
         auth_url = REPO_URL.replace("https://", f"https://{GIT_TOKEN}@")
@@ -1832,11 +1866,11 @@ def _read_grants_rows():
         with open(csv_path, newline="") as f:
             rows = list(csv.DictReader(f))
         _GRANTS_CACHE.update(rows=rows, at=now)
-        return rows
+        return rows, "git"
     except Exception:
-        # 缓存里有旧数据就先用旧的 —— 一次 git 抖动不该让首页上"我的权限"
-        # 整块消失。
-        return _GRANTS_CACHE["rows"] or []
+        # 缓存里有旧数据就先用旧的 —— 一次抖动不该让首页上"我的权限"整块消失。
+        return (_GRANTS_CACHE["rows"] or []), (
+            "cache" if _GRANTS_CACHE["rows"] else "unavailable")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1859,8 +1893,9 @@ def api_my_permissions():
         soon_days = 30
 
     now = datetime.now(timezone.utc)
+    rows, source = _read_grants_rows()
     grants = []
-    for row in _read_grants_rows():
+    for row in rows:
         if (row.get("username") or "").strip() != user:
             continue
         expires_at = (row.get("expires_at") or "").strip()
@@ -1882,6 +1917,10 @@ def api_my_permissions():
         "user": user,
         "grants": grants,
         "expiring_soon": [g for g in grants if g["expiring_soon"]],
+        # **调用方必须能区分"这个人没有 grant"和"我读不到 grants"** ——
+        # 两者返回的 grants 都是空列表,而含义完全相反。
+        "source": source,
+        "available": source != "unavailable",
     }
 
 

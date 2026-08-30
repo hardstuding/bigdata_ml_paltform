@@ -174,6 +174,11 @@
 
   {# 角色工作台:普通用户看"我的权限",审批人额外看到"待我审批"。
      permission-request-app 不可用时整块不显示 —— 首页少一块,好过整页 500。 #}
+  {% if permissions.warning %}
+  <div class="panel" style="border-color: var(--warn); padding: 12px 15px; margin-bottom: 22px">
+    <span class="note warn">⚠ {{ permissions.warning }}</span>
+  </div>
+  {% endif %}
   {% if permissions.available and permissions.grants %}
   <section>
     <div class="head"><h2>我的表权限</h2>

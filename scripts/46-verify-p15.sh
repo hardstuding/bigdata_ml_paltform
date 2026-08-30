@@ -124,14 +124,34 @@ print(urllib.request.urlopen(req, timeout=20).read().decode())" 2>/dev/null || t
       && ok "平台组看得到全部工具" \
       || bad "平台组也看不到 ArgoCD(规则配反了?)"
 
-    # 我的表权限:要求 permission-request-app 的 token 已经复制过来
-    if kubectl -n platform-portal get secret permission-request-app-internal >/dev/null 2>&1; then
-      ok "门户拿到了 permission-request-app 的内部 token"
-      echo "$ADMIN_HTML" | grep -q "我的表权限" \
-        && ok "「我的表权限」渲染出来了" \
-        || skip "「我的表权限」没显示 —— admin 可能确实没有表权限,不算失败"
-    else
+    # 我的表权限:要求 permission-request-app 的 token 已经复制过来。
+    #
+    # **用 analyst001 而不是 admin 来验。** 第一版拿 admin 测,而 admin 在
+    # table-access-grants.csv 里一条 grant 都没有 —— 于是这一栏永远不显示,
+    # 脚本只能报"跳过",等于什么都没验到。选一个**真的有 grant 的用户**,
+    # 这条才有意义。
+    if ! kubectl -n platform-portal get secret permission-request-app-internal >/dev/null 2>&1; then
       bad "platform-portal 命名空间里没有 permission-request-app-internal —— 跑 scripts/00-generate-secrets.sh"
+    else
+      ok "门户拿到了 permission-request-app 的内部 token"
+      GRANTEE="$(awk -F, 'NR>1 && $1!="" {print $1; exit}' platform/iam/table-access-grants.csv 2>/dev/null)"
+      if [ -z "$GRANTEE" ]; then
+        skip "table-access-grants.csv 里没有任何 grant,验不了「我的表权限」"
+      else
+        G_HTML="$(kubectl -n platform-portal exec "$P_POD" -- python3 -c "
+import urllib.request
+req = urllib.request.Request('http://localhost:8080/', headers={
+    'X-Forwarded-User': '$GRANTEE',
+    'X-Forwarded-Access-Token': '$(mktoken "$GRANTEE" '["data-analysts"]')'})
+print(urllib.request.urlopen(req, timeout=20).read().decode())" 2>/dev/null || true)"
+        echo "$G_HTML" | grep -q "我的表权限" \
+          && ok "「我的表权限」对有 grant 的用户($GRANTEE)渲染出来了" \
+          || bad "「我的表权限」对 $GRANTEE 也没显示 —— 门户没读到 grants"
+        FIRST_TABLE="$(awk -F, -v u="$GRANTEE" 'NR>1 && $1==u {print $2; exit}' platform/iam/table-access-grants.csv)"
+        [ -n "$FIRST_TABLE" ] && { echo "$G_HTML" | grep -q "$FIRST_TABLE" \
+          && ok "表名 $FIRST_TABLE 真的出现在页面上(不是空表格)" \
+          || bad "页面上没有 $FIRST_TABLE —— 渲染了标题但内容是空的"; }
+      fi
     fi
   fi
 fi

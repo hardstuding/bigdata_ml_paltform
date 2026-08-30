@@ -468,9 +468,16 @@ def my_permissions(username):
     """
     data = _perm_api("/api/my-permissions", username)
     if data is None:
-        return {"available": False, "grants": [], "expiring_soon": []}
+        return {"available": False, "grants": [], "expiring_soon": [], "warning": None}
+    # 上游明说了它读不到 grants 数据源时,**要说出来**,不能显示成"你没有
+    # 任何表权限" —— 两者返回的都是空列表,含义完全相反。
+    # 2026-08-30 开机验收当场撞到过一次(GIT_TOKEN 没配,接口永远返回空)。
+    if data.get("available") is False:
+        return {"available": True, "grants": [], "expiring_soon": [],
+                "warning": "读不到表权限数据(权限门户那边取不到 grants 记录),"
+                           "这里显示的空白不代表你没有权限。"}
     return {"available": True, "grants": data.get("grants", []),
-            "expiring_soon": data.get("expiring_soon", [])}
+            "expiring_soon": data.get("expiring_soon", []), "warning": None}
 
 
 def my_approvals(username):

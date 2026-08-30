@@ -931,3 +931,32 @@ class TestRoleAwareToolList:
         n_few = int(re.search(r"(\d+) 个工具", few).group(1))
         n_all = int(re.search(r"(\d+) 个工具", all_).group(1))
         assert n_few < n_all
+
+
+class TestGrantsUnavailableIsNotEmptyGrants:
+    """"读不到 grants"不能显示成"你没有任何表权限"。
+
+    **2026-08-30 开机验收当场抓到的**:permission-request-app 那边 GIT_TOKEN
+    没配、又没有别的数据源,于是接口永远返回空 grants,门户上那一栏永远
+    不显示 —— 而"这个人没有权限"和"读不到数据"返回的**是一模一样的空列表**。
+    """
+
+    def test_上游说读不到时_门户给出警告(self):
+        with patch.object(portal, "_perm_api",
+                          return_value={"grants": [], "expiring_soon": [],
+                                        "available": False, "source": "unavailable"}):
+            r = portal.my_permissions("alice")
+        assert r["warning"] and "不代表你没有权限" in r["warning"]
+
+    def test_上游正常但这个人确实没权限_不报警(self):
+        with patch.object(portal, "_perm_api",
+                          return_value={"grants": [], "expiring_soon": [],
+                                        "available": True, "source": "raw"}):
+            r = portal.my_permissions("alice")
+        assert r["warning"] is None
+
+    def test_老版本上游没有_available_字段时不报警(self):
+        # 兼容:字段缺失当成正常,不要因为上游还没升级就吓唬人。
+        with patch.object(portal, "_perm_api",
+                          return_value={"grants": [], "expiring_soon": []}):
+            assert portal.my_permissions("alice")["warning"] is None
