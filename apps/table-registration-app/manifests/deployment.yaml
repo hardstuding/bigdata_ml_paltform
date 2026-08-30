@@ -51,7 +51,7 @@ spec:
           # apps/permission-request-app/deployment.yaml 顶部的详细说明,
           # 同一次重新构建),对应 commit
           # 8fbb640b396670cfdd08ae7beef4d322aae93421。
-          image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/table-registration-app:49d1d1cd0392a161a22a9184659ebdba1159c176
+          image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/table-registration-app:fe73e92b7c46845bb569028426c2e00644b3ab4b
           env:
             - name: DB_PATH
               value: /data/registrations.db
