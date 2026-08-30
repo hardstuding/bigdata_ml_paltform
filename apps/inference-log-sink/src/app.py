@@ -59,12 +59,28 @@ def parse_event(headers, body):
     ce = {k[3:].lower(): v for k, v in headers.items() if k.lower().startswith("ce-")}
     # ce-type 形如 org.kubeflow.serving.inference.request / .response
     ev_type = (ce.get("type") or "").rsplit(".", 1)[-1] or "unknown"
+    # **字段来源是 2026-08-30 实测抓下来的,不是照 CloudEvents 规范推的。**
+    # 第一版按"直觉"取了 ce-source 和 ce-modelid,实机跑完发现:
+    #   - `ce-source` = "http://localhost:9081/" —— agent sidecar 自己的
+    #     本地地址,对"这次调的是哪个模型"这个问题毫无信息量
+    #   - `ce-modelid` **根本不存在**,于是 model 列一直是空字符串
+    # 也就是说留痕表能存下来,但**查不出这次推理调的是哪个模型** —— 而
+    # ADR-085 记这份数据的全部目的就是特征漂移分析,不知道模型等于白记。
+    #
+    # KServe 0.19 的 agent 实际发的 ce-* 头(实测,一条不多一条不少):
+    #   ce-component / ce-endpoint / ce-id / ce-inferenceservicename /
+    #   ce-metadata / ce-namespace / ce-recordedtime / ce-source /
+    #   ce-specversion / ce-time / ce-type
+    # 模型标识在 `ce-inferenceservicename`。
     return {
         "request_id": ce.get("id", ""),
-        "inference_service": ce.get("source", ""),
+        "inference_service": ce.get("inferenceservicename", ""),
         "namespace": ce.get("namespace", ""),
         "event_type": ev_type,
-        "model": ce.get("modelid", ""),
+        # `ce-endpoint` 在单模型场景下是空的,多模型(ModelMesh / 一个
+        # InferenceService 挂多个模型)时才有值。留着它比留一个恒空的
+        # ce-modelid 有意义 —— 至少它有值的时候是对的。
+        "model": ce.get("endpoint", ""),
         # 原样存 JSON 字符串。**不拆成列** —— 不同模型的输入 schema 完全
         # 不同,拆成固定列意味着每加一个模型就要改表(ADR-085)。
         "payload": body if isinstance(body, str) else json.dumps(body, ensure_ascii=False),

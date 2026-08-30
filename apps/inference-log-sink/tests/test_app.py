@@ -22,11 +22,29 @@ def client():
 
 
 def ce_headers(**kw):
+    """**这份头是 2026-08-30 从真实 KServe 0.19 agent 上抓下来的**,不是照
+    CloudEvents 规范编的。
+
+    第一版这里的 `ce-source` 编成了
+    `http://demo-rf-classifier-predictor.kserve-demo.svc.cluster.local/`
+    —— 一个看起来很合理、能从中读出模型名的地址。真实值是
+    `http://localhost:9081/`(agent sidecar 自己的本地地址),什么信息都
+    没有。**假数据比真数据"好看",于是测试全绿而线上那一列毫无用处。**
+    同理 `ce-modelid` 当时也在这份夹具里,而真实的 agent 根本不发这个头。
+
+    教训:夹具里的每个字段值都应该是**抄来的**,不是**想出来的**。
+    """
     base = {
         "ce-id": "req-123",
         "ce-type": "org.kubeflow.serving.inference.request",
-        "ce-source": "http://demo-rf-classifier-predictor.kserve-demo.svc.cluster.local/",
+        "ce-component": "predictor",
+        "ce-endpoint": "",
+        "ce-inferenceservicename": "demo-rf-classifier",
+        "ce-metadata": "{}",
         "ce-namespace": "kserve-demo",
+        "ce-recordedtime": "2026-08-30T05:00:00Z",
+        "ce-source": "http://localhost:9081/",
+        "ce-specversion": "1.0",
         "ce-time": "2026-08-30T05:00:00Z",
         "Content-Type": "application/json",
     }
@@ -43,6 +61,20 @@ class TestParseCloudEvent:
         assert r["request_id"] == "req-123"
         assert r["namespace"] == "kserve-demo"
         assert r["event_ts"] == "2026-08-30T05:00:00Z"
+
+    def test_模型标识取自_ce_inferenceservicename_不是_ce_source(self):
+        """`ce-source` 是 agent sidecar 的本地地址(http://localhost:9081/),
+        对"这次调的是哪个模型"毫无信息量。留痕表存下来却查不出模型,等于
+        ADR-085 的目的落空 —— 所以这条要盯死取的是哪个头。"""
+        r = sink.parse_event(ce_headers(), "{}")
+        assert r["inference_service"] == "demo-rf-classifier"
+        assert "localhost" not in r["inference_service"]
+
+    def test_多模型场景下_model_取_ce_endpoint(self):
+        """单模型时 ce-endpoint 是空的(实测),多模型时才有值。"""
+        assert sink.parse_event(ce_headers(), "{}")["model"] == ""
+        assert sink.parse_event(
+            ce_headers(**{"ce-endpoint": "model-b"}), "{}")["model"] == "model-b"
 
     def test_从_ce_type_末段取出请求还是响应(self):
         assert sink.parse_event(ce_headers(), "{}")["event_type"] == "request"

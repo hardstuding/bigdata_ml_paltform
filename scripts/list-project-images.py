@@ -263,6 +263,42 @@ def kserve_serving_runtime_images() -> set[str]:
     return images
 
 
+def kserve_sidecar_images() -> set[str]:
+    """KServe **按需注入**的 sidecar 镜像(agent / batcher / router 等)。
+
+    这一类镜像的特殊之处:它们不出现在任何 Deployment/StatefulSet 的
+    `image:` 字段里,而是躺在 `inferenceservice-config` 这个 ConfigMap 的
+    **JSON 字符串**中,KServe 控制器在 InferenceService 上出现对应配置时
+    才把它们塞进 Pod。所以这个脚本正常的"扫 image: 行"路径**永远看不到
+    它们**,helm template 出来的 YAML 里它们也只是一段字符串。
+
+    2026-08-30 实机踩到:给推理服务打开 payload logging(ADR-085)之后,
+    KServe 注入了 `kserve/agent:v0.19.0` 这个 sidecar,而它从来没被镜像
+    清单收录过 —— 于是在这台连不上 Docker Hub 的云主机上直接
+    ImagePullBackOff,**而"打开留痕"这个动作本身看起来跟镜像毫无关系**。
+    这正是 scripts/23 那套镜像预拉机制存在的意义,却漏掉了一整类镜像。
+
+    做法和上面 kserve_serving_runtime_images() 一样:不实时拉上游,直接读
+    活集群/本地渲染出来的那份 ConfigMap,把里面所有 "image" 字段挑出来。
+    """
+    import json as _json
+
+    cfg_path = REPO_ROOT / "apps" / "kserve-runtimes" / "inferenceservice-config-images.json"
+    if not cfg_path.exists():
+        return set()
+
+    print("==> kserve 按需注入的 sidecar(apps/kserve-runtimes/inferenceservice-config-images.json)",
+          file=sys.stderr)
+    try:
+        data = _json.loads(cfg_path.read_text(encoding="utf-8"))
+    except Exception as exc:   # noqa: BLE001
+        print(f"  !! 读不了:{exc}", file=sys.stderr)
+        return set()
+    # `_` 开头的键是说明文字,不是镜像。
+    return {v for k, v in data.items()
+            if not k.startswith("_") and isinstance(v, str) and v}
+
+
 def helm_values_images(dirs) -> set[str]:
     """直接扫 Application 文件本身的 `helm.valuesObject` 里写死的镜像。
 
@@ -311,6 +347,7 @@ def main():
     all_images |= helm_values_images(dirs)
     all_images |= argocd_bootstrap_images()
     all_images |= kserve_serving_runtime_images()
+    all_images |= kserve_sidecar_images()
 
     for img in sorted(all_images):
         print(img)

@@ -1,0 +1,4 @@
+{
+  "_comment": "KServe 按需注入的 sidecar 镜像。这些镜像躺在 kserve 命名空间的 inferenceservice-config ConfigMap 的 JSON 字符串里,不出现在任何 image: 字段,所以 scripts/list-project-images.py 扫不到 —— 2026-08-30 因此漏拉了 agent,给推理服务打开 payload logging 后直接 ImagePullBackOff。版本必须和 apps/definitions/kserve.yaml 里的 chart 版本对应,升 KServe 时一起改。",
+  "agent": "kserve/agent:v0.19.0"
+}
