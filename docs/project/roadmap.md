@@ -997,17 +997,17 @@ MinIO 分布式方案及 Iceberg/MLflow 制品的备份恢复、反亲和/拓扑
 完整方案见 `docs/architecture.md` "Phase 4 之后"一节和原始评审
 `docs/project/reviews/2026-08-15-external-review.md`。
 
-**2026-08-28 更新**:上面那句原文是"这五条现在都还没有开始实现",已经
-不准确了——A/C/D/E 各自都推进了第一步(见 `docs/project/current-work.md` 的进度
-表)。现在的实情是:
+**这张表 2026-08-30 重新核对过**,上一版(08-28)有 5 处已经不成立。
+**逐条的权威状态在 [`capability-matrix.md`](capability-matrix.md)**(那份有
+验证级别和证据链接,还有 CI 检查);这里只回答"这条主线整体走到哪了"。
 
 | 线 | 状态 |
 |---|---|
-| A 统一开发工作台 | 🟡 作业模板(`examples/`,4 个)+ `platform-submit --new` 脚手架已可用;**CI/CD 那半没做** |
-| B 数据资产与治理闭环 | 🟡 权限执行 ✅(ADR-051)、审计闭环 ✅(ADR-066)、数据质量 ✅(ADR-065/070);端到端血缘和变更影响分析没做 |
-| C 完整 MLOps | 🟡 审批/回滚闭环 ✅(ADR-080);推理可观测性、特征漂移没做;灰度是这套部署形态下做不了(见 ADR-080) |
-| D 统一运维控制面 | 🟡 六条黄金链路探针 ✅(ADR-079)、Runbook ✅、容量/成本看板 ✅;**服务目录**(一处看到所有服务和负责人)没做 |
-| E 管理驾驶舱 | 🟡 平台总览看板第一版已上;按月聚合要等数据攒够(Prometheus 持久化 2026-08-28 才补上) |
+| A 统一开发工作台 | 🟡 作业模板 + `platform-submit --new` 脚手架;**CI/CD 那半 2026-08-29 已补上**(`jobs/` 写一行 `schedule` → CronWorkflow,支持多文件/依赖对账/参数化补数/按环境晋级,08-30 实机验证)。**还缺**:每作业独立镜像、多层目录结构 |
+| B 数据资产与治理闭环 | 🟡 权限执行 ✅、审计闭环 ✅、数据质量 ✅、dbt 血缘 ✅(ADR-082);**还缺**:端到端血缘和变更影响分析(现在只有 dbt 那一段) |
+| C 完整 MLOps | 🟡 审批/回滚 ✅(ADR-080)、**推理可观测性 2026-08-29 已做**(`platform-inference` 看板 6 panel,真集群出数 P95 9.7ms);**还缺**:特征漂移(要先把推理输入留痕)。灰度是这套部署形态做不了 —— RawDeployment 无 Knative,`canaryTrafficPercent` 会被收下但完全不生效,脚本现在显式拒绝它 |
+| D 统一运维控制面 | 🟡 黄金链路探针 ✅(**2026-08-30 加到七条**,新增 audit)、Runbook ✅、容量/成本看板 ✅、**服务目录 2026-08-29 已做**([service-catalog.md](../reference/service-catalog.md),35 个服务 + CI 校验归属/owner/依赖不漂移);**还缺**:多节点故障/备份恢复/升级回滚演练 |
+| E 管理驾驶舱 | 🟡 平台总览看板第一版已上;**还缺**:按月聚合和预算对比 —— Prometheus 持久化 2026-08-28 才补上,数据要自己攒 |
 
 下面每条的原始描述保留,作为"完整形态长什么样"的参照。
 
@@ -1033,12 +1033,18 @@ MinIO 分布式方案及 Iceberg/MLflow 制品的备份恢复、反亲和/拓扑
 - **Flink**:2026-08-15 zhenghe 明确"作为新的大数据平台有它的必要性",
   从"Phase 4 按需"改成"确认要做"。**设计已完成**([ADR-056](../decisions/056-flink-role-design.md)):
   定位成"流式计算引擎"(实时聚合/join/特征计算),不做"数据搬运"。
-  引入顺序上 Kafka 现在零真实消费者、Kafka Connect + Iceberg Sink
-  这条轻量路径也没搭过,这两步应先于 Flink。**只是设计,没部署任何东西。**
-- ~~**Spark 4.x 评估**~~ —— **已评估(2026-08-26)**,见
-  [ADR-076](../decisions/076-spark-4-evaluation.md):结论是暂不升,但查出一个
-  之前没意识到的联系——**Spark 4 要求 Java 17,而 Iceberg 卡在 1.10.0 的
-  原因正是当前 Spark 镜像只有 Java 11**。触发条件和联动清单都写进 ADR 了。
+  **2026-08-30 更正**:这里原来写着"只是设计,没部署任何东西" —— 实际
+  Flink 2026-08-22 就部署并端到端验证过了(Kafka → Flink → Iceberg,
+  [ADR-062](../decisions/062-flink-streaming-pipeline.md)),还长出了
+  `streams/` 这套发布机制(写几行 yaml + PyFlink 脚本)和查询审计那条
+  链路(ADR-066)。当时"Kafka 零真实消费者"的判断也不成立了。
+- ~~**Spark 4.x 评估**~~ —— **已评估并且已经升了**。评估(2026-08-26,
+  [ADR-076](../decisions/076-spark-4-evaluation.md))当时的结论是暂不升,
+  但查出一个关键联系:**Spark 4 要求 Java 17,而 Iceberg 卡在 1.10.0 的
+  原因正是当前 Spark 镜像只有 Java 11**。2026-08-29 触发条件满足,
+  **Spark 3.5.9 → 4.1.3 + Iceberg 1.10.0 → 1.11.0 一起升完并实机验证**
+  (`SPARK_ICEBERG_DEMO_OK`),升级记录在
+  [`upgrade.md`](../operations/upgrade.md) 的「已知升级路径」。
 - **Stackable(Spark/Trino/Hive 统一 Operator 平台)**:2026-08-15 Codex
   新提出,**目前完全没评估过**。值得单独做 PoC(非生产、对比部署/升级/
   故障恢复成本、保留绕开它直接用官方 Operator 的能力),**不迁移任何
