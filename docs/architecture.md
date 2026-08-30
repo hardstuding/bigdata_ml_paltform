@@ -66,48 +66,63 @@
 
 ## 组件清单
 
-**local-lite 这一列是"这个 Phase 设计上归哪个环境"的静态标注,不是这台机器
-现在实际跑着什么**——按需启用/关闭是这台机器的常态(资源有限,验证完
-一个组件经常发现还要接着测下一个,就没关掉),真实的"现在到底启用哪些
-组件"以 `environments/<env>/config.yaml` 里的 `enabled_components`
-列表(2026-08-20 起,ADR-057 第三批)和 `ls apps/definitions/` 的当前
-输出为准,不要相信这张表或其他文档里任何写死的组件名单——2026-08-14
-文档审计就发现过 Spark Operator/Airflow 在这张表标着"cloud-full 才有",
-但实际已经在 `apps/definitions/` 常驻好几天,文档没跟上。
+**这张表回答的是"有哪些组件、各自在哪一层、多重"** —— 那部分基本不变。
+它**不回答"哪个环境启用了哪些"**,那是配置,而且每周都在变。
 
-| 层 | 组件 | 作用 | 资源权重 | local-lite(设计归属) | cloud-full | prod | 阶段 |
-|---|---|---|---|---|---|---|---|
-| 底座 | Kubernetes(colima + k3s) | 统一调度层 | 中 | ✅ | ✅ | ✅ | Phase 0 |
-| 底座 | ArgoCD | GitOps 持续部署 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
-| 底座 | ingress-nginx + cert-manager | 统一入口与证书 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
-| 底座 | Keycloak | 统一身份 / OIDC | 中 | ✅ | ✅ | ✅ | Phase 0 |
-| 底座 | Prometheus + Grafana + Loki | 指标 + 日志 | 中 | ✅ | ✅ | ✅ | Phase 0 |
-| 底座 | Harbor | 私有镜像仓库 | 轻 | — | ✅ | ✅ | Phase 4 |
-| 底座 | 平台门户(自建) | 统一入口页面,现场探测各工具状态 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
-| 治理 | 权限申请门户(自建) | 组权限申请 + 表访问分级审批 + 权限交接 + 审计 + 到期自动回收 | 轻 | ✅ | ✅ | ✅ | Phase 0 |
-| 治理 | 建表注册工具(自建) | 建表 + 回写负责人/安全等级进 OpenMetadata | 轻 | ✅ | ✅ | ✅ | Phase 0 |
-| 治理 | AI 运维角色(RBAC) | 给 AI 独立 ServiceAccount + 权限边界,开发阶段档已实测,运维阶段收紧档+危险操作审批链未实现(ADR-048) | 轻 | ⚠️ 部分 | — | — | Phase 0 |
-| 治理 | OPA(Trino 细粒度权限) | 策略引擎 + grants 数据实时同步,已实测(opa test + 真实 HTTP 场景验证);**故意没有**接进 Trino 的 access-control.properties 生效——上线是一次真实的行为收紧(Trino 现在零访问控制),需要先确认现有数据源(比如 Superset 用的表)都有对应 grant,不能无人看管时直接切换,见 ADR-051 | 轻 | ⚠️ 未接入 | — | — | Phase 0 |
-| 湖仓 | MinIO | S3 兼容对象存储 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
-| 湖仓 | Postgres(CloudNativePG operator 管理) | 元数据库共用 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
-| 湖仓 | Hive Metastore | 表元数据 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
-| 湖仓 | Iceberg | 开放表格式 | 轻 | ✅ | ✅ | ✅ | Phase 1 |
-| 湖仓 | Trino | 交互式 SQL / 联邦查询 | 重 | — | ✅ | ✅ | Phase 1 |
-| 湖仓 | OpenMetadata | 数据目录 / 血缘 | 重 | — | ✅ | ✅ | Phase 1 |
-| 湖仓 | Superset | BI / 看板 | 中 | — | ✅ | ✅ | Phase 1 |
-| 湖仓 | OPA(原计划 Ranger,见 ADR-028) | 细粒度权限(行/列级) | 中 | — | — | ✅ | Phase 4 |
-| 湖仓 | HBase / Doris | KV / OLAP,按需 | 重 | — | — | 可选 | Backlog |
-| 数据工程 | Airflow | 批处理编排 | 中 | — | ✅ | ✅ | Phase 2 |
-| 数据工程 | SeaTunnel | 批流一体数据集成 | 中 | — | ✅ | ✅ | Phase 2 |
-| 数据工程 | Spark Operator | k8s 原生 Spark 作业 | 重 | — | ✅ | ✅ | Phase 2 |
-| 数据工程 | Kafka | 消息队列,公司现有生产环境同款 | 中 | — | ✅ | ✅ | Phase 2 |
-| 数据工程 | Flink | 实时计算 / CDC | 重 | — | — | ✅ | Phase 4(2026-08-15 用户确认为必要组件,不是"按需"可选项,见 `docs/project/roadmap.md`) |
-| AI/ML | JupyterHub | 多用户 Notebook | 中 | — | ✅ | ✅ | Phase 3 |
-| AI/ML | MLflow | 实验跟踪 / 模型注册 | 轻 | — | ✅ | ✅ | Phase 3 |
-| AI/ML | Argo Workflows | 训练流水线编排 | 中 | — | ✅ | ✅ | Phase 3 |
-| AI/ML | KServe | 模型在线服务 | 中 | — | ✅ | ✅ | Phase 3 |
-| AI/ML | TF Serving / vLLM | 具体推理 runtime | 重 | — | ✅ | ✅ | Phase 3 |
-| AI/ML | Feast | 特征存储(离线 Spark+Iceberg + 在线 Redis) | 中 | ✅ | ✅ | ✅ | Phase 3.5 |
+```bash
+# 某个环境现在启用了哪些组件 —— 这是唯一权威的答案
+python3 -c "import yaml;print('\n'.join(yaml.safe_load(open('environments/cloud-full/config.yaml'))['enabled_components']))"
+```
+
+> **2026-08-30 把 local-lite / cloud-full / prod 三列删掉了。**
+>
+> 这张表原来带这三列,**而它已经烂过两次**:2026-08-14 的文档审计发现
+> Spark Operator/Airflow 标着"cloud-full 才有"而实际已经常驻好几天;
+> 2026-08-30 又发现 OPA 那一格写着「**故意没有**接进 Trino 生效 —— Trino
+> 现在零访问控制」,而 OPA 从 2026-08-16 起就正式生效了,列级脱敏和行级
+> 过滤也都在真集群上验过。
+>
+> **一份说「零访问控制」的架构文档,会让人对这个平台的安全态势做出完全
+> 错误的判断。** 而当时那段警告(「不要相信这张表里写死的组件名单」)就
+> 挂在表的正上方 —— 一个需要读者记得不要相信的表格,不该继续存在。
+>
+> 所以是**删掉那三列**,不是再同步一遍:同一份状态维护在两个地方,迟早
+> 还会分叉。状态归 `enabled_components`(一处、机器可读、渲染器直接读它),
+> 这张表只留不会过期的部分。
+
+| 层 | 组件 | 作用 | 资源权重 | 阶段 |
+|---|---|---|---|---|
+| 底座 | Kubernetes(colima + k3s) | 统一调度层 | 中 | Phase 0 |
+| 底座 | ArgoCD | GitOps 持续部署 | 轻 | Phase 0 |
+| 底座 | ingress-nginx + cert-manager | 统一入口与证书 | 轻 | Phase 0 |
+| 底座 | Keycloak | 统一身份 / OIDC | 中 | Phase 0 |
+| 底座 | Prometheus + Grafana + Loki | 指标 + 日志 | 中 | Phase 0 |
+| 底座 | Harbor | 私有镜像仓库 | 轻 | Phase 4 |
+| 底座 | 平台门户(自建) | 统一入口页面,现场探测各工具状态 | 轻 | Phase 0 |
+| 治理 | 权限申请门户(自建) | 组权限申请 + 表访问分级审批 + 权限交接 + 审计 + 到期自动回收 | 轻 | Phase 0 |
+| 治理 | 建表注册工具(自建) | 建表 + 回写负责人/安全等级进 OpenMetadata | 轻 | Phase 0 |
+| 治理 | AI 运维角色(RBAC) | 给 AI 独立 ServiceAccount + 权限边界,开发阶段档已实测,运维阶段收紧档+危险操作审批链未实现(ADR-048) | 轻 | Phase 0 |
+| 治理 | OPA(Trino 细粒度权限) | **2026-08-16 已正式接进 Trino 生效**(ADR-051)。没有 grant 的表查询被 `PERMISSION_DENIED` 拒;列级脱敏 + 行级过滤 2026-08-23/26 在真集群上用真实 SQL 验过(ADR-063);grants 数据由 `opa-grants-sync` 每 5 分钟同步。**2026-08-30 更正**:这一格原来写着「故意没有接进……Trino 现在零访问控制」,那是 08-16 之前的状态 —— 一份说「零访问控制」的架构文档会让人对平台的安全态势做出完全错误的判断 | 轻 | Phase 0 |
+| 湖仓 | MinIO | S3 兼容对象存储 | 轻 | Phase 1 |
+| 湖仓 | Postgres(CloudNativePG operator 管理) | 元数据库共用 | 轻 | Phase 1 |
+| 湖仓 | Hive Metastore | 表元数据 | 轻 | Phase 1 |
+| 湖仓 | Iceberg | 开放表格式 | 轻 | Phase 1 |
+| 湖仓 | Trino | 交互式 SQL / 联邦查询 | 重 | Phase 1 |
+| 湖仓 | OpenMetadata | 数据目录 / 血缘 | 重 | Phase 1 |
+| 湖仓 | Superset | BI / 看板 | 中 | Phase 1 |
+| 湖仓 | OPA(原计划 Ranger,见 ADR-028) | 细粒度权限(行/列级) | 中 | Phase 4 |
+| 湖仓 | HBase / Doris | KV / OLAP,按需 | 重 | Backlog |
+| 数据工程 | Airflow | 批处理编排 | 中 | Phase 2 |
+| 数据工程 | SeaTunnel | 批流一体数据集成 | 中 | Phase 2 |
+| 数据工程 | Spark Operator | k8s 原生 Spark 作业 | 重 | Phase 2 |
+| 数据工程 | Kafka | 消息队列,公司现有生产环境同款 | 中 | Phase 2 |
+| 数据工程 | Flink | 实时计算 / CDC | 重 | Phase 4(2026-08-15 用户确认为必要组件,不是"按需"可选项,见 `docs/project/roadmap.md`) |
+| AI/ML | JupyterHub | 多用户 Notebook | 中 | Phase 3 |
+| AI/ML | MLflow | 实验跟踪 / 模型注册 | 轻 | Phase 3 |
+| AI/ML | Argo Workflows | 训练流水线编排 | 中 | Phase 3 |
+| AI/ML | KServe | 模型在线服务 | 中 | Phase 3 |
+| AI/ML | TF Serving / vLLM | 具体推理 runtime | 重 | Phase 3 |
+| AI/ML | Feast | 特征存储(离线 Spark+Iceberg + 在线 Redis) | 中 | Phase 3.5 |
 
 ## 环境画像
 
