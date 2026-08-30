@@ -187,6 +187,29 @@ if [ -n "${CANARY_PERCENT:-}" ]; then
   echo "=== 灰度模式:新版本拿 ${CANARY_PERCENT}% 流量,旧 revision 继续服务其余部分 ==="
 fi
 
+# 推理留痕(ADR-085)。**默认关闭** —— "默认收集所有推理输入"不是一个应该
+# 默默生效的行为,而且推理输入很可能包含个人信息。要开:
+#
+#   ENABLE_PAYLOAD_LOG=1 ./scripts/11-deploy-demo-inference-service.sh
+#
+# `mode: all` = 请求和响应都记。两条记录靠 CloudEvent 的 id 关联(同一次
+# 推理是同一个 id),下游 iceberg.ml.inference_log 里用 request_id 拼起来。
+LOGGER_BLOCK=""
+if [ "${ENABLE_PAYLOAD_LOG:-0}" = "1" ]; then
+  if ! kubectl -n inference-log-sink get svc inference-log-sink >/dev/null 2>&1; then
+    echo "!! ENABLE_PAYLOAD_LOG=1 但 inference-log-sink 这个服务不在 —— 先确认它已经启用"
+    echo "   (environments/<env>/config.yaml 的 enabled_components 里要有 inference-log-sink.yaml)"
+    exit 1
+  fi
+  LOGGER_BLOCK="    logger:
+      mode: all
+      url: http://inference-log-sink.inference-log-sink.svc.cluster.local
+"
+  echo "=== 推理留痕已开启(ENABLE_PAYLOAD_LOG=1)==="
+else
+  echo "=== 推理留痕未开启(默认)。要开:ENABLE_PAYLOAD_LOG=1 ==="
+fi
+
 echo "=== 部署 InferenceService ==="
 cat <<EOF | kubectl apply -f -
 apiVersion: serving.kserve.io/v1beta1
@@ -202,7 +225,7 @@ metadata:
     serving.kserve.io/enable-prometheus-scraping: "true"
 spec:
   predictor:
-${CANARY_LINE}    serviceAccountName: kserve-minio-sa
+${LOGGER_BLOCK}${CANARY_LINE}    serviceAccountName: kserve-minio-sa
     model:
       modelFormat:
         name: mlflow

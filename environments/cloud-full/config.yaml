@@ -67,6 +67,7 @@ enabled_components:
   - schema-registry.yaml
   - kafka-operator.yaml
   - kafka-producer-device-events.yaml
+  - inference-log-sink.yaml
   - keycloak-db-init.yaml
   - kserve-crd.yaml
   - kserve-resources.yaml

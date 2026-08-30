@@ -232,6 +232,20 @@ services:
     排障: ADR-068
     备注: Flink 作业还没接,schema 目前仍写死在 SQL 里
 
+  - name: inference-log-sink
+    用途: 收 KServe payload logger 的 CloudEvent,丢进 Kafka;下游 Flink 落到 iceberg.ml.inference_log
+    类别: AI/ML
+    owner: platform-team
+    面向用户: false
+    请求路径上: false
+    依赖: [kafka-cluster]
+    排障: ADR-085
+    备注: >-
+      默认不会有流量 —— KServe 的 logger 要在 InferenceService 上显式开启
+      (scripts/11 的 ENABLE_PAYLOAD_LOG=1)。记录的是推理输入,**很可能含
+      个人信息**:iceberg.ml 这个 schema 在 OPA 里和 audit 一样只有
+      platform-team 能读;保留期还没做,上生产前必须先解决
+
   # ---------- 平台自身的可观测与治理 ----------
   - name: golden-path-probes
     用途: 六条真实业务链路的探针,回答「一件真实的事现在做不做得成」
@@ -413,10 +427,7 @@ infra_only:
   trino-liveness-fix.yaml: 巡检修复 CronJob,归属 trino
   openmetadata-quality-alerts.yaml: 质量告警 CronJob,归属 openmetadata
   alert-echo-sink.yaml: 告警出口的验证终点,归属告警链路(ADR-081)
-  # inference-log-sink.yaml 暂时不在这里,也不在上面的服务列表里 —— 它
-  # **还没启用**(ADR-085 已实现,等 CI 构建出镜像、把 tag 从 latest 换成
-  # 真实 SHA 之后再加进 enabled_components)。启用的同一次改动里要把它
-  # 加进上面的服务列表,check-service-catalog.py 会拦住"启用了但没登记"。
+
   argo-training-workflow-template.yaml: WorkflowTemplate,归属 argo-workflows
   dbt-demo.yaml: dbt 项目,归属 airflow 的 dbt_demo DAG
   kafka-producer-device-events.yaml: 造数 CronJob,归属 flink-streaming-demo

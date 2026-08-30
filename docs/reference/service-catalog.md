@@ -28,6 +28,7 @@
 |---|---|---|---|---|---|
 | **argo-workflows** | 训练/批处理的工作流编排,notebook 里 SDK 触发的就是它 | platform-team | 是 | keycloak、minio | BACKLOG 1.5(SSO RBAC 那次) |
 | **feast** | 特征存储,离线读 Iceberg、在线走 Redis | platform-team | 否 | trino、minio、hive-metastore | ADR-042 |
+| **inference-log-sink** | 收 KServe payload logger 的 CloudEvent,丢进 Kafka;下游 Flink 落到 iceberg.ml.inference_log<br>默认不会有流量 —— KServe 的 logger 要在 InferenceService 上显式开启 (scripts/11 的 ENABLE_PAYLOAD_LOG=1)。记录的是推理输入,**很可能含 个人信息**:iceberg.ml 这个 schema 在 OPA 里和 audit 一样只有 platform-team 能读;保留期还没做,上生产前必须先解决 | platform-team | 否 | kafka-cluster | ADR-085 |
 | **jupyterhub** | 多用户 Notebook,镜像里带 platform_sdk,可直接提交作业 | platform-team | 是 | keycloak、argo-workflows、minio | ADR-058 |
 | **kserve-resources** | 在线推理服务的运行时(sklearn / xgboost / triton 等)<br>deploymentMode 是 Standard(不装 Knative),所以做不了 canary 灰度 | platform-team | 否 | minio、mlflow | ADR-027 / ADR-075 |
 | **mlflow** | 实验跟踪 + 模型注册表;上线前的审批章也打在这里 | platform-team | 是 | postgres、minio、keycloak | ADR-026 / ADR-080 |

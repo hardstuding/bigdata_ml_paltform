@@ -222,24 +222,18 @@ Trino 的 `system.runtime.queries` 里已经没有那条 CTAS 了 —— 它是�
 受 `query.max-history` 限制,coordinator 一重启就清空。**这是已知局限,
 不是配置错了**,脚本的输出里会直接这么说。
 
-**17. 推理留痕**(ADR-085,**两步,顺序不能颠倒**):
+**17. 推理留痕**(ADR-085。**第一步已完成** —— CI 构建成功、tag 已钉到
+`7d42658`、组件已启用):
 
 ```
-第一步(等 CI 构建出镜像之后):
-  把 apps/inference-log-sink/manifests/deployment.yaml 里的 :latest
-  换成一个真实存在的 commit SHA,并把 inference-log-sink.yaml 加进
-  environments/cloud-full/config.yaml 的 enabled_components
-  → check-image-tags.py 和 check-service-catalog.py 会拦住漏做的那一半
-
-第二步(部署之后):
-  ENABLE_PAYLOAD_LOG=1 ./scripts/11-deploy-demo-inference-service.sh
-  发一次推理请求
-  → kubectl -n inference-log-sink logs deploy/inference-log-sink 应该看到 202
-  → 等一个 checkpoint(60s)后,Trino 里:
-      SELECT count(*) FROM iceberg.ml.inference_log
-    应该 >= 2(一次推理产生 request + response 两条)
-  → 用非 platform-team 账号查同一张表,应该被 PERMISSION_DENIED 拒
-    (ml 和 audit 受同一套 OPA 保护)
+ENABLE_PAYLOAD_LOG=1 ./scripts/11-deploy-demo-inference-service.sh
+发一次推理请求
+→ kubectl -n inference-log-sink logs deploy/inference-log-sink  应该看到 202
+→ 等一个 checkpoint(60s)后,Trino 里:
+    SELECT count(*) FROM iceberg.ml.inference_log
+  应该 >= 2(一次推理产生 request + response 两条)
+→ 用非 platform-team 账号查同一张表,应该被 PERMISSION_DENIED 拒
+  (ml 和 audit 受同一套 OPA 保护)
 ```
 
 **失败长什么样**:接收端返回 503 说明写 Kafka 失败 —— **那是有意设计的**,
