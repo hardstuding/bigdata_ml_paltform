@@ -1,7 +1,7 @@
 # ADR-084:分析师的浏览器 SQL 入口 —— 复用 Superset SQL Lab,不引入新组件
 
 日期:2026-08-29
-状态:**已决策,实现中(SQL Lab 本身待实机验证)**
+状态:**已实机验证**(2026-08-30):SQL Lab 上 `current_user` 是登录者本人、没 grant 的表被 `PERMISSION_DENIED` 拒、列级脱敏生效
 
 ## 问题
 

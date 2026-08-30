@@ -1,7 +1,7 @@
 # ADR-075:KServe runtime 只默认装四个,其余挪进 optional/
 
 日期:2026-08-26
-状态:已实现,**未部署验证**(两个 kustomization 本地都渲染通过)
+状态:**已部署**;默认那 4 个 runtime 由 `inference` 黄金链路探针持续验证(2026-08-29 实测通过)
 
 ## 背景
 

@@ -112,29 +112,30 @@
 | [038](038-cloudnativepg-evaluation.md) | CloudNativePG:给共享 Postgres 找 HA 升级路径 | 已完成迁移和切流量 |
 | [039](039-teardown-rebuild-test.md) | 推倒重建测试:验证"一键部署"是真的 | local-lite 2026-08-13 / cloud-full 2026-08-22,都通过 |
 | [041](041-queue-resource-management.md) | ResourceQuota + LimitRange + PriorityClass | 已验证 |
-| [064](064-role-based-resource-quota.md) | 按组分配计算配额 + 空闲互借(Kueue) | 已实机验证 |
-| [065](065-data-quality-on-openmetadata.md) | 数据质量断言复用 OpenMetadata | 已实机验证 |
-| [066](066-trino-query-audit.md) | Trino 查询审计走 Kafka event listener | 第一段已验证 |
-| [067](067-portal-as-workbench.md) | 门户从链接目录改成工作台 | 代码完成,未上集群 |
-| [068](068-schema-registry.md) | Schema Registry 选 Karapace | manifest 完成,未部署 |
-| [069](069-cost-attribution.md) | 成本归属用 OpenCost,单价自己填 | 配置完成,未部署 |
-| [070](070-data-freshness-slo.md) | 新鲜度当成一条数据质量断言 | 检测已落地,告警未做 |
-| [071](071-platform-alert-rules.md) | 平台自定义告警规则 + Flink 作业级指标 | 未部署验证 |
-| [072](072-openmetadata-2-upgrade.md) | OpenMetadata 升到 2.0.0 大版本 | 已升级并验证 |
-| [073](073-quality-alerts-to-alertmanager.md) | 质量/新鲜度断言结果推给 Alertmanager | 未部署验证 |
-| [074](074-superset-impersonation.md) | Superset 透传登录用户身份给 Trino | 未部署验证,**行为收紧** |
-| [075](075-kserve-runtime-matrix.md) | KServe runtime 精简到 4 个,其余进 optional/ | 未部署验证 |
-| [076](076-spark-4-evaluation.md) | Spark 4.x 评估 | 结论:暂不升,触发条件已定 |
-| [077](077-superset-chinese-ui.md) | Superset 汉化 | 配置已加,翻译编译未构建验证 |
-| [078](078-trino-group-provider.md) | Trino file group provider | **已实机验证** |
-| [079](079-golden-path-probes.md) | 按链路探测(D 线第一步)+ 黄金链路看板 | 未部署验证 |
-| [080](080-model-approval-and-rollback.md) | 模型上线审批 + 回滚(C 线第一步) | 未部署验证 |
-| [081](081-alert-delivery-verified-with-echo-sink.md) | 用回显接收端让「告警送得出去」持续被验证 | 未部署验证 |
+| [064](064-role-based-resource-quota.md) | 按组分配计算配额 + 空闲互借(Kueue) | **已实机验证**(cloud-full,2026-08-23) |
+| [065](065-data-quality-on-openmetadata.md) | 数据质量断言复用 OpenMetadata | 已实机验证(cloud-full) |
+| [066](066-trino-query-audit.md) | Trino 查询审计走 Kafka event listener | **已实机验证**(2026-08-24):Trino → Kafka → Flink → Iceberg 全链路。`audit.query_events` 一次查询一行、`audit.query_table_access` 一次表访问一行,实测 3 条查询 → 5 行事件 / 4 行表访问。2026-08-30 补了 `audit` 黄金链路探针(待实机验证) |
+| [067](067-portal-as-workbench.md) | 门户从链接目录改成工作台 | **已上线并实机验证**(2026-08-30):按角色显示工具、我的表权限、待我审批、作业详情页 |
+| [068](068-schema-registry.md) | Schema Registry 选 Karapace | **已部署并实机验证**(2026-08-25):加可选字段放行、`double`→`string` 被 409 拦在发送侧。**Flink 作业还没接上它**,schema 仍写死在 SQL 里 |
+| [069](069-cost-attribution.md) | 成本归属用 OpenCost,单价自己填 | **已部署并实机出数**(2026-08-26):29 个命名空间合计 ¥0.808/小时;按组的 PromQL 在真集群验过。**管理视角(按月聚合、和预算对比)仍未做** |
+| [070](070-data-freshness-slo.md) | 新鲜度当成一条数据质量断言 | **检测已实机验证**(2026-08-23);**告警出口 2026-08-28 打通**(ADR-081) |
+| [071](071-platform-alert-rules.md) | 平台自定义告警规则 + Flink 作业级指标 | **已部署并生效**(2026-08-19 起,规则抓到过真实问题)。2026-08-30 修正了 `FlinkMetricsMissing` 一条名不副实的注释 |
+| [072](072-openmetadata-2-upgrade.md) | OpenMetadata 升到 2.0.0 大版本 | **已升级并验证通过**(cloud-full) |
+| [073](073-quality-alerts-to-alertmanager.md) | 质量/新鲜度断言结果推给 Alertmanager | 已实现,**未部署验证**(逻辑用假数据在本地跑过) |
+| [074](074-superset-impersonation.md) | Superset 透传登录用户身份给 Trino | **已上线并实机验证**(2026-08-27);盘表已做,影响面确认极小 |
+| [075](075-kserve-runtime-matrix.md) | KServe runtime 精简到 4 个,其余进 optional/ | **已部署**;默认那 4 个 runtime 由 `inference` 黄金链路探针持续验证(2026-08-29 实测通过) |
+| [076](076-spark-4-evaluation.md) | Spark 4.x 评估 | **已执行** |
+| [077](077-superset-chinese-ui.md) | Superset 汉化 | **已构建并实机验证**(2026-08-28):language pack 加载成功,4054 条译文 |
+| [078](078-trino-group-provider.md) | Trino file group provider | **已实现并实机验证通过** |
+| [079](079-golden-path-probes.md) | 按链路探测(D 线第一步)+ 黄金链路看板 | **已部署并实机验证**(2026-08-29:六条探针最近一次全部 Completed) |
+| [080](080-model-approval-and-rollback.md) | 模型上线审批 + 回滚(C 线第一步) | **已实机验证**(2026-08-28):训练→注册→审批→部署→真实推理→回滚守卫,全链路 |
+| [081](081-alert-delivery-verified-with-echo-sink.md) | 用回显接收端让「告警送得出去」持续被验证 | **已实机验证**(2026-08-28):告警从 Alertmanager 出去、POST 到外部终点、payload 完整可见 |
 | [022](022-ci-chart-validation.md) | CI:push/PR 前跑 `helm template` | 已采纳 |
-| [083](083-internal-package-registry.md) | 内部包共享:MinIO 上的静态 PEP 503 索引,不引入包服务器 | 已实现,待实机验证 |
-| [082](082-dbt-lineage-ingestion.md) | 让 dbt 的产物真的被消费:血缘接进 OpenMetadata | 已实现,待实机验证 |
+| [083](083-internal-package-registry.md) | 内部包共享:MinIO 上的静态 PEP 503 索引,不引入包服务器 | **已实机验证**(2026-08-29):pod 里不加任何参数 `pip install platform-helpers` 装上并能用 |
+| [082](082-dbt-lineage-ingestion.md) | 让 dbt 的产物真的被消费:血缘接进 OpenMetadata | **已实现并实机验证通过**(2026-08-29 02:23,cloud-full) |
+| [084](084-analyst-sql-workbench.md) | 分析师的浏览器 SQL 入口:复用 Superset SQL Lab | **已实机验证**(2026-08-30):SQL Lab 上 `current_user` 是登录者本人、没 grant 的表被 `PERMISSION_DENIED` 拒、列级脱敏生效 |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
-| [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 机制已实现并在 cloud-full 验证;ACME 和告警外推两档未在真实环境验证 |
+| [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 已实现;ACME 那一档**还没有在真实环境验证过**(缺真实域名和 ICP 备案) |
 
 ## 产品与门户
 

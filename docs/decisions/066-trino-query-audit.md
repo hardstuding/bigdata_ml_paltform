@@ -1,7 +1,7 @@
 # ADR-066:Trino 查询审计走 Kafka event listener
 
 日期:2026-08-23
-状态:**第一段(开始留痕)已实机验证**;第二段(持久化到 Iceberg)未做
+状态:**已实机验证**(2026-08-24):Trino → Kafka → Flink → Iceberg 全链路。`audit.query_events` 一次查询一行、`audit.query_table_access` 一次表访问一行,实测 3 条查询 → 5 行事件 / 4 行表访问。2026-08-30 补了 `audit` 黄金链路探针(待实机验证)
 
 ## 背景:这条缺口的性质和别的不一样
 

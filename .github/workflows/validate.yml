@@ -121,6 +121,12 @@ jobs:
       - name: 一键拉起路径覆盖检查
         run: python3 scripts/check-bootstrap-coverage.py
 
+      # ADR 索引的状态列是从每份 ADR 自己的 `状态:` 行生成的。手写两份的
+      # 后果 2026-08-30 实测过:索引里 10 条写着"未部署验证",而它们早就
+      # 部署并实机验证过了。这个检查也会拦住"有 ADR 文件但索引里没列"。
+      - name: ADR 索引防漂移
+        run: python3 scripts/sync-adr-index.py --check
+
       # 文档里的 SDK 调用示例,参数要真的能和签名对上。
       # 2026-08-29 发现 usage-guide 里写着 `submit_job("train.py")`,而真实
       # 签名第一个参数是 name —— 照着文档写必然报错,而这种错不会被任何

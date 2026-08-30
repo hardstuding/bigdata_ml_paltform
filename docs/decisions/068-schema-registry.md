@@ -1,7 +1,7 @@
 # ADR-068:Schema Registry 选 Karapace
 
 日期:2026-08-23
-状态:manifest 完成,**未部署验证**(要等下次开机)
+状态:**已部署并实机验证**(2026-08-25):加可选字段放行、`double`→`string` 被 409 拦在发送侧。**Flink 作业还没接上它**,schema 仍写死在 SQL 里
 
 ## 背景
 

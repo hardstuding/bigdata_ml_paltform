@@ -122,6 +122,12 @@ TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
 | `list-component-versions.py` | 汇总所有组件锁定的版本 | |
 | `list-project-images.py` | 扫描全部用到的镜像 | |
 | `check-manual-credentials.sh` | 扫出"哪些 Secret 需要人工填、现在缺哪个"(只读) | |
+| `check-bootstrap-coverage.py` | 一键拉起路径和文档的部署主线表两边一致 | ✅ |
+| `sync-adr-index.py` | ADR 索引的状态列 ← 每份 ADR 自己的 `状态:` 行 | ✅ `--check` 防漂移 |
+| `check-capability-matrix.py` | 能力表自洽(✅ 的行不许写"未验证")+ 缺口文档不许自己记状态 | ✅ |
+| `check-duplicated-sources.py` | `shared/` 的权威源 ↔ 各应用 `src/` 里的副本 | ✅ |
+| `check-doc-links.py` | 文档内部链接没有死链 | ✅ |
+| `check-doc-examples.py` | 文档里的 SDK 调用示例和真实签名对得上 | ✅ |
 | `verify-image-digests.sh` | 校验已加载镜像的 digest 和官方一致(防镜像站投毒) | |
 
 ## 6. 运维 / 安全 / 迁移
