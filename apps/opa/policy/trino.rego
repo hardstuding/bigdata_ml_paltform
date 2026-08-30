@@ -55,7 +55,13 @@ default allow := false
 #       PERMISSION_DENIED: Cannot select from columns [schema_name] in
 #       table or view system.information_schema.schemata
 #     "建账号"和"给授权"是两处代码、两个地方改,漏一个就是这个结果。
-service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service", "platform_sdk_demo_service", "openmetadata_service"}
+#   - iceberg_maintenance_service:jobs/iceberg-maintenance 用。
+#     **2026-08-30 实机撞到:第一版只把它加进了下面审计表那条例外,
+#     忘了加进这个集合** —— 结果它连 `demo` 这种普通 schema 都读不了
+#     (`default allow := false`),作业报"一张表都没处理到"。
+#     这两处**都要加**:这个集合决定"它算不算服务账号",下面那条例外
+#     决定"服务账号里谁能碰敏感 schema"。
+service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service", "platform_sdk_demo_service", "openmetadata_service", "iceberg_maintenance_service"}
 
 is_service_account if {
 	input.context.identity.user in service_accounts

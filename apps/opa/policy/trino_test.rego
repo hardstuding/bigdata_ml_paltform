@@ -317,3 +317,24 @@ test_normal_schema_not_restricted if {
 		"context": {"identity": {"user": "superset_service", "groups": []}},
 	}
 }
+
+# 维护账号要同时满足两条才行(2026-08-30 实机撞到:只加了第二条)
+test_maintenance_account_allowed_on_normal_schema if {
+	trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "demo", "tableName": "orders"}},
+		},
+		"context": {"identity": {"user": "iceberg_maintenance_service", "groups": []}},
+	}
+}
+
+test_maintenance_account_allowed_on_sensitive_schema if {
+	trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "audit", "tableName": "query_events"}},
+		},
+		"context": {"identity": {"user": "iceberg_maintenance_service", "groups": []}},
+	}
+}
