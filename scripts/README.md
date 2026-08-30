@@ -128,6 +128,8 @@ TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
 | `check-duplicated-sources.py` | `shared/` 的权威源 ↔ 各应用 `src/` 里的副本 | ✅ |
 | `check-doc-links.py` | 文档内部链接没有死链 | ✅ |
 | `check-doc-examples.py` | 文档里的 SDK 调用示例和真实签名对得上 | ✅ |
+| `check-doc-commands.py` | 文档里写的 `./scripts/xxx` 真的存在且可执行 | ✅ |
+| `list-manual-credentials.py` | "必须人工提供"的凭据清单(**离线可跑**) | ✅ `--check` |
 | `verify-image-digests.sh` | 校验已加载镜像的 digest 和官方一致(防镜像站投毒) | |
 
 ## 6. 运维 / 安全 / 迁移

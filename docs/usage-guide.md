@@ -274,9 +274,14 @@ run_workflow_template("train-demo-model")            # 触发已部署的工作�
 
 ## 上线一个模型
 
-**前置条件**:模型已经注册进 MLflow Model Registry,**并且被批准过**。
+**前置条件**:模型已经注册进 MLflow Model Registry,**并且被批准过**
+(`./scripts/41-approve-model.sh <模型名> <版本>`)。
 
-**操作**:`scripts/11-deploy-model.sh`。
+**操作**:
+
+```bash
+./scripts/11-deploy-demo-inference-service.sh
+```
 
 **预期结果**:KServe InferenceService 就绪,V2 协议推理返回预测。
 
@@ -284,6 +289,8 @@ run_workflow_template("train-demo-model")            # 触发已部署的工作�
 
 - **上线单位是"注册表里被批准过的版本"**,不是"MinIO 里最新的目录"。存在
   更新的未批准 v2 时,部署仍然只用已批准的 v1 —— 这条守卫验证过。
+- **回滚是 `./scripts/42-rollback-model.sh`**,不是手改 InferenceService ——
+  手改的话注册表里"当前上线的是哪个版本"和实际就对不上了。
 - **灰度做不了,而且脚本会显式拒绝 `canaryTrafficPercent`**。KServe 在这里
   是 RawDeployment 模式(刻意不装 Knative),那个字段会被收下但**完全不
   生效**,新版本直接拿 100% 流量。**留一个不生效的参数比没有更糟**,所以

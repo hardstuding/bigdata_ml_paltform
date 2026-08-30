@@ -133,6 +133,13 @@ jobs:
       - name: 人工凭据清单完整性
         run: python3 scripts/list-manual-credentials.py --check
 
+      # 文档里写的 ./scripts/xxx 命令,指向的脚本要真的存在且可执行。
+      # 一份"照着做就能拉起来"的文档,最基础的失效方式就是里面的命令根本
+      # 不存在 —— 读的时候完全看不出来,只有真去敲那一行才发现,而那时人
+      # 已经在部署途中了。2026-08-30 加这个检查时当场抓到一条。
+      - name: 文档里的命令真的存在
+        run: python3 scripts/check-doc-commands.py
+
       # 文档里的 SDK 调用示例,参数要真的能和签名对上。
       # 2026-08-29 发现 usage-guide 里写着 `submit_job("train.py")`,而真实
       # 签名第一个参数是 name —— 照着文档写必然报错,而这种错不会被任何
