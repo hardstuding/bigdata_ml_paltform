@@ -5,6 +5,7 @@
 | 你想…… | 看这里 |
 |---|---|
 | 第一次接触,想先跑通一条完整链路 | [`getting-started.md`](getting-started.md) |
+| **从零把这套平台拉起来** | [`operations/deploy-from-scratch.md`](operations/deploy-from-scratch.md) —— 假设你对这个项目一无所知,从上到下照做 |
 | 用这个平台干活(查数、建表、跑作业、上线模型) | [`usage-guide.md`](usage-guide.md) |
 | 运维它(部署、排障、备份、升级) | [`operations/`](operations/) |
 | 搞清楚它为什么长这样 | [`architecture.md`](architecture.md) 和 [`decisions/`](decisions/) |

@@ -127,6 +127,12 @@ jobs:
       - name: ADR 索引防漂移
         run: python3 scripts/sync-adr-index.py --check
 
+      # 有 Secret 被 manifest 引用、却既没有脚本创建它、也没登记进"必须人工
+      # 提供"的清单 —— 那个 Secret 就是没人管的。表现是某个 Pod 起不来,而
+      # 报错不会告诉你是缺凭据。
+      - name: 人工凭据清单完整性
+        run: python3 scripts/list-manual-credentials.py --check
+
       # 文档里的 SDK 调用示例,参数要真的能和签名对上。
       # 2026-08-29 发现 usage-guide 里写着 `submit_job("train.py")`,而真实
       # 签名第一个参数是 name —— 照着文档写必然报错,而这种错不会被任何

@@ -26,6 +26,11 @@ Kubernetes-native 的 Data + AI 平台骨架:统一身份认证、GitOps 驱动�
 
 ## 快速上手(部署)
 
+> **完全没接触过这个项目(人或 AI)?直接看
+> [`docs/operations/deploy-from-scratch.md`](docs/operations/deploy-from-scratch.md)**
+> —— 那份从"你要先准备什么"开始,一路到"怎么确认真的能用",不用先读别的。
+> 下面这段是给已经熟悉的人看的速查。
+
 ```bash
 git clone <这个仓库的地址> bigdata_ml_paltform && cd bigdata_ml_paltform
 ./scripts/00-generate-secrets.sh
