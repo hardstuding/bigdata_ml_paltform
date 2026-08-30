@@ -960,3 +960,16 @@ class TestGrantsUnavailableIsNotEmptyGrants:
         with patch.object(portal, "_perm_api",
                           return_value={"grants": [], "expiring_soon": []}):
             assert portal.my_permissions("alice")["warning"] is None
+
+
+class TestAuditGoldenPath:
+    def test_门户认识_audit_这条链路(self):
+        # 探针加了新链路而门户不认的话,首页上它会显示成原始的 key
+        # (`audit`)而不是人话 —— 而且"N/M 条通"的分母也会对不上。
+        assert "audit" in portal.GOLDEN_PATHS
+        label, chain = portal.GOLDEN_PATHS["audit"]
+        assert "留痕" in label and "Kafka" in chain
+
+    def test_六条以外的新链路也会被算进总数(self):
+        # 这条不是测常量,是测"加链路不用改别处"这个性质。
+        assert len(portal.GOLDEN_PATHS) >= 7

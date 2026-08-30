@@ -42,9 +42,17 @@ spec:
               就永久丢失(cloud-full 30 天)。**审计记录补不回来**,越早处理越好。
               查:kubectl -n flink get flinkdeployment trino-audit-sink
 
-        # 上面那条盯的是"作业还在不在"。这条盯的是更隐蔽的一层:作业在跑,
-        # 但**消费停滞**(比如卡在某个算子)。用 Kafka 的消费位点推进速度看。
-        # 注意 `absent()` 单独成条,不和上面合并:两种情况的处置方向不一样。
+        # 上面那条盯的是"作业还在不在"。这条盯的是**指标本身抓不抓得到**。
+        # `absent()` 单独成条、不和上面合并:两种情况的处置方向不一样。
+        #
+        # **2026-08-30 更正注释**:这里原来写着"这条盯的是……作业在跑但消费
+        # 停滞……用 Kafka 的消费位点推进速度看" —— 而下面的表达式只是
+        # `absent(...)`,压根没看位点。**注释描述的是一个这条规则没做的事**,
+        # 比没有注释更糟:读的人会以为停滞这种情况已经被盯住了。
+        #
+        # "作业在跑但消费停滞"现在由**黄金链路探针的 audit 那条**负责
+        # (apps/golden-path-probes/,判据是 `audit.query_events` 里有没有
+        # 新行)—— 那才是业务结果判据,比任何 Flink 指标都直接。
         - alert: FlinkMetricsMissing
           expr: absent(flink_jobmanager_numRunningJobs)
           for: 30m

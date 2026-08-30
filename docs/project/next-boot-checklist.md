@@ -195,3 +195,14 @@ platform-team 账号打开建表工具 → 负责人那个框可编辑
 把验过的项在 [`capability-matrix.md`](capability-matrix.md) 里从「未验证」
 改掉,并写上日期和证据。`scripts/check-capability-matrix.py` 会拦住"没验
 就标 ✅"。
+
+**15. 新加的 audit 黄金链路探针**(2026-08-30 加,**没上过集群**):
+
+```
+kubectl -n monitoring get cronjob goldenpath-audit        # 应该存在
+手工触发一次:kubectl -n monitoring create job --from=cronjob/goldenpath-audit t1
+→ 期望输出「链路 [audit] 通(Xs):最新审计记录 N 分钟前」
+→ 如果报表不存在,说明 iceberg.audit.query_events 还没建 —— 那本身就是
+  审计链路没跑起来,是真阳性不是探针的问题
+门户首页「黄金链路」那栏应该变成 7 条,并出现「查询留痕」
+```

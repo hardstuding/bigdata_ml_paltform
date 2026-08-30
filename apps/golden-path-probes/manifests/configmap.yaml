@@ -104,6 +104,34 @@ data:
         return f"最新数据 {age} 分钟前"
 
 
+    def probe_audit():
+        """链路七:查询审计。Trino event listener -> Kafka -> Flink -> Iceberg。
+
+        **判据是"审计表里有没有新行",不是"Flink 作业在不在跑"。**
+        这条区别是这个探针存在的全部理由:
+
+        - `AuditSinkJobNotRunning` 那条告警盯的是作业还在不在。作业**在跑
+          但消费停滞**(卡在某个算子、反压、写 Iceberg 一直失败)它看不出来。
+        - 而审计这条链路的失效**补不回来**:Trino 的 event listener 配了
+          `terminate-on-initialization-failure=false`(否则 Kafka 挂了 Trino
+          起不来),代价就是事件会静默丢失;Kafka 保留期一到就永久没了。
+          ADR-066 里那个取舍,靠的就是"断了要有人立刻知道"。
+
+        探针自己这次查询也会被审计记下来,所以**不需要额外造流量** ——
+        只要看最近有没有任何审计行进来就够了。
+        """
+        max_age_min = int(os.environ.get("AUDIT_MAX_AGE_MIN", "60"))
+        age = trino_query(
+            "select coalesce(date_diff('minute', max(event_time), current_timestamp), 99999) "
+            "from iceberg.audit.query_events")
+        if age is None or int(age) > max_age_min:
+            raise RuntimeError(
+                f"audit.query_events 最新一条是 {age} 分钟前,超过阈值 {max_age_min} 分钟。"
+                "审计事件还在往 Kafka 写,但没人在消费落库 —— **Kafka 保留期一到就永久丢失**,"
+                "补不回来。查:kubectl -n flink get flinkdeployment trino-audit-sink")
+        return f"最新审计记录 {age} 分钟前"
+
+
     def probe_catalog():
         """链路三:数据目录。Trino 元数据 -> OpenMetadata 采集 -> 目录可查。
 
@@ -225,7 +253,8 @@ data:
 
     PROBES = {"query": probe_query, "streaming": probe_streaming,
               "catalog": probe_catalog, "authz": probe_authz,
-              "model": probe_model, "inference": probe_inference}
+              "model": probe_model, "inference": probe_inference,
+              "audit": probe_audit}
 
     if __name__ == "__main__":
         name = sys.argv[1]

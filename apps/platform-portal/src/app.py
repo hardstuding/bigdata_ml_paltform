@@ -668,6 +668,10 @@ GOLDEN_PATHS = {
     # 探的是**发一次真实请求拿到预测**,不是 Pod Ready ——
     # 08-28 实测过两种「Pod 绿而服务不可用」的中间态(ADR-080)。
     "inference": ("推理能用", "KServe → 真实请求返回预测"),
+    # 这条和别的不是一个性质:别的链路断了修好就照旧,**审计断了那段时间的
+    # 记录永远补不回来**(event listener 是 fail-open 的,事件静默丢失,
+    # Kafka 保留期一到就没了)。判据是审计表里有没有新行,不是作业在不在跑。
+    "audit": ("查询留痕", "Trino → Kafka → Flink → Iceberg(断了补不回来)"),
 }
 
 # 多久没成功算"断了"。和 GoldenPathBroken 告警同一个阈值,**故意保持一致**

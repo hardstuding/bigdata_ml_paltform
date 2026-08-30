@@ -380,3 +380,67 @@ spec:
             - name: probe
               configMap:
                 name: golden-path-probes
+---
+# 查询审计这条链路(ADR-066)。**它和别的探针不是一个性质的**:别的链路
+# 断了,修好之后一切照旧;审计断了,**那段时间的记录永远补不回来** ——
+# Trino 的 event listener 是 fail-open 的(否则 Kafka 挂了 Trino 起不来),
+# 事件会静默丢失,Kafka 保留期一到就没了。
+#
+# 已有的 `AuditSinkJobNotRunning` 告警盯的是"作业还在不在";这条盯的是
+# **表里有没有新行** —— 作业在跑但消费停滞(反压、写 Iceberg 一直失败)
+# 那种情况,前者看不出来。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: goldenpath-audit
+  namespace: monitoring
+  labels:
+    platform/golden-path: "audit"
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    metadata:
+      labels:
+        platform/golden-path: "probe"
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 180
+      template:
+        metadata:
+          labels:
+            platform/golden-path: "probe"
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              command: ["python3", "/probe/probe.py", "audit"]
+              env:
+                - name: TRINO_USER
+                  value: goldenpath_probe
+                - name: TRINO_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: trino-service-account
+                      key: password-goldenpath_probe
+                - name: AUDIT_MAX_AGE_MIN
+                  # 探针自己每 10 分钟查一次,那次查询本身就会被审计记下来,
+                  # 所以正常情况下审计表里总有几分钟内的新行。给
+                  # {{RES:goldenpath_audit_max_age_min}} 分钟是为了容忍一次
+                  # checkpoint 延迟和一次探针失败,不是因为链路真的那么慢。
+                  value: "{{RES:goldenpath_audit_max_age_min}}"
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - name: probe
+                  mountPath: /probe
+          volumes:
+            - name: probe
+              configMap:
+                name: golden-path-probes

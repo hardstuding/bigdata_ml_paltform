@@ -170,6 +170,9 @@ local-lite:
   # local-lite 给得最松——这一档 Flink/Kafka 常常是 park 状态,
   # 给短了只会一直红,而"一直红的告警"比没有告警更糟。
   goldenpath_streaming_max_age_min: "120"
+  # 审计链路的探针阈值。和 streaming 同量级 —— 两者都是"Kafka → Flink → Iceberg",
+  # 延迟特性一样,没有理由给不同的容忍度。
+  goldenpath_audit_max_age_min: "120"
 
   # Prometheus。笔记本上不持久化、只留 6 小时——这一档的目的是"验证指标
   # 链路能跑通",不是看趋势。
@@ -360,6 +363,9 @@ cloud-full:
   # checkpoint,正常情况下数据不会超过几分钟旧。给 60 分钟是为了容忍
   # 一次 producer 失败 + 一次 checkpoint 延迟,不是因为链路真的那么慢。
   goldenpath_streaming_max_age_min: "60"
+  # 审计链路的探针阈值。和 streaming 同量级 —— 两者都是"Kafka → Flink → Iceberg",
+  # 延迟特性一样,没有理由给不同的容忍度。
+  goldenpath_audit_max_age_min: "60"
 
   # Prometheus。**2026-08-28 从 6h/无持久化改过来**:这一档是"功能完整的
   # 集成环境",而指标每次开机清零的话,成本/容量/黄金链路的历史全是空的,
@@ -584,6 +590,9 @@ prod:
   # 黄金链路探针(ADR-079)。生产给得最严:流式数据半小时没更新就该
   # 有人知道了。
   goldenpath_streaming_max_age_min: "30"
+  # 审计链路的探针阈值。和 streaming 同量级 —— 两者都是"Kafka → Flink → Iceberg",
+  # 延迟特性一样,没有理由给不同的容忍度。
+  goldenpath_audit_max_age_min: "30"
 
   # Prometheus。生产要能回答"上个月各组花了多少"——那是 E 线管理驾驶舱
   # 的核心问题,90 天是为了跨月对比留余量。**这个数字是方向性起步值**,
