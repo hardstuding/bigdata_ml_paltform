@@ -1670,3 +1670,48 @@ class TestApprovalPolicy:
 
     def test_没有负责人时不崩(self):
         assert perm.approval_policy(1, None)["table_owner"] == ""
+
+
+class Test表治理属性查询的FQN前缀:
+    """2026-08-30 实机踩到的真 bug:`lookup_table_governance` 要的是 OM 的
+    完整 FQN(`trino.iceberg.demo.orders`),而 `/api/table-governance` 的
+    参数说明和 400 报错里给的例子是 `iceberg.demo.orders`。**外部系统按
+    接口自己说的格式调,永远只会拿到 404**,而那个 404 说的是"数据目录里
+    查不到这张表",看起来完全像数据问题,不像参数格式问题。
+
+    这一类 bug 之前测不出来,是因为所有相关测试都把
+    `lookup_table_governance` 整个 mock 掉了 —— 被 mock 的那一层里正好
+    藏着错。所以这几条**不 mock 它**,只 mock 它下面的 om_request。
+    """
+
+    def _fake_om(self, monkeypatch, known_fqn):
+        called = []
+
+        def fake(method, path, *a, **kw):
+            called.append(path)
+            fqn = path.split("/api/v1/tables/name/", 1)[1].split("?")[0]
+            if fqn != known_fqn:
+                raise perm.requests.HTTPError("404")
+            return {"tags": [], "owners": [],
+                    "extension": {"securityLevel": 2, "registeredOwner": "u1"}}
+
+        monkeypatch.setattr(perm, "om_request", fake)
+        monkeypatch.setattr(perm, "OPENMETADATA_TOKEN", "t")
+        return called
+
+    def test_不带服务名前缀的三段式表名也查得到(self, monkeypatch):
+        self._fake_om(monkeypatch, "trino.iceberg.demo.orders")
+        assert perm.lookup_table_governance("iceberg.demo.orders") == (2, "u1")
+
+    def test_带服务名前缀的完整FQN照样查得到(self, monkeypatch):
+        self._fake_om(monkeypatch, "trino.iceberg.demo.orders")
+        assert perm.lookup_table_governance("trino.iceberg.demo.orders") == (2, "u1")
+
+    def test_已经带前缀时不会再加一层(self, monkeypatch):
+        called = self._fake_om(monkeypatch, "trino.iceberg.demo.orders")
+        perm.lookup_table_governance("trino.iceberg.demo.orders")
+        assert not any("trino.trino." in p for p in called)
+
+    def test_两种都查不到时返回空_不抛异常(self, monkeypatch):
+        self._fake_om(monkeypatch, "trino.iceberg.demo.别的表")
+        assert perm.lookup_table_governance("iceberg.demo.orders") == (None, None)

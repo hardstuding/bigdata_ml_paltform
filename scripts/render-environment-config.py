@@ -79,6 +79,7 @@ DIR_MAP = {
     # 架构级改动",后来发现现有机制这样扩展就够了,那个判断过重,已修正。
     "apps-postgres-manifests": REPO_ROOT / "apps" / "postgres" / "manifests",
     "apps-platform-portal-manifests": REPO_ROOT / "apps" / "platform-portal" / "manifests",
+    "apps-table-registration-app-manifests": REPO_ROOT / "apps" / "table-registration-app" / "manifests",
     "platform-cert-manager-issuers": REPO_ROOT / "platform" / "cert-manager-issuers" / "manifests",
     "platform-alertmanager-notification": REPO_ROOT / "platform" / "alertmanager-notification" / "manifests",
     "apps-kafka-manifests": REPO_ROOT / "apps" / "kafka" / "manifests",

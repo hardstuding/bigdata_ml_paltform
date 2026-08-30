@@ -543,9 +543,15 @@ def register_table_in_openmetadata(catalog: str, schema: str, table: str, column
             # 表**的 —— 改一次要重写全部表实体。指向平台的话,改的只有一处
             # 配置;而且平台这一跳还要补上 OA 不知道的东西(安全等级、
             # 表负责人、需要几级审批)。
-            "accessRequest": _access_request_link(catalog, schema, table),
         },
     }
+    # **拿不到公网地址时不写这个属性,而不是写一个空字符串。**
+    # 2026-08-30 实测:写空串的话 OpenMetadata 的表详情页上会多出一个
+    # 「accessRequest」字段、值是空白 —— 比没有更糟,它看起来像"这张表
+    # 没法申请",而真相是平台自己没配地址。
+    _link = _access_request_link(catalog, schema, table)
+    if _link:
+        body["extension"]["accessRequest"] = _link
     if owners:
         body["owners"] = owners
     om_request("PUT", "/api/v1/tables", body)

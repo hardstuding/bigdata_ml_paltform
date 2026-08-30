@@ -434,6 +434,13 @@ def om_request(method: str, path: str):
     return resp.json() if resp.content else None
 
 
+# OpenMetadata 里那个 Trino DatabaseService 的名字(scripts/29 建的)。
+# 表在 OM 里的完整 FQN 是 `<服务名>.<catalog>.<schema>.<表>`,而调用方手里
+# 的表名通常来自 Trino,是不带服务名的三段式 —— lookup_table_governance()
+# 两种都认,靠的就是这个常量。
+OM_DATABASE_SERVICE = os.environ.get("OPENMETADATA_DATABASE_SERVICE", "trino")
+
+
 def lookup_table_governance(table_fqn: str):
     """查 OpenMetadata 里这张表的安全等级和负责人。table_fqn 是完整 FQN
     (比如 trino.iceberg.demo.orders,和 table-registration-app 建表时
@@ -441,9 +448,31 @@ def lookup_table_governance(table_fqn: str):
     (None, None),调用方要处理这种情况,不能假设一定查得到。"""
     if not OPENMETADATA_TOKEN:
         return None, None
-    try:
-        data = om_request("GET", f"/api/v1/tables/name/{table_fqn}?fields=owners,tags,extension")
-    except requests.HTTPError:
+
+    # **两种写法都收:带不带 OM 服务名前缀。**
+    #
+    # 2026-08-30 实测踩到:这个函数要的是 OM 的完整 FQN
+    # (`trino.iceberg.demo.orders`),而 /api/table-governance 自己的参数
+    # 说明和 400 报错里写的例子是 `iceberg.demo.orders`(Trino 里的写法)。
+    # 也就是说**外部系统按这个接口自己说的格式调,永远只会拿到 404** ——
+    # 而 404 的措辞是"数据目录里查不到这张表",看起来完全像是数据问题,
+    # 不像是参数格式问题。这是最坏的一类接口 bug:它不报错,它撒谎。
+    #
+    # 与其去统一措辞(哪一种才"对"其实没有绝对答案:调用方手里拿到的
+    # 表名来自 Trino,那边就是不带服务名前缀的),不如两种都认。
+    candidates = [table_fqn]
+    if not table_fqn.startswith(f"{OM_DATABASE_SERVICE}."):
+        candidates.append(f"{OM_DATABASE_SERVICE}.{table_fqn}")
+
+    data = None
+    for fqn in candidates:
+        try:
+            data = om_request(
+                "GET", f"/api/v1/tables/name/{fqn}?fields=owners,tags,extension")
+            break
+        except requests.HTTPError:
+            continue
+    if data is None:
         return None, None
     security_level = None
     for tag in data.get("tags", []) or []:
@@ -2023,7 +2052,7 @@ def api_table_governance():
     """
     table_fqn = request.args.get("table", "").strip()
     if not table_fqn:
-        return {"error": "必须带 table 参数(完整表名,比如 iceberg.demo.orders)"}, 400
+        return {"error": "必须带 table 参数(表名,比如 iceberg.demo.orders 或 trino.iceberg.demo.orders,两种都认)"}, 400
     security_level, table_owner = lookup_table_governance(table_fqn)
     if security_level is None:
         return {

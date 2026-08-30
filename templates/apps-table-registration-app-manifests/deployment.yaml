@@ -76,7 +76,7 @@ spec:
             # host 是同一套拼法),没有任何理由让人手工去建一个 secret:
             # 少一件要记得做的事,就少一个"忘了做而且没人发现"的机会。
             - name: PERMISSION_APP_PUBLIC_URL
-              value: "http://permission-request.local-lite.test:32460"
+              value: "{{EXTERNAL_SCHEME}}://permission-request.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}"
             - name: INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef:

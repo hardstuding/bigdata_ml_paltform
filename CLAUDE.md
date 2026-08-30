@@ -207,6 +207,7 @@ head -3 <文件> | grep -q "自动生成\|这个文件是生成的" && echo "!! 
 |---|---|
 | `apps/definitions/*.yaml` | `apps/components/*.yaml` |
 | `platform/apps/*.yaml` | `templates/platform-apps/*.yaml` |
+| `apps/table-registration-app/manifests/*` | `templates/apps-table-registration-app-manifests/*` |
 | `platform/bootstrap/*` | `templates/platform-bootstrap/*` |
 | `scripts/03-configure-keycloak.sh` 等 | `templates/scripts/*` |
 | `apps/platform-jobs/manifests/*` | `jobs/`(经 `render-jobs.py`) |
