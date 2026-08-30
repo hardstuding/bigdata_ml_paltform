@@ -727,6 +727,19 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
 
 ## P3:打磨已有角色能力(不需要新组件,是体验问题)
 
+- **两条链路的 Iceberg warehouse 前缀不一致**(2026-08-30 做 iceberg-backup
+  时发现):审计 sink(`scripts/flink_trino_audit_sink.py`、
+  `streams/device-events/job.py`)配的是 `s3a://lakehouse/warehouse`,推理
+  留痕 sink(`streams/inference-log/job.py`)默认的是 `s3a://lakehouse/`,
+  而 `apps/hive-metastore/manifests/core-site-configmap.yaml` 里写的也是
+  `s3a://lakehouse/`。结果是同一个 lakehouse 桶里,一部分 schema 落在
+  `warehouse/xxx.db/`,另一部分会落在 `xxx.db/`。
+  **现在的影响是"任何按路径操作对象存储的东西都得两个位置都找"**
+  ——`apps/iceberg-backup` 已经这么绕过去了,但这是绕,不是修。
+  真正的修法是把 warehouse 前缀收敛成一处配置(渲染时注入),让所有
+  sink 引用同一个值。**目前没有数据损坏风险,所以没排进 P0/P1**;等
+  `ml` schema 真的有数据了再动,免得改路径导致已有表找不到。
+
 - **告警送不到人** —— **机制那一半已验证([ADR-081](../decisions/081-alert-delivery-verified-with-echo-sink.md))**:
   告警真的被 POST 出去过,终点是集群内的 alert-echo-sink,能回看 payload。
   **还差的只是真实渠道地址**(企微/飞书/邮件),换渠道 = 改

@@ -274,16 +274,26 @@ argo submit --from cronwf/iceberg-maintenance -n argo-workflows -p dry_run=1
 **那是真问题**;个别动作失败(比如 optimize 报 table is being written)
 不算,作业不会变红。
 
-**20. Iceberg 备份**(**没上过集群**):
+**20. Iceberg 备份**(**2026-08-30 实机验证通过**):
 
 ```
 kubectl -n data create job --from=cronjob/iceberg-backup bk1
 kubectl -n data logs job/bk1 -f
-→ 期望:镜像 lakehouse/audit/ 和 lakehouse/ml/,最后打印 mc du 的结果
-→ audit / ml 都还不存在时应该打印「没有需要备份的 schema」并**正常退出**,
-  不该报失败
-mc ls backups/iceberg/   # 确认东西真的到了目的地
+→ 实测结果:audit 镜像成功(33.43 MiB / 1239 个对象),ml 打印
+  「schema ml 还不存在,跳过」并正常退出(推理留痕链路还没产出数据)
 ```
+
+**这一条上集群跑出了三个只有实机才会暴露的问题**,都已修:
+
+1. 每次都在第一条 `mc alias set` 上 **Connection refused** —— 新建 pod
+   头几秒连集群内服务有概率被拒(和 postgres-backup 注释里记的是同一个
+   现象),已加重试。
+2. 备份路径写死错了:实际是 `lakehouse/warehouse/audit.db/`,目录名带
+   `.db` 后缀。而且仓库里两条链路的 warehouse 前缀本来就不一致(审计是
+   `s3a://lakehouse/warehouse`,推理留痕默认 `s3a://lakehouse/`),所以
+   改成两个候选位置都找。**这个不一致本身待收敛,见 roadmap backlog。**
+3. 「schema 不存在就跳过」的守卫形同虚设 —— `mc ls` 对不存在的前缀
+   **退出码是 0**,得判断输出是否为空。
 
 **记住这一档的局限**:cloud-full 的备份目的地就是同一个 MinIO ——
 **验的是"备份任务能跑通",不是"数据安全了"**。
