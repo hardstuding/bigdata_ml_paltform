@@ -135,7 +135,7 @@
 
 | 环节 | 状态 | 验证级别 | 最后验证 | 证据 |
 |---|---|---|---|---|
-| 权限分级审批 | ✅ | demo | 2026-08-18 | [ADR-044](../decisions/044-tiered-approval-workflow.md) |
+| 权限分级审批 | 🟡 | demo | 2026-08-18 | [ADR-044](../decisions/044-tiered-approval-workflow.md)。**2026-08-30 承认一个设计问题并改了协议**([ADR-086](../decisions/086-approval-belongs-to-oa.md)):原来的外部对接是「平台算出该谁批、再让 OA 去执行」—— 反了,OA 才有组织架构和审批规则。新增 `APPROVAL_BACKEND=oa`:整单一次提交、OA 自己决定谁批、一次回调最终结果。**没有真实 OA 可对接,未验证**;默认仍是 `local` |
 | 审批通知 / 超时升级 | ✅ | demo | 2026-08-18 | [ADR-045](../decisions/045-approval-backend-notifications-escalation.md),企微推送需真实凭据激活 |
 | 审批落地不再假成功 | ✅ | 集成验证 | 2026-08-29 | 写 git 失败时状态是 `approved_pending_apply` 而不是 `approved`,配 `/internal/retry-pending-applies` |
 | 权限交接 / 到期回收 | ✅ | 集成验证 | 2026-08-18 | [ADR-045](../decisions/045-approval-backend-notifications-escalation.md) / [ADR-050](../decisions/050-grant-expiry-reclamation.md) |

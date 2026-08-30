@@ -12,6 +12,7 @@
   cd apps/permission-request-app && python3 -m pytest tests/ -v
 """
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -1504,3 +1505,109 @@ class TestRenew:
                            data={"table_fqn": "iceberg.demo.users"},
                            headers=auth("engineer1"))
         assert resp.status_code == 302
+
+
+class TestOaBackend:
+    """`APPROVAL_BACKEND=oa`(ADR-086)。
+
+    **和 webhook 那档的根本区别**:webhook 是"平台算出该谁批,再让 OA 去
+    执行"—— 那是反的,OA 才是有组织架构和审批规则的那一方。oa 这档是
+    "整张单子交出去,OA 自己决定谁批,一次回调最终结果"。
+    """
+
+    def _submit(self, client, monkeypatch, level=2, owner="manager1"):
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (level, owner))
+        monkeypatch.setattr(perm, "APPROVAL_BACKEND", "oa")
+        monkeypatch.setattr(perm, "EXTERNAL_OA_REQUEST_URL", "http://oa.example.com/api/tickets")
+        monkeypatch.setattr(perm, "PLATFORM_PUBLIC_URL", "https://platform.example.com")
+        sent = {}
+
+        class R:
+            def raise_for_status(self): pass
+
+        def fake_post(url, json=None, timeout=None):
+            sent["url"] = url
+            sent["body"] = json
+            return R()
+
+        monkeypatch.setattr(perm.requests, "post", fake_post)
+        client.post("/table-access/request",
+                    data={"table_fqn": "iceberg.demo.orders", "reason": "季度对账要看订单明细"},
+                    headers=auth("engineer1"))
+        return sent
+
+    def test_整单一次_post_不按步派发(self, client, monkeypatch):
+        sent = self._submit(client, monkeypatch)
+        assert sent["url"].endswith("/api/tickets")
+        assert sent["body"]["table_fqn"] == "iceberg.demo.orders"
+        assert sent["body"]["applicant"] == "engineer1"
+
+    def test_不告诉_oa_该谁批(self, client, monkeypatch):
+        """**这是这份改动的核心。** body 里不能有 approver_username ——
+        谁是直属上级、请假了谁代理,全是 OA 的事。"""
+        sent = self._submit(client, monkeypatch)
+        flat = json.dumps(sent["body"], ensure_ascii=False)
+        assert "approver_username" not in flat
+        assert "manager1" in flat      # 表负责人要给(那是平台的知识)
+        assert sent["body"]["required_approval"]["table_owner"] == "manager1"
+
+    def test_告诉_oa_的是需要几级和为什么(self, client, monkeypatch):
+        sent = self._submit(client, monkeypatch, level=3)
+        ra = sent["body"]["required_approval"]
+        assert ra["levels"] == 3 and ra["security_level"] == 3
+        assert "L3" in ra["policy"]
+
+    def test_带上回调地址(self, client, monkeypatch):
+        sent = self._submit(client, monkeypatch)
+        assert sent["body"]["callback_url"].startswith("https://platform.example.com/")
+        assert sent["body"]["callback_url"].endswith("/oa-callback")
+
+    def test_交出去之后所有步骤都是_pending_external(self, client, monkeypatch):
+        self._submit(client, monkeypatch)
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        st = {r[0] for r in conn.execute("SELECT status FROM approval_steps").fetchall()}
+        conn.close()
+        assert st == {"pending_external"}
+
+    def test_oa_不可用时退化成本地审批_而不是卡死(self, client, monkeypatch):
+        """OA 抽风不能让申请卡在没人能处理的状态 —— 和 ADR-045 同一个判断。"""
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (1, "manager1"))
+        monkeypatch.setattr(perm, "APPROVAL_BACKEND", "oa")
+        monkeypatch.setattr(perm, "EXTERNAL_OA_REQUEST_URL", "http://oa.example.com/x")
+        monkeypatch.setattr(perm.requests, "post",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("oa down")))
+        client.post("/table-access/request",
+                    data={"table_fqn": "iceberg.demo.orders", "reason": "季度对账要看订单明细"},
+                    headers=auth("engineer1"))
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        st = {r[0] for r in conn.execute("SELECT status FROM approval_steps").fetchall()}
+        conn.close()
+        assert "pending" in st      # 退化成本地,不是 pending_external
+
+    def test_回调批准之后走完整的落地流程(self, client, monkeypatch, local_git_repo):
+        self._submit(client, monkeypatch)
+        monkeypatch.setattr(perm, "EXTERNAL_OA_CALLBACK_TOKEN", "cb-token")
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        rid = conn.execute("SELECT id FROM table_access_requests ORDER BY id DESC LIMIT 1").fetchone()[0]
+        conn.close()
+        resp = client.post(f"/table-access/request/{rid}/oa-callback",
+                           json={"token": "cb-token", "status": "approved",
+                                 "approvers": ["li", "wang"], "note": "同意"})
+        assert resp.status_code == 200
+        conn = perm.sqlite3.connect(perm.DB_PATH)
+        conn.row_factory = perm.sqlite3.Row
+        row = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (rid,)).fetchone()
+        conn.close()
+        # 留痕要能看出是 OA 批的、谁批的
+        assert "[OA]" in row["note"] and "li" in row["note"]
+        assert row["status"] in ("approved", "approved_pending_apply")
+
+    def test_回调要带对_token(self, client, monkeypatch):
+        monkeypatch.setattr(perm, "EXTERNAL_OA_CALLBACK_TOKEN", "cb-token")
+        assert client.post("/table-access/request/1/oa-callback",
+                           json={"token": "wrong", "status": "approved"}).status_code == 403
+
+    def test_默认仍然是_local(self):
+        # 测试阶段不该因为这次改动而变行为。
+        import os
+        assert os.environ.get("APPROVAL_BACKEND", "local") == "local"

@@ -110,8 +110,34 @@ spec:
                   name: permission-request-app-notify
                   key: wecom-webhook-url
                   optional: true
+            # 三档,见 ADR-086:
+            #   local  —— 平台自己收批准点击(**测试阶段用这个**)
+            #   oa     —— **接公司 OA 时改成这个**:整张申请单一次 POST 给
+            #             OA,OA 走自己的审批链,审完一次回调最终结果。
+            #             要配 EXTERNAL_OA_REQUEST_URL + PLATFORM_PUBLIC_URL
+            #             + EXTERNAL_OA_CALLBACK_TOKEN
+            #   webhook —— ADR-045 那套按步 POST。**形状是错的,不推荐**
+            #             (等于平台自己算出该谁批、再让 OA 去执行),保留
+            #             只是为了不破坏可能已有的对接
             - name: APPROVAL_BACKEND
-              value: local  # 改成 webhook 才会启用下面两个变量,见 ADR-045
+              value: local
+            # oa 模式:整单提交给 OA 的地址
+            - name: EXTERNAL_OA_REQUEST_URL
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-notify
+                  key: external-oa-request-url
+                  optional: true
+            # oa 模式:平台自己的对外地址,用来拼 callback_url 告诉 OA 往哪回调。
+            # **这里不能写 {{DOMAIN_SUFFIX}} 这类占位符** —— 这个文件不是
+            # 渲染生成物(不在 templates/ 下),占位符不会被替换,会原样变成
+            # 字面量。所以和其它 oa 配置一样从 Secret 取,接 OA 的时候一起填。
+            - name: PLATFORM_PUBLIC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: permission-request-app-notify
+                  key: platform-public-url
+                  optional: true
             - name: EXTERNAL_OA_WEBHOOK_URL
               valueFrom:
                 secretKeyRef:

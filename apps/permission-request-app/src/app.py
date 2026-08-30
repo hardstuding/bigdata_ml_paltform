@@ -109,7 +109,21 @@ INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN", "")
 # EXTERNAL_OA_WEBHOOK_URL 出去,不在这个页面等人点,靠外部系统回调
 # /table-access/step/<id>/external-callback 报告结果。这次没有真实对接
 # 目标,只交付这个协议本身,见 ADR-045 的范围边界说明。
+# 三档(ADR-086):
+#   local(**默认**)—— 平台自己收批准点击。测试阶段用这个。
+#   oa    —— **接公司 OA 时用这一档。** 整张申请单一次 POST 给 OA,OA 走
+#            它自己的审批链,审批结束一次回调最终结果。
+#   webhook —— ADR-045 那套"按步 POST、每步带 approver_username"。
+#            **形状是错的,不推荐**:那等于平台自己算出该谁批、再让 OA 去
+#            执行,而 OA 才是有组织架构和审批规则的那一方。保留只是为了
+#            不破坏可能已经存在的对接,见 ADR-086。
 APPROVAL_BACKEND = os.environ.get("APPROVAL_BACKEND", "local")
+
+# oa 模式下:整单 POST 到这里,OA 审完回调
+# /table-access/request/<id>/oa-callback。
+EXTERNAL_OA_REQUEST_URL = os.environ.get("EXTERNAL_OA_REQUEST_URL", "")
+# 平台自己的对外地址,拼 callback_url 用 —— OA 得知道往哪回调。
+PLATFORM_PUBLIC_URL = os.environ.get("PLATFORM_PUBLIC_URL", "")
 EXTERNAL_OA_WEBHOOK_URL = os.environ.get("EXTERNAL_OA_WEBHOOK_URL", "")
 EXTERNAL_OA_CALLBACK_TOKEN = os.environ.get("EXTERNAL_OA_CALLBACK_TOKEN", "")
 
@@ -569,6 +583,62 @@ def current_step_order(conn, request_id: int):
         (request_id,),
     ).fetchone()
     return row["s"]
+
+
+def approval_policy(security_level: int, table_owner: str | None) -> dict:
+    """这张表**需要什么强度的审批** —— 平台该告诉 OA 的就是这个。
+
+    **注意这里没有 approver_username。** 谁是直属上级、请假了谁代理、会签
+    还是或签,全是 OA 的事;平台知道的是"这张表几级、负责人是谁",那是
+    数据治理的知识,OA 不可能知道(ADR-086)。
+    """
+    levels = 1
+    if security_level >= 2:
+        levels = 2
+    if security_level >= 3:
+        levels = 3
+    parts = ["L1:直属上级 + 表负责人"]
+    if levels >= 2:
+        parts.append("L2:上级的上级")
+    if levels >= 3:
+        parts.append("L3:指定管理员")
+    return {
+        "levels": levels,
+        "policy": ";".join(parts),
+        "table_owner": table_owner or "",
+        "security_level": security_level,
+    }
+
+
+def dispatch_to_oa(conn, request_id: int, req_row) -> bool:
+    """整张申请单一次 POST 给 OA(ADR-086 的 `oa` 模式)。
+
+    返回是否成功交出去。**失败要退化成本地审批** —— 不能让 OA 抽风导致
+    申请卡死在没人能处理的状态,这一点和 ADR-045 的判断一样。
+    """
+    if not EXTERNAL_OA_REQUEST_URL:
+        return False
+    callback = (f"{PLATFORM_PUBLIC_URL.rstrip('/')}/table-access/request/{request_id}/oa-callback"
+                if PLATFORM_PUBLIC_URL else "")
+    body = {
+        "request_id": request_id,
+        "applicant": req_row["username"],
+        "table_fqn": req_row["table_fqn"],
+        "security_level": req_row["security_level"],
+        "reason": req_row["reason"],
+        "required_approval": approval_policy(req_row["security_level"], req_row["table_owner"]),
+        "callback_url": callback,
+    }
+    try:
+        requests.post(EXTERNAL_OA_REQUEST_URL, json=body, timeout=5).raise_for_status()
+    except Exception:   # noqa: BLE001 —— 交不出去就退化成本地审批
+        return False
+    # 整单交出去了:所有 step 一起标成 pending_external。**不逐级派发** ——
+    # OA 眼里这是一张单子,不是 N 张。
+    conn.execute(
+        "UPDATE approval_steps SET status='pending_external', activated_at=? WHERE request_id=?",
+        (datetime.now(timezone.utc).isoformat(), request_id))
+    return True
 
 
 def dispatch_step(conn, step_row):
@@ -1326,6 +1396,14 @@ def create_table_access_request(conn, username: str, table_fqn: str, reason: str
             ("算不出任何审批人 —— 可能是申请人不在组织架构里、这张表没有负责人,"
              "或者负责人就是申请人自己(自己不能批自己)。请联系平台管理员手动处理", request_id),
         )
+    elif APPROVAL_BACKEND == "oa":
+        # **整单交给 OA,不逐级派发**(ADR-086)。审批链仍然算出来了,但
+        # 它在这一档里只用来表达"需要几级",不用来指定谁批 —— 谁批是 OA
+        # 的事。交不出去就退化成本地审批,不能让申请卡死。
+        req_row = conn.execute(
+            "SELECT * FROM table_access_requests WHERE id=?", (request_id,)).fetchone()
+        if not dispatch_to_oa(conn, request_id, req_row):
+            activate_next_step(conn, request_id)
     else:
         activate_next_step(conn, request_id)
     return (True, None)
@@ -1555,6 +1633,58 @@ def nudge_request(req_id):
     conn.commit()
     conn.close()
     return redirect(url_for("index"))
+
+
+@app.route("/table-access/request/<int:req_id>/oa-callback", methods=["POST"])
+def oa_callback(req_id):
+    """OA 审批结束,一次回调最终结果(ADR-086 的 `oa` 模式)。
+
+    **和按步的 external-callback 的区别**:那个是"第 N 级批了",这个是
+    "这张单子结束了"。OA 眼里本来就只有一张单子 —— 它内部走几级、谁批的、
+    有没有代理人,平台不需要知道,也不该假装知道。
+
+    `approvers` 是 OA 告诉平台"最终是谁批的",只用于留痕。**平台不校验
+    这些人是谁** —— 校验的前提是平台有一份可信的组织架构,而那正是我们
+    没有、也不该维护的东西。
+    """
+    if (not EXTERNAL_OA_CALLBACK_TOKEN or request.json is None
+            or request.json.get("token") != EXTERNAL_OA_CALLBACK_TOKEN):
+        abort(403)
+    status = request.json.get("status")
+    if status not in ("approved", "rejected"):
+        abort(400)
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    req = conn.execute("SELECT * FROM table_access_requests WHERE id=?", (req_id,)).fetchone()
+    if not req or req["status"] != "pending":
+        conn.close()
+        abort(404)
+
+    now = datetime.now(timezone.utc).isoformat()
+    approvers = request.json.get("approvers") or []
+    note = request.json.get("note") or ""
+    # 把 OA 报回来的结果落到所有 step 上 —— 留痕要能看出"这单是 OA 批的、
+    # 谁批的",而不是凭空变成 approved。
+    conn.execute(
+        "UPDATE approval_steps SET status=?, decided_at=? WHERE request_id=?",
+        (status, now, req_id))
+    who = ("、".join(str(a) for a in approvers)) if approvers else "OA 未提供审批人"
+    oa_note = f"[OA] {who} {'批准' if status == 'approved' else '拒绝'}。{note}".strip()
+
+    # **先 finalize 再写 note,而且是追加不是覆盖。**
+    # finalize_table_request_if_done() 会把 note 设成落地结果(写 git 成功
+    # 与否)。先写 OA 的归属再 finalize,那条归属会被覆盖掉 —— 2026-08-30
+    # 写测试时就是这么发现的。两条信息都要留:
+    #   - 谁批的(合规要回答"这个权限是谁批的")
+    #   - 授权有没有真的生效(approved 和 approved_pending_apply 的区别)
+    finalize_table_request_if_done(conn, req_id)
+    final = conn.execute("SELECT note FROM table_access_requests WHERE id=?", (req_id,)).fetchone()
+    merged = f"{oa_note} | {final['note']}" if final and final["note"] else oa_note
+    conn.execute("UPDATE table_access_requests SET note=? WHERE id=?", (merged, req_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
 
 
 @app.route("/table-access/step/<int:step_id>/external-callback", methods=["POST"])
