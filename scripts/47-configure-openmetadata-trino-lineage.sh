@@ -77,6 +77,27 @@ def om(method, path, body=None):
 svc = om("GET", "/api/v1/services/databaseServices/name/trino")
 print(f"database service: {svc['fullyQualifiedName']} (id={svc['id']})")
 
+# **先确认连接配置是完整的,再建采集管道。**
+#
+# 2026-08-30 实机踩到:这个 DatabaseService 上的 username / authType 不知道
+# 在哪一步丢了(scripts/29 是唯一写它们的地方,重跑一次就补回来了)。
+# 而缺了 username 的后果**极难从报错里认出来**:采集 Job 会在
+# OpenMetadata 内部拿这份配置去挨个匹配几十种数据库连接类型,吐出
+# **483 条 pydantic 校验错误**,绝大多数是 BigQuery/BigTable/Vertica 的
+# 噪音,真正那一条
+#   connection.config...[TrinoConnection].username  Field required
+# 夹在中间,最后以一句毫不相干的
+#   AttributeError: 'NoneType' object has no attribute 'root'
+# 收尾。
+#
+# 与其让人去那 483 行里翻,不如在这里一句话说清楚。
+missing = [f for f in ("username", "authType") if not svc.get("connection", {}).get("config", {}).get(f)]
+if missing:
+    raise SystemExit(
+        f"!! trino 这个 DatabaseService 的连接配置缺了 {missing} —— "
+        "先跑 ./scripts/29-configure-openmetadata-trino-ingestion.sh 补全,再跑这个脚本。\n"
+        "   (不补的话采集 Job 会以 483 条 pydantic 校验错误失败,真正的原因埋在里面)")
+
 # `DatabaseLineage` 采集器:读 Trino 的查询历史、自己解析 SQL、自己建边。
 #
 # queryLogDuration=1:只看最近 1 天的查询。**给大了没用** —— Trino 的

@@ -196,7 +196,20 @@ platform-team 账号打开建表工具 → 负责人那个框可编辑
 改掉,并写上日期和证据。`scripts/check-capability-matrix.py` 会拦住"没验
 就标 ✅"。
 
-**15. 新加的 audit 黄金链路探针**(2026-08-30 加,**没上过集群**):
+**15. 新加的 audit 黄金链路探针**(**2026-08-30 实机验证通过**:
+「链路 [audit] 通(0.3s):最新审计记录 1 分钟前」,门户黄金链路 7 条齐):
+
+**上集群跑出两个真问题**,都已修:
+
+1. 探针查了一个**不存在的列** —— 写的 `event_time`,`audit.query_events`
+   的时间列叫 `event_ts`(`event_time` 是隔壁 `demo.device_events_stream`
+   的列名,照抄时没核对表结构)。
+2. 改完列名之后被**自己的 OPA 策略**挡住:`Cannot select from columns
+   [event_ts]`。没有像 openmetadata_service / iceberg_maintenance_service
+   那样放开整个 audit schema —— 按**列**开了一条窄口子(只有
+   `query_events` 的 `event_ts`),多选一列立刻被拒,6 条测试守着。
+
+原验证步骤:
 
 ```
 kubectl -n monitoring get cronjob goldenpath-audit        # 应该存在
@@ -207,7 +220,19 @@ kubectl -n monitoring get cronjob goldenpath-audit        # 应该存在
 门户首页「黄金链路」那栏应该变成 7 条,并出现「查询留痕」
 ```
 
-**16. 从查询历史自动推的血缘**(2026-08-30 加,**没上过集群**):
+**16. 从查询历史自动推的血缘**(**2026-08-30 实机验证通过**:血缘接口
+查到 `trino.iceberg.demo.orders -> lineage_probe_1788096845`,从查询历史
+自动推出来的,没有人工声明):
+
+**上集群跑出一个真问题**:`trino` 这个 DatabaseService 上的
+`username`/`authType` 不知在哪一步丢了(scripts/29 是唯一写它们的地方,
+重跑一次就补回来)。而缺了 username 的报错**极难认**:采集 Job 会吐出
+**483 条 pydantic 校验错误**(绝大多数是 BigQuery/BigTable 的噪音),
+真正那条 `[TrinoConnection].username Field required` 夹在中间,最后以一句
+毫不相干的 `AttributeError: 'NoneType' object has no attribute 'root'`
+收尾。**scripts/47 现在会先检查这两个字段,缺了就直接告诉你去跑 29。**
+
+原验证步骤:
 
 ```bash
 ./scripts/47-configure-openmetadata-trino-lineage.sh   # 配采集
