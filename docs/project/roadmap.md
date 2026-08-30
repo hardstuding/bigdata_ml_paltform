@@ -52,8 +52,22 @@ runner 在境外)。`platform-sdk/**` 也进了触发路径 —— SDK 改了镜
 
    `check-image-tag-freshness.py` 也一并覆盖了它:改了
    `apps/platform-image/` 或 `platform-sdk/` 却没换 SHA,CI 会红。
-3. **还没做**:在集群上验一次 notebook 和一个定时作业真的能起来。
-   见 `docs/project/next-boot-checklist.md`。
+3. ~~在集群上验一次 notebook 和一个定时作业真的能起来~~ **2026-08-30 验完**:
+   - ACR 上 `platform-runtime:49d1d1cd...` 确实存在,argo-workflows 命名空间
+     能直接拉(拉取凭据也在)
+   - 定时作业:克隆一份 CronWorkflow、时间改到两分钟后,它**自己**触发并
+     跑成功,`main` 容器用的就是 ACR 那个镜像
+   - notebook:用和 singleuser 完全相同的镜像+环境变量+ServiceAccount 起
+     一个 pod,`platform_sdk.query()` 查得通 Trino(`current_user` 是
+     `notebook_service`),`default_job_image()` 解析成 ACR 那份;再从这个
+     pod 里 `submit_job()` 提交一个作业,**作业跑在同一个镜像上**并查到了
+     真实数据(`orders` 10 行)。这一步验的就是 ADR-058 那条"交互开发和
+     调度执行环境一致"
+
+   **有一点没验到,如实记**:没有真的通过 JupyterHub 的 Web 界面(OIDC 登录)
+   spawn 一个 notebook —— 那要走浏览器,脚本进不去。spawner 用哪个镜像是
+   从渲染出来的配置和 `continuous-image-puller` 的 initContainer 确认的
+   (两者都指向新镜像),不是从一个真的被 spawn 出来的 pod 上确认的。
 
 **为什么第 3 步必须单独做**:一旦 ACR 上那个 tag 不存在或者名字拼错,
 **集群上所有 notebook 和定时作业会同时 ImagePullBackOff**,而这是没法在

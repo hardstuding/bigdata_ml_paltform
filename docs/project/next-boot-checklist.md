@@ -233,12 +233,20 @@ kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str
 
 ---
 
-## 开机后必验:统一运行时镜像切到 ACR(2026-08-30 改的,**没上过集群**)
+## ~~开机后必验:统一运行时镜像切到 ACR~~ **2026-08-30 已验完**
 
 `environments/<env>/config.yaml` 新增 `platform_job_image`,cloud-full 指向
 `.../platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176`。
 在这之前 notebook 和定时作业用的是 `local/platform-runtime:0.1.0` ——
 一个**只存在于那台云主机上、靠手工 docker build 出来的**镜像。
+
+**验完的结果**:镜像存在且能拉;定时作业自触发跑成功、`main` 容器就是
+ACR 那份;用和 singleuser 相同的镜像/环境/SA 起的 pod 里,
+`platform_sdk.query()` 通、`default_job_image()` 解析正确、`submit_job()`
+提交的作业跑在同一个镜像上并查到真实数据。**没验到的**:没通过 JupyterHub
+的 Web 界面真的 spawn 一个 notebook(要浏览器 OIDC)。
+
+下面的步骤保留,换 SHA 之后按同一套再走一遍。
 
 **风险点很集中**:那个 tag 如果 ACR 上不存在(或者名字拼错),
 **集群上所有 notebook 和定时作业会同时 ImagePullBackOff**。所以第一步
@@ -276,7 +284,11 @@ kubectl -n jupyterhub get pods -o jsonpath='{range .items[*]}{.metadata.name} {.
 
 ---
 
-## 开机后先做:清掉 2026-08-30 验证留下的一个临时凭据
+## ~~开机后先做:清掉 2026-08-30 验证留下的一个临时凭据~~ **2026-08-30 已做**
+
+(密码已换成随机值,`directAccessGrantsEnabled` 确认为 `false`。下面留着做法备查。)
+
+### 原步骤
 
 验组权限审批按钮时,给 Keycloak `platform` 域的 `admin` 设了一个临时密码
 (密码模式换 token 用),`directAccessGrantsEnabled` 当时已经关回去了,但
