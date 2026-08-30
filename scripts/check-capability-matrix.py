@@ -22,8 +22,40 @@ LEVELS = {"生产验证", "集成验证", "demo", "未验证", "计划中", "—
 STATUSES = {"✅", "🟡", "❌"}
 
 
-def main() -> int:
+GAPS_DOC = pathlib.Path(__file__).resolve().parent.parent / "docs/project/production-readiness-gaps.md"
+STATUS_WORDS = ("未部署", "未上集群", "未验证", "配置完成", "代码完成", "manifest 完成")
+
+
+def check_gaps_doc_has_no_status() -> list[str]:
+    """`production-readiness-gaps.md` 的条目标题里不许再挂状态。
+
+    **为什么单独查这个**:那份文档 2026-08-30 之前每条标题上都挂着 ✅/🟡
+    和"未部署""未上集群",结果它比现实**落后了四五天** —— 三条写着未部署
+    的东西早就部署并验证过了。一份"生产就绪度"文档**低估**已完成的部分,
+    后果和高估一样坏:会让人重复做已经做完的事,或者在评估"能不能上生产"
+    时给出错误结论。
+
+    职责划分是:状态只在 capability-matrix.md 里有一份;那份文档记的是
+    "为什么这条是缺口""做到什么程度才算做完",那部分不会过期。这个检查
+    就是把这条划分钉住 —— 不然下一次有人顺手在标题上写个 ✅,就又开始了。
+    """
+    if not GAPS_DOC.exists():
+        return []
     problems = []
+    for lineno, line in enumerate(GAPS_DOC.read_text().splitlines(), 1):
+        if not re.match(r"^## \d+\. ", line):
+            continue
+        hit = [w for w in ("✅", "🟡", "❌", *STATUS_WORDS) if w in line]
+        if hit:
+            problems.append(
+                f"production-readiness-gaps.md:{lineno} 条目标题里带了状态 {hit}:"
+                f"「{line.strip()}」。状态只在 capability-matrix.md 里维护 —— "
+                f"两份文档各记一份,迟早会打架(2026-08-30 实测落后了四五天)")
+    return problems
+
+
+def main() -> int:
+    problems = check_gaps_doc_has_no_status()
     rows = 0
     for lineno, line in enumerate(DOC.read_text().splitlines(), 1):
         if not line.startswith("|"):
@@ -55,7 +87,7 @@ def main() -> int:
             problems.append(f"{lineno}: 「{环节}」没有证据链接")
 
     if problems:
-        print(f"capability-matrix.md 有 {len(problems)} 个问题:", file=sys.stderr)
+        print(f"能力/缺口文档有 {len(problems)} 个问题:", file=sys.stderr)
         for p in problems:
             print("  - " + p, file=sys.stderr)
         return 1
