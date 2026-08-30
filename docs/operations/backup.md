@@ -9,9 +9,25 @@
 |---|---|---|
 | Postgres(Keycloak / Hive Metastore / MLflow / Airflow / Superset 共用) | ✅ 每天 02:00 UTC | `pg_dumpall` 全量 → MinIO `backups/postgres/`,留 14 天 |
 | Keycloak realm / client / 用户 | ✅ | 就在上面那份里,不用单独处理 |
-| MinIO 里的 Iceberg 表数据 | ❌ **没有备份,而且这个判断已经过期** | 原来的理由是「能从数据源重导」([ADR-033](../decisions/033-postgres-backup.md)),那句话后面跟着一条触发条件:**「以后如果有不可重建的数据落进 MinIO,这个判断要重新做」**。**2026-08-30 核对:这个条件早就满足了,没人注意到。** `iceberg.audit.query_events`(08-24 起)记的是「谁在什么时候查了哪张表」,`iceberg.ml.inference_log`(08-30 起)记的是线上推理的输入输出 —— **这两类都重导不出来**,丢了就是永久丢了,而它们恰恰是合规场景最需要的那部分。**上生产前必须解决**,见 [production-readiness-gaps.md](../project/production-readiness-gaps.md) |
+| MinIO 里的 `audit` / `ml` 两个 schema | ✅ 每天 04:00 UTC(**2026-08-30 补的**) | `mc mirror` 到备份目的地。这两类**重导不出来** —— 审计记的是「谁在什么时候查了哪张表」(08-24 起),推理留痕记的是线上推理的输入输出(08-30 起)。**没上过集群,未验证** |
+| MinIO 里其它 Iceberg 表(demo / tpch 等) | ❌ 刻意不备 | 能从数据源重建,备了只是白占空间 |
 
 ---
+
+> ### ⚠️ 两件必须知道的事
+>
+> **1. cloud-full 这一档,备份和被备份的数据在同一个 MinIO 里。**
+> 备份目的地是配置项(`environments/<env>/config.yaml` 的
+> `backup_s3_endpoint`),cloud-full 指向集群内的 MinIO,**prod 那档指向
+> 异地**。也就是说现在这套防的是"误删、逻辑错误、想回到昨天",
+> **防不住 MinIO 本身没了** —— 而这个平台的 MinIO 是**单副本**。
+> 「我们有备份」在这一档下会给人错误的安全感。
+>
+> **2. 恢复 Iceberg 表需要两半,缺一半恢复不出来。**
+> 数据文件在 MinIO(`iceberg-backup` 备的),**表结构在 Hive Metastore
+> 里,而 HMS 的库在 Postgres**(`postgres-backup` 备的)。两份备份的时间
+> 点不一致的话,可能出现"表结构里有这张表,但数据文件对不上"的情况。
+> **这个恢复路径一次都没演练过。**
 
 ## 恢复 Postgres(到一次性实例,用于演练或取数)
 

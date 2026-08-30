@@ -1,0 +1,25 @@
+# 备份 Iceberg 里重导不出来的那几张表(审计 ADR-066 / 推理留痕 ADR-085),
+# 见 apps/iceberg-backup/manifests/cronjob.yaml 顶部的完整说明。
+#
+# **这一条补的是 ADR-033 里一个已经触发但没人注意到的条件**:那份 ADR 说
+# MinIO 刻意不备份,理由是"Iceberg 表能从数据源重导",并留了一句"以后如果
+# 有不可重建的数据落进 MinIO,这个判断要重新做" —— 2026-08-24 起就满足了。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iceberg-backup
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/iceberg-backup/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: ["CreateNamespace=true"]

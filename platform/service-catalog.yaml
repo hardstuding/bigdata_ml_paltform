@@ -313,6 +313,23 @@ services:
     请求路径上: false
     依赖: [postgres, minio]
     排障: ADR-033
+    备注: >-
+      **备份目的地是配置项**(environments/<env>/config.yaml 的
+      backup_s3_endpoint)。cloud-full 那档指向集群内同一个 MinIO ——
+      防误删可以,**防不住 MinIO 本身没了**;prod 那档指向异地
+
+  - name: iceberg-backup
+    用途: 每天镜像 iceberg 里 audit / ml 两个 schema 的数据文件(那两类重导不出来)
+    类别: 平台
+    owner: platform-team
+    面向用户: false
+    请求路径上: false
+    依赖: [minio, postgres]
+    排障: ADR-033
+    备注: >-
+      **恢复需要两半**:这里备的是数据文件,表结构在 Hive Metastore
+      (Postgres 里),由 postgres-backup 覆盖 —— **只有一半是恢复不出来的**。
+      只备 audit / ml:demo/tpch 那些能重建,备了白占空间
 
   - name: kserve-resources
     用途: 在线推理服务的运行时(sklearn / xgboost / triton 等)

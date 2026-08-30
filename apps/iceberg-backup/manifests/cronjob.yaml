@@ -1,0 +1,96 @@
+# 备份 Iceberg 里那几张**重导不出来**的表(ADR-033 的补充)。
+#
+# **为什么现在需要,而 2026-08-13 定 ADR-033 时不需要**:那时的判断是
+# "MinIO 里都是 Iceberg 表数据,理论上能从数据源重新导入",所以刻意不备份。
+# 那句话后面跟着一条触发条件:**「以后如果有不可重建的数据落进 MinIO,
+# 这个判断要重新做」**。
+#
+# **2026-08-30 核对:这个条件早就满足了,而没人注意到。**
+#   - `iceberg.audit.*`(2026-08-24 起,ADR-066)—— 谁在什么时候查了哪张表
+#   - `iceberg.ml.inference_log`(2026-08-30 起,ADR-085)—— 线上推理的输入输出
+# 这两类记的都是"发生过什么",**重导不出来**,而它们恰恰是合规场景最需要
+# 的那部分。
+#
+# **只备份这两个 schema,不备份整个 lakehouse**:demo/tpch 那些是能重建的,
+# 备了只是白占空间;而 audit/ml 是 append-only、增长可预测的。
+#
+# ⚠️ **恢复需要两半**:这里备的是数据文件,而表结构在 Hive Metastore
+# (Postgres 里)—— 那一半由 postgres-backup 那个 CronJob 覆盖。**只有一半
+# 是恢复不出来的**,这一点写在 docs/operations/backup.md 里。
+#
+# 目的地和 postgres-backup 用同一套配置项(environments/<env>/config.yaml
+# 的 backup_s3_endpoint / _bucket / _secret)。**cloud-full 这一档指向的是
+# 集群内同一个 MinIO** —— 防误删可以,**防不住 MinIO 本身没了**;prod 那档
+# 指向异地。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: iceberg-backup
+  namespace: data
+spec:
+  # 04:00 UTC —— 排在 iceberg-maintenance(03:00)之后,备的是已经合并过
+  # 小文件、清过快照的状态,省空间也省时间。
+  schedule: "0 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          containers:
+            - name: mirror
+              image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+              env:
+                - name: SRC_USER
+                  valueFrom:
+                    secretKeyRef: {name: minio-root, key: rootUser}
+                - name: SRC_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: minio-root, key: rootPassword}
+                - name: BACKUP_S3_USER
+                  valueFrom:
+                    secretKeyRef: {name: minio-root, key: rootUser}
+                - name: BACKUP_S3_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: minio-root, key: rootPassword}
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  mc alias set src http://minio.minio.svc.cluster.local:9000 "$SRC_USER" "$SRC_PASSWORD"
+                  mc alias set backuptarget http://minio.minio.svc.cluster.local:9000 "$BACKUP_S3_USER" "$BACKUP_S3_PASSWORD"
+                  mc mb --ignore-existing backuptarget/backups
+
+                  COPIED=0
+                  for schema in audit ml; do
+                    if ! mc ls "src/lakehouse/${schema}/" >/dev/null 2>&1; then
+                      echo "== schema ${schema} 还不存在,跳过(组件可能还没启用)"
+                      continue
+                    fi
+                    echo "== 镜像 lakehouse/${schema}/ -> backups/iceberg/${schema}/"
+                    # **不加 --remove**:镜像端不该跟着源端删。审计数据被误删
+                    # (或者被 expire_snapshots 清掉)时,备份里还留着才有意义。
+                    mc mirror --overwrite \
+                      "src/lakehouse/${schema}/" \
+                      "backuptarget/backups/iceberg/${schema}/"
+                    COPIED=$((COPIED + 1))
+                  done
+
+                  if [ "$COPIED" = "0" ]; then
+                    # 一个 schema 都没有,说明审计和推理留痕都还没启用 ——
+                    # 这时候"没东西可备"是正常的,不该报失败。
+                    echo "== 没有需要备份的 schema(audit / ml 都不存在)"
+                    exit 0
+                  fi
+
+                  echo "=== 备份后的内容 ==="
+                  mc du "backuptarget/backups/iceberg/"
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {memory: 512Mi}

@@ -273,3 +273,17 @@ argo submit --from cronwf/iceberg-maintenance -n argo-workflows -p dry_run=1
 **失败长什么样**:如果报 "一张表都没处理到",是 iceberg catalog 连不上,
 **那是真问题**;个别动作失败(比如 optimize 报 table is being written)
 不算,作业不会变红。
+
+**20. Iceberg 备份**(**没上过集群**):
+
+```
+kubectl -n data create job --from=cronjob/iceberg-backup bk1
+kubectl -n data logs job/bk1 -f
+→ 期望:镜像 lakehouse/audit/ 和 lakehouse/ml/,最后打印 mc du 的结果
+→ audit / ml 都还不存在时应该打印「没有需要备份的 schema」并**正常退出**,
+  不该报失败
+mc ls backups/iceberg/   # 确认东西真的到了目的地
+```
+
+**记住这一档的局限**:cloud-full 的备份目的地就是同一个 MinIO ——
+**验的是"备份任务能跑通",不是"数据安全了"**。

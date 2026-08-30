@@ -89,6 +89,7 @@ DIR_MAP = {
     # 的注释,这次不是新机制,是同一个机制第三/四次使用)。
     "apps-kafka-producer-manifests": REPO_ROOT / "apps" / "kafka-producer" / "manifests",
     "apps-postgres-backup-manifests": REPO_ROOT / "apps" / "postgres-backup" / "manifests",
+    "apps-iceberg-backup-manifests": REPO_ROOT / "apps" / "iceberg-backup" / "manifests",
     # 2026-08-23(ADR-064):Kueue 的队列配额三个环境差别巨大
     "apps-kueue-manifests": REPO_ROOT / "apps" / "kueue" / "manifests",
     "apps-schema-registry-manifests": REPO_ROOT / "apps" / "schema-registry" / "manifests",

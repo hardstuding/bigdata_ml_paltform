@@ -56,10 +56,11 @@
 | 服务 | 用途 | 负责组 | 面向用户 | 依赖 | 出问题看哪里 |
 |---|---|---|---|---|---|
 | **cert-manager** | 证书签发。三档环境共用 platform-issuer 这个名字,背后接自签还是真实 CA 由环境配置决定 | platform-team | 否 | — | ADR-060 |
+| **iceberg-backup** | 每天镜像 iceberg 里 audit / ml 两个 schema 的数据文件(那两类重导不出来)<br>**恢复需要两半**:这里备的是数据文件,表结构在 Hive Metastore (Postgres 里),由 postgres-backup 覆盖 —— **只有一半是恢复不出来的**。 只备 audit / ml:demo/tpch 那些能重建,备了白占空间 | platform-team | 否 | minio、postgres | ADR-033 |
 | **internal-packages** | 公司内部 Python 包的共享(packages/ 下 push,一小时内能 pip install)<br>索引是 MinIO 上的 PEP 503 静态目录,没有包服务器进程; 集群内所有工作负载都能装这些包,不按组隔离——不要往里放密钥 | platform-team | 是 | minio | packages/README.md;设计取舍见 ADR-083 |
 | **kueue** | 按组分配计算配额,同 cohort 内空闲可互借 | platform-team | 否 | — | ADR-064 |
 | **platform-jobs** | git 里的定时作业(jobs/ 下写个 schedule 就会定时跑,不用写 DAG)<br>manifest 是生成物,不要手改;CI 校验它和 jobs/ 不漂移 | platform-team | 是 | argo-workflows、trino、kueue | jobs/README.md;生成器是 scripts/render-jobs.py |
-| **postgres-backup** | 每天把 Postgres 全量备份传到 MinIO | platform-team | 否 | postgres、minio | ADR-033 |
+| **postgres-backup** | 每天把 Postgres 全量备份传到 MinIO<br>**备份目的地是配置项**(environments/<env>/config.yaml 的 backup_s3_endpoint)。cloud-full 那档指向集群内同一个 MinIO —— 防误删可以,**防不住 MinIO 本身没了**;prod 那档指向异地 | platform-team | 否 | postgres、minio | ADR-033 |
 
 ## 数据
 
