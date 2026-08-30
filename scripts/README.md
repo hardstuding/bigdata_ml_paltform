@@ -124,6 +124,7 @@ TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
 | `list-component-versions.py` | 汇总所有组件锁定的版本 | |
 | `list-project-images.py` | 扫描全部用到的镜像 | |
 | `check-manual-credentials.sh` | 扫出"哪些 Secret 需要人工填、现在缺哪个"(只读) | |
+| `tidy-credentials.py` | 把 `secrets/generated-credentials.txt` 收敛成"只剩当前有效的"(它是追加写的,三周下来会攒出一堆失效值)。**先跑不带参数预览** | |
 | `check-bootstrap-coverage.py` | 一键拉起路径和文档的部署主线表两边一致 | ✅ |
 | `sync-adr-index.py` | ADR 索引的状态列 ← 每份 ADR 自己的 `状态:` 行 | ✅ `--check` 防漂移 |
 | `check-capability-matrix.py` | 能力表自洽(✅ 的行不许写"未验证")+ 缺口文档不许自己记状态 | ✅ |
