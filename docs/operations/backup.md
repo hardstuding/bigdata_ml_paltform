@@ -9,7 +9,7 @@
 |---|---|---|
 | Postgres(Keycloak / Hive Metastore / MLflow / Airflow / Superset 共用) | ✅ 每天 02:00 UTC | `pg_dumpall` 全量 → MinIO `backups/postgres/`,留 14 天 |
 | Keycloak realm / client / 用户 | ✅ | 就在上面那份里,不用单独处理 |
-| MinIO 里的 Iceberg 表数据 | ❌ **刻意不备** | 理论上能从数据源重导,和 Postgres 里那些不可重建的元数据不是同一类风险([ADR-033](../decisions/033-postgres-backup.md))。**以后如果有不可重建的数据落进 MinIO,这个判断要重新做** |
+| MinIO 里的 Iceberg 表数据 | ❌ **没有备份,而且这个判断已经过期** | 原来的理由是「能从数据源重导」([ADR-033](../decisions/033-postgres-backup.md)),那句话后面跟着一条触发条件:**「以后如果有不可重建的数据落进 MinIO,这个判断要重新做」**。**2026-08-30 核对:这个条件早就满足了,没人注意到。** `iceberg.audit.query_events`(08-24 起)记的是「谁在什么时候查了哪张表」,`iceberg.ml.inference_log`(08-30 起)记的是线上推理的输入输出 —— **这两类都重导不出来**,丢了就是永久丢了,而它们恰恰是合规场景最需要的那部分。**上生产前必须解决**,见 [production-readiness-gaps.md](../project/production-readiness-gaps.md) |
 
 ---
 
