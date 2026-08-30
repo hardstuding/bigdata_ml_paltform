@@ -257,3 +257,19 @@ curl 平台的治理接口(不需要 token):
 **顺带验一个隐患修复**:自定义属性的 propertyType 之前是写死的 UUID,
 现在改成运行时按名字查。如果建表报 `Cannot invoke "Object.hashCode()"`
 这种莫名其妙的 NPE,就是这条没生效。
+
+**19. Iceberg 表维护作业**(**没上过集群**):
+
+```
+argo submit --from cronwf/iceberg-maintenance -n argo-workflows -p dry_run=1
+→ 先用 dry-run 看它打算动哪些表(应该只有 audit / ml / demo 三个 schema,
+  不该出现 tpch / tpcds)
+再不带 dry_run 跑一次
+→ 每张表应该报 "3/3 成功";个别失败是正常的(表正在被写),会列出来
+→ 跑完在 Trino 里:SELECT count(*) FROM iceberg.audit."query_events$snapshots"
+  快照数应该比跑之前少(超过 7 天的被清了)
+```
+
+**失败长什么样**:如果报 "一张表都没处理到",是 iceberg catalog 连不上,
+**那是真问题**;个别动作失败(比如 optimize 报 table is being written)
+不算,作业不会变红。

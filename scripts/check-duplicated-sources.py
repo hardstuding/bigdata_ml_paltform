@@ -22,6 +22,12 @@ REPO = Path(__file__).resolve().parent.parent
 
 # (权威源, [副本...])
 GROUPS = [
+    # 平台作业的公共小工具。作业的文件按目录挂进容器,一个作业看不到另一个
+    # 作业的文件,所以只能每个作业各放一份(见 shared/jobkit.py 顶部)。
+    ("shared/jobkit.py", [
+        "jobs/daily-order-summary/jobkit.py",
+        "jobs/iceberg-maintenance/jobkit.py",
+    ]),
     ("shared/flask_identity.py", [
         "apps/platform-portal/src/identity.py",
         "apps/permission-request-app/src/identity.py",

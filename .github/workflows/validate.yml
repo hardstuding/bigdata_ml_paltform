@@ -74,6 +74,12 @@ jobs:
       - name: render-jobs 校验逻辑
         run: python3 -m pytest tests/test_render_jobs.py -q
 
+      # Iceberg 维护作业的逻辑:动作顺序(先合并再过期最后清孤儿,换了顺序
+      # 清不掉东西)、部分失败不让整个作业挂掉、dry-run。这几条在集群上
+      # 不会立刻暴露 —— 顺序错了只是"没清干净",看不出来。
+      - name: Iceberg 维护作业逻辑
+        run: python3 -m pytest tests/test_iceberg_maintenance.py -q
+
       - name: 镜像版本锁定校验(不允许 latest 这类浮动 tag,见 ADR-010)
         run: python3 scripts/check-image-tags.py
 

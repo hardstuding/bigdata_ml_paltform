@@ -71,3 +71,78 @@ spec:
             path: jobkit.py
           name: platform-jobs-scripts
         name: scripts
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: render-jobs
+    platform-jobs/name: iceberg-maintenance
+  name: iceberg-maintenance
+  namespace: argo-workflows
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  schedules:
+  - 0 3 * * *
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  timezone: UTC
+  workflowSpec:
+    arguments:
+      parameters:
+      - name: dry_run
+        value: ''
+      - name: retain_days
+        value: '7'
+    entrypoint: main
+    serviceAccountName: argo-workflow
+    templates:
+    - container:
+        command:
+        - python3
+        - /scripts/job.py
+        env:
+        - name: MLFLOW_S3_ENDPOINT_URL
+          value: http://minio.minio.svc.cluster.local:9000
+        - name: MLFLOW_TRACKING_URI
+          value: http://mlflow.mlflow.svc.cluster.local:5000
+        - name: PARAM_DRY_RUN
+          value: '{{workflow.parameters.dry_run}}'
+        - name: PARAM_RETAIN_DAYS
+          value: '{{workflow.parameters.retain_days}}'
+        - name: PLATFORM_TRINO_HOST
+          value: trino.trino.svc.cluster.local
+        - name: PLATFORM_TRINO_PORT
+          value: '8443'
+        - name: PYTHONPATH
+          value: /scripts
+        envFrom:
+        - secretRef:
+            name: platform-job-credentials
+            optional: true
+        image: local/platform-runtime:0.1.0
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            memory: 1Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - mountPath: /scripts
+          name: scripts
+      metadata:
+        labels:
+          app.kubernetes.io/managed-by: render-jobs
+          kueue.x-k8s.io/queue-name: platform-team
+      name: main
+      volumes:
+      - configMap:
+          items:
+          - key: iceberg-maintenance--job.py
+            path: job.py
+          - key: iceberg-maintenance--jobkit.py
+            path: jobkit.py
+          name: platform-jobs-scripts
+        name: scripts

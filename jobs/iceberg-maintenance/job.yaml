@@ -1,0 +1,29 @@
+# Iceberg 表维护:过期快照、孤儿文件、小文件合并。
+#
+# **这是 2026-08-30 主动盘点时发现的一个真实缺口**(见
+# docs/project/production-readiness-gaps.md):全仓库搜不到
+# expire_snapshots / remove_orphan_files / rewrite_data_files —— 也就是说
+# 快照永不过期、失败写入留下的文件永远躺着、流式写入的小文件永不合并。
+#
+# **最先出问题的是持续写入的那几张表**:审计(ADR-066)、推理留痕
+# (ADR-085)、设备事件流。它们每个 checkpoint 落一批小文件,不合并的话
+# 查询会越来越慢,而存储只增不减。
+name: iceberg-maintenance
+script: job.py
+# 每天 03:00 UTC。挑这个点是因为:比 daily-order-summary(01:30)晚,
+# 让它先跑完;比黄金链路探针的整点错开,不抢 Trino 的资源。
+schedule: "0 3 * * *"
+timezone: UTC
+cpu: "500m"
+memory: "1Gi"
+owner_group: platform-team
+requires:
+  - trino
+params:
+  # 保留多久的快照。7 天足够回滚一次误操作,再长就是白占存储。
+  # **不要给太短** —— 快照被删掉之后,基于它的时间旅行查询会直接失败。
+  retain_days: "7"
+  # 只演练不真的执行(第一次上线时用,看看它打算动哪些表)
+  dry_run: ""
+environments:
+  - cloud-full
