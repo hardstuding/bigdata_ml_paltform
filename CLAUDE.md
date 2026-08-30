@@ -215,7 +215,23 @@ kubectl wait --for=condition=Ready pod/xxx --timeout=600s
 ## 已知差距(如实记录,不是没人管的隐藏债务)
 
 见 [ADR-055](docs/decisions/055-external-review-response-2026-08-15.md)
-和 [`docs/project/roadmap.md`](docs/project/roadmap.md) 的完整清单,这里只点名最重要
-的几条:一键部署目前仍是多个手动脚本按顺序跑;三个自建 Flask 工具没有
-自动化测试、源码和 ConfigMap 靠人工同步;环境切换靠手动 `git mv` 加手调
-资源,不是声明式的。
+和 [`docs/project/roadmap.md`](docs/project/roadmap.md) 的完整清单。
+
+**这一段 2026-08-30 核对过一次**,原来点名的三条里有两条已经不成立了 ——
+如实更新,不留假的债务(留着的后果是有人去做一件已经做完的事):
+
+- ~~一键部署仍是多个手动脚本按顺序跑~~ → `scripts/bootstrap-all.sh` 串起
+  27 步,幂等、失败非零退出、出部署报告;
+  `scripts/check-bootstrap-coverage.py` 保证它和文档的部署主线表两边一致。
+  从零拉起的完整说明:
+  [`docs/operations/deploy-from-scratch.md`](docs/operations/deploy-from-scratch.md)。
+- ~~三个自建 Flask 工具没有自动化测试~~ → 门户 105 / 权限门户 114 /
+  建表 75 条测试,全部在 CI 里。
+- **源码和 ConfigMap 靠人工同步** —— 这条仍然成立,但已经有两层网:
+  `check-embedded-scripts.py`(ConfigMap 里的副本)和
+  `check-duplicated-sources.py`(应用 `src/` 里的副本)。
+- **环境切换**已经是声明式的(`enabled_components` + `resource-profiles.yaml`),
+  但**三档环境只有 cloud-full 真的跑过**,prod 那档从没部署过。
+
+**真正还剩的大缺口**:没上过生产(能力表里零个"生产验证"),门禁条件见
+[`docs/project/production-readiness-gaps.md`](docs/project/production-readiness-gaps.md)。
