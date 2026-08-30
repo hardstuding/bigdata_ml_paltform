@@ -30,7 +30,7 @@ spec:
           # 字符串拼接,塞不进 digest,而同一个 SHA tag 只会被那一次构建推送
           # 一次、不会被覆盖 —— 和 digest 的不可变性是一回事。
           # 7d42658 = 这个组件第一次被 CI 构建出来的那次(ADR-085)。
-          image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/inference-log-sink:9d1ca9f9991c3660e502c04d76d77b2505ed3eba
+          image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/inference-log-sink:c57472d8b83bdc00218d092720ff80cc5e29e26f
           imagePullPolicy: IfNotPresent
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
