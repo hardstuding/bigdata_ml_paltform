@@ -88,3 +88,34 @@ subjects:
   - kind: ServiceAccount
     name: platform-portal
     namespace: platform-portal
+---
+# 「流作业」那栏 2026-08-30 实机看到的是「读不到流作业(ForbiddenException)」
+# —— 功能写了、卡片也渲染出来了,但 ServiceAccount 从来没有读
+# FlinkDeployment 的权限。**页面不报错、不空白,只是那一栏一直显示一句
+# 看起来像"暂时没有"的话**,所以一直没人发现。
+#
+# 只给 get/list,不给写:门户对流作业是只读的(和它对 Workflow 不一样 ——
+# 那边要 patch/create 才能取消和重跑)。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-portal-read-flink
+  namespace: flink
+rules:
+  - apiGroups: ["flink.apache.org"]
+    resources: ["flinkdeployments"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-portal-read-flink
+  namespace: flink
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-portal-read-flink
+subjects:
+  - kind: ServiceAccount
+    name: platform-portal
+    namespace: platform-portal
