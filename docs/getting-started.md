@@ -10,8 +10,9 @@
 [`docs/operations/`](operations/),每个技术选择为什么这么定看
 [`docs/decisions/`](decisions/)。
 
-前提:平台已经部署好了(还没部署看 [`README.md`](../README.md) 的
-"从零拉起整套服务",一条命令是 `./scripts/bootstrap-all.sh`)。
+前提:平台已经部署好了。**还没部署的话先看
+[`operations/deploy-from-scratch.md`](operations/deploy-from-scratch.md)**
+—— 那份从"你要先准备什么"开始,一条命令是 `./scripts/bootstrap-all.sh`。
 
 ---
 
@@ -61,18 +62,30 @@ Keycloak 账号登录。门户列出所有工具的入口和**现场探测的在
 意味着**:对象存储、Hive Metastore、Trino 三者之间的连接是通的——平台
 最底下那层地基是好的。
 
-## 第 3 步:查一下(Trino)
+## 第 3 步:查一下
+
+从门户点 **「SQL 工作台」**,写:
 
 ```sql
 select * from iceberg.demo.orders limit 10;
 ```
 
-从门户进 Trino,或者在 notebook 里 `platform_sdk.query(...)`。
+> **不要去 Trino 那张卡写 SQL。** Trino 的 Web UI **没有编辑器** —— 它只能
+> 看查询在跑什么、执行计划、耗时。门户上曾经把它介绍成 SQL 工作台,新人
+> 照着点进去会一脸懵,这个错 2026-08-30 才改掉(见
+> [ADR-084](decisions/084-analyst-sql-workbench.md))。
 
-Trino 是这个平台**唯一的统一查询入口**:一个 SQL 接口,底下可以是 Iceberg
+也可以在 notebook 里 `platform_sdk.query(...)`,走的是同一个引擎、同一套
+权限。
+
+Trino 是这个平台**唯一的统一查询引擎**:一个 SQL 接口,底下可以是 Iceberg
 表、也可以是外部数据库。它上面挂了 OPA 做权限(哪个组能看哪张表、哪些
-字段要脱敏),所以"给某人开一张表的权限"是改 `platform/iam/` 里的
-配置 + `git push`,不是登录到某个系统里点几下。
+字段要脱敏),所以"给某人开一张表的权限"是走权限申请门户 + `git push`,
+不是登录到某个系统里点几下。
+
+**你会看到的两件"不是 bug"的事**:某些列是 `138****5678` 或 `***MASKED***`
+(列级脱敏,按你的授权等级);同一张表别人比你多几行(行级过滤,按部门)。
+见 [ADR-063](decisions/063-trino-column-row-level-security.md)。
 
 > Trino SQL 语法:https://trino.io/docs/current/
 
@@ -145,8 +158,33 @@ Success 就算完——这是这个平台反复吃过亏之后形成的习惯(Jo
 
 ## 第 8 步:让它每天自己跑(Airflow)
 
-前面都是手动触发。真实场景里这些步骤要定时跑,这是 Airflow 的活,
-DAG 样例在 `apps/airflow/dags/`。
+前面都是手动触发。真实场景里要定时跑,而**这里有两条路,选错会白写很多
+东西**:
+
+| 你的作业 | 用什么 | 怎么做 |
+|---|---|---|
+| **单步**(一个脚本跑完就完) | `jobs/` | 建 `jobs/<名字>/`,`job.yaml` 里写一行 `schedule`,push。**不用碰 Airflow** |
+| **多步**,步骤之间有依赖或要传数据 | Airflow DAG | 样例在 `apps/airflow/dags/` |
+
+**单步作业不该为了加个定时去写 DAG** —— 一个 `schedule` 字段能解决的事,
+不值得引入一个调度器的全部概念。`jobs/` 那条路还顺带给了多文件、依赖声明
+(写了镜像里没有的包 CI 直接红)、参数化补数、按环境晋级,细节见
+[`jobs/README.md`](../jobs/README.md)。
+
+照抄 `jobs/daily-order-summary/`:
+
+```bash
+cp -r jobs/daily-order-summary jobs/my-daily-job
+# 改 job.yaml 的 name 和 schedule,改 job.py
+python3 scripts/render-jobs.py cloud-full
+git add -A && git commit -m "feat: 加一个日更作业" && git push
+```
+
+补数(重跑某一天)不是再跑一遍今天:
+
+```bash
+argo submit --from cronwf/my-daily-job -n argo-workflows -p run_date=2026-08-01
+```
 
 > Airflow:https://airflow.apache.org/docs/
 
