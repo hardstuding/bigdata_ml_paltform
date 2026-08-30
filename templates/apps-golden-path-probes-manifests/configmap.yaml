@@ -122,7 +122,7 @@ data:
         """
         max_age_min = int(os.environ.get("AUDIT_MAX_AGE_MIN", "60"))
         age = trino_query(
-            "select coalesce(date_diff('minute', max(event_time), current_timestamp), 99999) "
+            "select coalesce(date_diff('minute', max(event_ts), current_timestamp), 99999) "
             "from iceberg.audit.query_events")
         if age is None or int(age) > max_age_min:
             raise RuntimeError(
