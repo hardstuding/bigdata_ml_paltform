@@ -34,7 +34,7 @@ spec:
           # 同一次重新构建),对应 commit
           # eac7f6052f00883fe46fd076248a224eecce695d(2026-08-23 ADR-067 那次改造)。
           # 已核实是 amd64+arm64 双架构 manifest list。
-          image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-portal:49d1d1cd0392a161a22a9184659ebdba1159c176
+          image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-portal:24df4819b6a79b290aa99cce7332a124698bf786
           env:
             # 2026-08-16 真实故障:门户列出的 13 个工具链接全部没带端口,
             # cloud-full 的 ingress-nginx 是 NodePort(32460 http、32535
