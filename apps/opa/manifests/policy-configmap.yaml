@@ -8,4 +8,409 @@ metadata:
   name: opa-policy
   namespace: opa
 data:
-  trino.rego: "package trino\n\n# 改这个文件之后,**活的 OPA 会在约 1 分钟内自己重载,不需要重启 Pod**\n# ——前提是 apps/opa/manifests/deployment.yaml 里的 `--watch --ignore=..*\n# /policies` 三个参数都在。2026-08-23 之前不是这样:那时候没有 --watch,\n# 策略改了只有在 Pod 恰好重启过之后才生效,而 ArgoCD 一路显示\n# Synced/Healthy。要确认某次策略改动**真的生效了**,别看 ArgoCD,直接问\n# 活的 OPA:\n#\n#   kubectl -n opa port-forward svc/opa 18181:8181\n#   curl -s localhost:18181/v1/policies | python3 -m json.tool | grep -c <你改的那行>\n#\n# 或者直接拿一条真实 input POST 到 /v1/data/trino/allow 看结果。\n\n# Trino OPA 访问控制策略(ADR-051)。表级判断这一层(SelectFromColumns/\n# ShowCreateTable)按 platform/iam/table-access-grants.csv 里的授权记录判断。\n# 列级脱敏(columnMask)和行级过滤(rowFilters)见文件下半部分,ADR-063。\n#\n# 默认拒绝(default allow := false)——这是这个项目第一次给 Trino 加访问\n# 控制,之前是完全没有限制的(AllowAllAccessControl)。这个策略上线是一次\n# 真实的行为收紧,不是\"反正本来就这样,加个形式\":之前能查的表,上线后\n# 没有对应 grant 记录就查不到了,包括 Superset 之类已经在用的数据源表。\n# 见 ADR-051\"上线前必须先做的事\"。\n\ndefault allow := false\n\n# ---- 平台工具的服务账号:不走审批链约束 ----\n# 这些是平台自建工具连 Trino 用的专属账号(见\n# scripts/00-generate-secrets.sh 的 trino-service-account),不代表某个\n# 终端用户在查数据,不受这份策略后面那些针对人类用户的限制约束:\n#   - table_registration_service:apps/table-registration-app 建表/管理 schema 用。\n#   - superset_service:Superset 所有看板/数据源共用这一个 Trino 连接\n#     (2026-08-16 ADR-051 切换上线前审计确认,见该 ADR\"实际在用的表\"\n#     一节)——看谁能看哪个看板是 Superset 自己的 RBAC 管,不是靠 Trino\n#     按人头发 grant;如果按人头发,以后每加一个 Superset 数据源都要\n#     手动补 grant,和 Superset 自己的权限模型重复维护,也对不上\"谁在\n#     Superset 里能点开这个看板\"这个真实的访问入口。\n#   - dbt_demo_service:apps/airflow 的 dbt_demo DAG(dbt build)用,\n#     真实执行 CREATE TABLE/INSERT 这类写操作,不是终端用户手工建表,\n#     不应该被\"终端用户默认禁止写操作\"这条规则挡住。\n#   - platform_sdk_demo_service:ADR-058 的 platform_sdk_demo DAG 用,\n#     和 dbt_demo_service/superset_service 是同一个性质——平台自己的\n#     验证/演示账号,不代表某个真实终端用户在查数据,不该走\n#     table-access-grants.csv 那条给人类用户走审批的路径。2026-08-19\n#     真实踩过这个坑:一开始没加进这个集合,`iceberg.demo.orders`\n#     报 PERMISSION_DENIED,和账号密码本身对不对是两回事(先排查完\n#     Trino 的 password.db 是 subPath 挂载、账号新建后要重启 Trino\n#     pod 才能生效那个坑,才轮到这条)。\n#   - openmetadata_service:OpenMetadata 的 Trino 元数据自动采集用\n#     (scripts/29-configure-openmetadata-trino-ingestion.sh)。它要读\n#     `system.information_schema.schemata` / `.tables` / `.columns` 才能\n#     发现有哪些表——**这是元数据发现的本质,不是在查业务数据**。\n#     2026-08-23 真实踩到:建了 Trino 账号(scripts/00)但没加进这个集合,\n#     采集 Job 的 GetSchemas 步骤报\n#       PERMISSION_DENIED: Cannot select from columns [schema_name] in\n#       table or view system.information_schema.schemata\n#     \"建账号\"和\"给授权\"是两处代码、两个地方改,漏一个就是这个结果。\nservice_accounts := {\"table_registration_service\", \"superset_service\", \"dbt_demo_service\", \"platform_sdk_demo_service\", \"openmetadata_service\"}\n\nis_service_account if {\n\tinput.context.identity.user in service_accounts\n}\n\n# ---- 身份代理(impersonation):Superset 代表真实用户去查 ----\n#\n# **2026-08-26 之前这里是个真实的权限漏洞。** Superset 用**一个共享的**\n# `superset_service` 账号连 Trino,于是 Trino 看到的永远是这个服务账号,\n# 而服务账号在下面那条规则里是无条件放行的。后果:\n#\n#   - 任何能在 Superset 里建一个查询的人,**能读到 Trino 上的任何表**,\n#     不管他有没有 table-access-grants.csv 里的授权;\n#   - 列级脱敏和行级过滤(ADR-063)在 Superset 这条路上**完全不生效**\n#     ——因为 `is_exempt_from_masking` 对服务账号豁免。\n#\n# 也就是说,这个平台在权限上最大的一笔投入,恰恰在**用得最多的那条 BI\n# 路径上是空的**。当初 ADR-051 选共享账号是有理由的(不想给每个 Superset\n# 数据源手动补 grant),但那个理由换来的代价当时没算清楚。\n#\n# 现在改成:Superset 打开 impersonation,把登录用户的身份透传给 Trino,\n# Trino 看到的是真实的人,后面所有按人判断的规则(grant / 脱敏 / 行过滤 /\n# platform-team 全权)就都自然生效了。zhenghe 2026-08-26 提的\n# \"admin 应该有全权限\" 也随之成立——platform-team 的人在 Superset 里就是\n# 以自己的身份查,`is_platform_admin` 那条规则照常放行。\n#\n# 被代理的用户名来自 Superset 的会话(Keycloak SSO 认证过的),不是终端\n# 用户能随便填的输入。\n#\n# resource 的字段路径是从 Trino 源码核实的,不是猜的:\n# plugin/trino-opa/.../OpaAccessControl.java 的 checkCanImpersonateUser\n# 构造的是 `OpaQueryInputResource.builder().user(new TrinoUser(userName))`,\n# 而 TrinoUser 是 `record TrinoUser(String user, ...)` —— 所以是\n# input.action.resource.user.user。\n# notebook_service(2026-08-29 加):JupyterHub 里的 notebook 和 SDK 提交的\n# 作业连 Trino 用它。**它刻意不在上面的 service_accounts 里** —— 那个集合\n# 是无条件放行,而 notebook 恰恰是真实用户在查真实数据的地方,必须走和\n# Superset 一样的代理路径,按登录用户算权限。\n#\n# 修的是一个真实的洞:在这之前 SDK 文档让人 export 一个服务账号\n# (platform_sdk_demo_service,它在 service_accounts 里),于是\n# **行列级权限对 notebook 完全不生效** —— 分析师在 Superset 里被脱敏的\n# 手机号,在 notebook 里能直接查出明文。Superset 那条路 2026-08-26 就用\n# impersonation 修好了(ADR-074),SDK 这条路一直没修。\nimpersonation_allowed_accounts := {\"superset_service\", \"notebook_service\"}\n\nallow if {\n\tinput.action.operation == \"ImpersonateUser\"\n\tinput.context.identity.user in impersonation_allowed_accounts\n}\n\nallow if {\n\tis_service_account\n\tnot is_audit_data(input)\n\t# 代理请求走上面那条专门的规则,不吃\"服务账号无条件放行\"这一条——\n\t# 否则以后往 impersonation_allowed_accounts 之外加服务账号时,会以为\n\t# 自己没开代理权限,实际上早就开了。\n\tinput.action.operation != \"ImpersonateUser\"\n}\n\n# openmetadata_service 是唯一被放行到审计表的服务账号,理由是**它采的是\n# 元数据不是数据**:scripts/29 配的 sourceConfig 是 `DatabaseMetadata`\n# (表名/字段名/类型),没有开 profiler 和 sample data,所以它看不到任何\n# 一行审计记录。\n#\n# 为什么值得单独开这个口子:挡住它的后果是**审计表永远不出现在数据目录\n# 里**(2026-08-23 实测确认 `trino.iceberg.audit.query_events` 在 OpenMetadata\n# 里是 404)。而数据治理这个角色恰恰需要知道\"平台上存在这样一张表、它有\n# 哪些字段\",否则合规审查的人连该去查什么都不知道。\n#\n# **如果哪天给 Trino 的采集打开了 profiler 或 sample data,这条必须撤掉**\n# ——那时候它就能读到真实数据行了。这行字是留给那个时候的。\nallow if {\n\tis_service_account\n\tis_audit_data(input)\n\tinput.context.identity.user == \"openmetadata_service\"\n}\n\n# 表维护作业(jobs/iceberg-maintenance,ADR-033 的配套)也要能碰这两个\n# schema —— **而且恰恰是它们最需要维护**:审计和推理留痕是持续写入的,\n# 小文件和过期快照堆得最快。\n#\n# **2026-08-30 实机第一次跑就撞到了这一条**:维护作业对\n# `iceberg.audit.*` 的三个动作全部 PERMISSION_DENIED —— 被上面那条\n# \"敏感 schema 只有 platform-team 能读\"挡住了。也就是说**最需要维护的\n# 两张表,永远不会被维护**。\n#\n# 为什么可以开这个口子:`ALTER TABLE ... EXECUTE optimize /\n# expire_snapshots / remove_orphan_files` **不返回任何数据行** —— 它重写\n# 和删除文件,但不把内容交给调用方。这和 openmetadata_service 那条是同\n# 一个理由(采元数据不采数据),不是\"因为不方便所以放行\"。\n#\n# **必须是一个专用账号,不能复用 platform_sdk_demo_service。** 第一版就是\n# 那么写的,被 `test_other_service_accounts_still_denied_on_audit_schema`\n# 当场拦下 —— 那个账号是所有 notebook 和作业共用的,给它审计权限等于\n# **任何能提交作业的人都能读审计表**。那条测试就是为了防这个而写的。\n#\n# **如果哪天这个专用账号被用来跑别的东西,这条必须收窄** —— 它现在能读到\n# 审计表的数据行,而那不是本意。留这行字给那个时候。\nallow if {\n\tis_service_account\n\tis_audit_data(input)\n\tinput.context.identity.user == \"iceberg_maintenance_service\"\n}\n\n# ---- 审计表:只有平台管理组能读 ----\n#\n# **审计表泄露比业务表泄露更糟**——它记着每个人查过什么、导出过什么,\n# 是一份\"谁对什么感兴趣\"的完整画像。所以它不能沿用普通表那套授权。\n#\n# 具体挡的是**服务账号那条口子**。审计表在 `default allow := false` 之下,\n# 普通用户本来就读不到(要有 table-access-grants.csv 里的 grant 记录);\n# 但 `is_service_account` 那条是**无条件放行**,意味着任何人只要能在\n# Superset 里建一个查询,就能借 superset_service 这个账号读到全部审计\n# 记录。这不是这次新引入的问题,是\"服务账号无差别放行\"这个既有设计撞上\n# 一张新的敏感表——但撞上了就得处理,不能因为\"老问题\"就放着。\n#\n# platform-team 仍然能读(is_platform_admin 那条没加限制):合规调查本来\n# 就是平台管理组的活,而且他们本来就能读所有表,在这里单独挡住没有意义。\n#\n# 判定只看 schema 名,不看 catalog:审计数据只会写进 `audit` 这个 schema\n# (见 scripts/flink_trino_audit_sink.py),而**用 schema 名判断比枚举表名\n# 安全**——以后往里加一张新的审计表,不用记得回来改这条策略。\n# **一个集合,不是一个字符串。** 2026-08-30 推理留痕(ADR-085)进来时,\n# 第一反应是复制一份 `is_inference_data` 规则 —— 那样每加一张敏感表就多一\n# 条几乎一样的规则,而漏掉一条不会有任何地方报错。改成集合之后,加一个\n# schema 就是加一个字符串。\n#\n# - `audit`:查询审计(ADR-066)—— 记着每个人查过什么、导出过什么\n# - `ml`:推理留痕(ADR-085)—— 推理输入很可能是用户的个人数据\n#\n# 两者的共同点是**它们泄露比业务表泄露更糟**:一份是\"谁对什么感兴趣\"的\n# 完整画像,一份是原始的用户输入。\nsensitive_schemas := {\"audit\", \"ml\"}\n\nis_audit_data(inp) if {\n\tinp.action.resource.table.schemaName in sensitive_schemas\n}\n\n# ---- 平台管理组:不受表级授权约束,方便排障 ----\n# 和 ArgoCD(ADR-028)platform-team -> role:admin 是同一个权限模型,不是\n# 这次新发明的口子。\nis_platform_admin if {\n\t\"platform-team\" in input.context.identity.groups\n}\n\nallow if {\n\tis_platform_admin\n}\n\n# ---- 基础浏览操作:任何登录用户都放行 ----\n# 能看到 catalog/schema/table/column 存在,不等于能读到里面的数据——这个\n# 项目的表目录浏览(建表注册工具 ADR-043、权限申请门户的表访问分级审批\n# ADR-046)本来就是\"任何登录用户都能看目录、决定要不要申请\"的模式,这里\n# 保持一致,不在浏览这一层加限制,只在真正读数据这一层(SelectFromColumns/\n# ShowCreateTable)卡审批记录。\nbasic_browse_operations := {\n\t\"ExecuteQuery\",\n\t\"AccessCatalog\",\n\t\"ShowSchemas\",\n\t\"ShowTables\",\n\t\"ShowColumns\",\n\t\"ShowCreateSchema\",\n\t\"FilterCatalogs\",\n\t\"FilterSchemas\",\n\t\"FilterTables\",\n\t\"FilterColumns\",\n}\n\nallow if {\n\tinput.action.operation in basic_browse_operations\n}\n\n# ---- 真正读数据:必须有有效(未过期)的 grant 记录 ----\ngated_operations := {\"SelectFromColumns\", \"ShowCreateTable\"}\n\nallow if {\n\tinput.action.operation in gated_operations\n\ttable_fqn := sprintf(\"%s.%s\", [input.action.resource.table.schemaName, input.action.resource.table.tableName])\n\thas_valid_grant(input.context.identity.user, table_fqn)\n}\n\nhas_valid_grant(user, table_fqn) if {\n\tsome g in data.trino.grants\n\tg.username == user\n\tg.table_fqn == table_fqn\n\tnot grant_expired(g)\n}\n\ngrant_expired(g) if {\n\tg.expires_at != \"\"\n\ttime.parse_rfc3339_ns(g.expires_at) < time.now_ns()\n}\n\n# 没写明确覆盖的操作(CreateTable/DropTable/InsertIntoTable/DeleteFromTable/\n# AlterColumn/CreateView/... 等所有写类操作),默认拒绝——这是有意的设计,\n# 不是漏写:这个平台的建表/改表走 apps/table-registration-app 这个专属\n# 工具(用上面的 is_service_account 账号),不是让终端用户在 Trino 里直接\n# 执行 DDL/DML。如果以后真的需要放开某类写操作给终端用户,应该是一次\n# 独立、有讨论的决定,不是在这份策略里悄悄漏放。\n\n# ==========================================================================\n# 列级脱敏 + 行级过滤(ADR-063)\n# ==========================================================================\n# Trino OPA 插件原生支持两个额外接口(源码 plugin/trino-opa 的\n# OpaConfig.java/OpaHighLevelClient.java 核实过完整 wire schema,不是凭\n# 印象写的,详见 ADR-063):\n#   - opa.policy.column-masking-uri -> 这份策略里的 columnMask 规则\n#     (非 batch 模式,请求 operation 是 GetColumnMask,一次一列;响应体\n#     要么是 {\"expression\": \"<SQL 表达式>\"},要么整条规则 undefined 表示\n#     不脱敏——和 Optional<OpaViewExpression> 的语义对应)。\n#   - opa.policy.row-filters-uri -> 这份策略里的 rowFilters 规则\n#     (operation 是 GetRowFilters;响应体是一个数组,每个元素\n#     {\"expression\": \"<SQL 布尔表达式>\"},作为额外的 WHERE 条件 AND 起来;\n#     空数组/undefined 表示不过滤)。\n#\n# 权限判断复用已有的 platform/iam 数据,不新发明模型:\n#   - 列级脱敏门槛用 data.trino.grants 里本来就有的 security_level 字段\n#     (apps/permission-request-app 分级审批留下的,数值语义和\n#     build_approval_steps 一致:level>=2 要多一层主管审批,level>=3 再加\n#     一层)——把\"要看到敏感列明文\"和\"这张表本身审批到了多高级别\"绑在一起,\n#     不单独维护一套列级权限。\n#   - 行级过滤按部门,数据来自 platform/iam/employees.csv 的 department\n#     列,同步机制见 apps/opa/manifests/departments-sync-cronjob.yaml\n#     (和 grants-sync-cronjob.yaml 同一个模式:5 分钟一次,PUT 进\n#     data.trino.user_departments)。\n\n# ---- 列级脱敏:按列名分类敏感字段 ----\n# 子串匹配(不区分大小写),覆盖手机号/邮箱/身份证这几类最常见的敏感字段\n# 命名习惯(中英文都配了,这个仓库的表目前是英文列名,中文模式是为以后\n# 接入中文命名的表留的)。required_level 是\"要看到明文,grant 至少要是这个\n# security_level\"——身份证比手机号/邮箱更敏感,门槛更高。\nsensitive_column_rules := [\n\t{\"pattern\": \"phone\", \"required_level\": 2, \"mask_kind\": \"partial_digits\"},\n\t{\"pattern\": \"mobile\", \"required_level\": 2, \"mask_kind\": \"partial_digits\"},\n\t{\"pattern\": \"手机\", \"required_level\": 2, \"mask_kind\": \"partial_digits\"},\n\t{\"pattern\": \"email\", \"required_level\": 2, \"mask_kind\": \"partial_email\"},\n\t{\"pattern\": \"邮箱\", \"required_level\": 2, \"mask_kind\": \"partial_email\"},\n\t{\"pattern\": \"id_card\", \"required_level\": 3, \"mask_kind\": \"full\"},\n\t{\"pattern\": \"identity_no\", \"required_level\": 3, \"mask_kind\": \"full\"},\n\t{\"pattern\": \"身份证\", \"required_level\": 3, \"mask_kind\": \"full\"},\n]\n\nmatching_sensitive_rule(column_name) := rule if {\n\tlower_name := lower(column_name)\n\tsome rule in sensitive_column_rules\n\tcontains(lower_name, rule.pattern)\n}\n\n# 手机号/邮箱做部分脱敏(保留可用于排障/核对的局部信息),身份证这类更敏感\n# 的字段直接整段替换,不留任何可反推的片段。\nmask_expression(rule, column_name) := expr if {\n\trule.mask_kind == \"partial_digits\"\n\texpr := sprintf(\"regexp_replace(CAST(%s AS varchar), '(\\\\d{3})\\\\d+(\\\\d{4})', '$1****$2')\", [quoted_identifier(column_name)])\n}\n\nmask_expression(rule, column_name) := expr if {\n\trule.mask_kind == \"partial_email\"\n\texpr := sprintf(\"regexp_replace(CAST(%s AS varchar), '(^.{2}).*(@.*$)', '$1***$2')\", [quoted_identifier(column_name)])\n}\n\nmask_expression(rule, _) := \"'***MASKED***'\" if {\n\trule.mask_kind == \"full\"\n}\n\n# Trino 传来的列名本身可信(来自它自己的 catalog 元数据,不是终端用户输入),\n# 这里只是按 SQL 标识符规则加双引号,不是防注入的边界。\nquoted_identifier(name) := concat(\"\", [\"\\\"\", name, \"\\\"\"])\n\n# 服务账号 / 平台管理组和表级 allow 判断用同一条豁免——它们的查询不代表某个\n# 真实终端用户在看数据,见文件上半部分 service_accounts/is_platform_admin\n# 的注释。\nis_exempt_from_masking if {\n\tis_service_account\n}\n\nis_exempt_from_masking if {\n\tis_platform_admin\n}\n\n# 用户对这张表当前的有效 grant 级别;没有有效 grant 时按 0 处理(比任何\n# required_level 都低,一定脱敏)——这是纵深防御:正常情况下没有 grant 连\n# SelectFromColumns 都过不了(见 allow 规则),走不到脱敏这一步,但脱敏判断\n# 不应该依赖\"外面一定先做过判断\"这个假设,自己也要 fail-safe。\neffective_grant_level(user, table_fqn) := level if {\n\tsome g in data.trino.grants\n\tg.username == user\n\tg.table_fqn == table_fqn\n\tnot grant_expired(g)\n\tlevel := g.security_level\n}\n\neffective_grant_level(user, table_fqn) := 0 if {\n\tnot has_valid_grant(user, table_fqn)\n}\n\ncolumnMask := {\"expression\": expr} if {\n\tinput.action.operation == \"GetColumnMask\"\n\tnot is_exempt_from_masking\n\tcol := input.action.resource.column\n\trule := matching_sensitive_rule(col.columnName)\n\ttable_fqn := sprintf(\"%s.%s\", [col.schemaName, col.tableName])\n\teffective_grant_level(input.context.identity.user, table_fqn) < rule.required_level\n\texpr := mask_expression(rule, col.columnName)\n}\n\n# ---- 行级过滤:按部门 ----\n# 哪些表要按部门过滤是声明式白名单,和 basic_browse_operations/\n# gated_operations 一样的写法,table_fqn 格式也和它们(以及 data.trino.grants\n# 里的 table_fqn)保持一致——schemaName.tableName,不带 catalog 前缀。目前\n# 这个仓库里唯一的示例表是 demo.regional_sales(还没真的建过,留给下次接\n# 真实按区域/部门分片的数据时用)。以后要给别的表加行级过滤,在这个集合里\n# 加一行,不是悄悄对所有表生效。\nrow_level_filtered_tables := {\"demo.regional_sales\"}\n\nuser_department(user) := dept if {\n\tsome d in data.trino.user_departments\n\td.username == user\n\tdept := d.department\n}\n\nuser_has_department(user) if {\n\tuser_department(user)\n}\n\n# 能查到部门:只放行属于自己部门的行。\nrowFilters := [{\"expression\": expr}] if {\n\tinput.action.operation == \"GetRowFilters\"\n\tnot is_exempt_from_masking\n\ttbl := input.action.resource.table\n\ttable_fqn := sprintf(\"%s.%s\", [tbl.schemaName, tbl.tableName])\n\ttable_fqn in row_level_filtered_tables\n\tdept := user_department(input.context.identity.user)\n\texpr := sprintf(\"department = '%s'\", [dept])\n}\n\n# 查不到部门(employees.csv 里没有这个人,或者数据还没同步过来):按这个\n# 仓库一贯的\"宁可漏权限报错,不要漏配置导致意外授权\"原则,不是放行看全部\n# 数据,是过滤成空结果集(1 = 0),而不是默认不过滤。\nrowFilters := [{\"expression\": \"1 = 0\"}] if {\n\tinput.action.operation == \"GetRowFilters\"\n\tnot is_exempt_from_masking\n\ttbl := input.action.resource.table\n\ttable_fqn := sprintf(\"%s.%s\", [tbl.schemaName, tbl.tableName])\n\ttable_fqn in row_level_filtered_tables\n\tnot user_has_department(input.context.identity.user)\n}\n"
+  trino.rego: |
+    package trino
+
+    # 改这个文件之后,**活的 OPA 会在约 1 分钟内自己重载,不需要重启 Pod**
+    # ——前提是 apps/opa/manifests/deployment.yaml 里的 `--watch --ignore=..*
+    # /policies` 三个参数都在。2026-08-23 之前不是这样:那时候没有 --watch,
+    # 策略改了只有在 Pod 恰好重启过之后才生效,而 ArgoCD 一路显示
+    # Synced/Healthy。要确认某次策略改动**真的生效了**,别看 ArgoCD,直接问
+    # 活的 OPA:
+    #
+    #   kubectl -n opa port-forward svc/opa 18181:8181
+    #   curl -s localhost:18181/v1/policies | python3 -m json.tool | grep -c <你改的那行>
+    #
+    # 或者直接拿一条真实 input POST 到 /v1/data/trino/allow 看结果。
+
+    # Trino OPA 访问控制策略(ADR-051)。表级判断这一层(SelectFromColumns/
+    # ShowCreateTable)按 platform/iam/table-access-grants.csv 里的授权记录判断。
+    # 列级脱敏(columnMask)和行级过滤(rowFilters)见文件下半部分,ADR-063。
+    #
+    # 默认拒绝(default allow := false)——这是这个项目第一次给 Trino 加访问
+    # 控制,之前是完全没有限制的(AllowAllAccessControl)。这个策略上线是一次
+    # 真实的行为收紧,不是"反正本来就这样,加个形式":之前能查的表,上线后
+    # 没有对应 grant 记录就查不到了,包括 Superset 之类已经在用的数据源表。
+    # 见 ADR-051"上线前必须先做的事"。
+
+    default allow := false
+
+    # ---- 平台工具的服务账号:不走审批链约束 ----
+    # 这些是平台自建工具连 Trino 用的专属账号(见
+    # scripts/00-generate-secrets.sh 的 trino-service-account),不代表某个
+    # 终端用户在查数据,不受这份策略后面那些针对人类用户的限制约束:
+    #   - table_registration_service:apps/table-registration-app 建表/管理 schema 用。
+    #   - superset_service:Superset 所有看板/数据源共用这一个 Trino 连接
+    #     (2026-08-16 ADR-051 切换上线前审计确认,见该 ADR"实际在用的表"
+    #     一节)——看谁能看哪个看板是 Superset 自己的 RBAC 管,不是靠 Trino
+    #     按人头发 grant;如果按人头发,以后每加一个 Superset 数据源都要
+    #     手动补 grant,和 Superset 自己的权限模型重复维护,也对不上"谁在
+    #     Superset 里能点开这个看板"这个真实的访问入口。
+    #   - dbt_demo_service:apps/airflow 的 dbt_demo DAG(dbt build)用,
+    #     真实执行 CREATE TABLE/INSERT 这类写操作,不是终端用户手工建表,
+    #     不应该被"终端用户默认禁止写操作"这条规则挡住。
+    #   - platform_sdk_demo_service:ADR-058 的 platform_sdk_demo DAG 用,
+    #     和 dbt_demo_service/superset_service 是同一个性质——平台自己的
+    #     验证/演示账号,不代表某个真实终端用户在查数据,不该走
+    #     table-access-grants.csv 那条给人类用户走审批的路径。2026-08-19
+    #     真实踩过这个坑:一开始没加进这个集合,`iceberg.demo.orders`
+    #     报 PERMISSION_DENIED,和账号密码本身对不对是两回事(先排查完
+    #     Trino 的 password.db 是 subPath 挂载、账号新建后要重启 Trino
+    #     pod 才能生效那个坑,才轮到这条)。
+    #   - openmetadata_service:OpenMetadata 的 Trino 元数据自动采集用
+    #     (scripts/29-configure-openmetadata-trino-ingestion.sh)。它要读
+    #     `system.information_schema.schemata` / `.tables` / `.columns` 才能
+    #     发现有哪些表——**这是元数据发现的本质,不是在查业务数据**。
+    #     2026-08-23 真实踩到:建了 Trino 账号(scripts/00)但没加进这个集合,
+    #     采集 Job 的 GetSchemas 步骤报
+    #       PERMISSION_DENIED: Cannot select from columns [schema_name] in
+    #       table or view system.information_schema.schemata
+    #     "建账号"和"给授权"是两处代码、两个地方改,漏一个就是这个结果。
+    service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service", "platform_sdk_demo_service", "openmetadata_service"}
+
+    is_service_account if {
+    	input.context.identity.user in service_accounts
+    }
+
+    # ---- 身份代理(impersonation):Superset 代表真实用户去查 ----
+    #
+    # **2026-08-26 之前这里是个真实的权限漏洞。** Superset 用**一个共享的**
+    # `superset_service` 账号连 Trino,于是 Trino 看到的永远是这个服务账号,
+    # 而服务账号在下面那条规则里是无条件放行的。后果:
+    #
+    #   - 任何能在 Superset 里建一个查询的人,**能读到 Trino 上的任何表**,
+    #     不管他有没有 table-access-grants.csv 里的授权;
+    #   - 列级脱敏和行级过滤(ADR-063)在 Superset 这条路上**完全不生效**
+    #     ——因为 `is_exempt_from_masking` 对服务账号豁免。
+    #
+    # 也就是说,这个平台在权限上最大的一笔投入,恰恰在**用得最多的那条 BI
+    # 路径上是空的**。当初 ADR-051 选共享账号是有理由的(不想给每个 Superset
+    # 数据源手动补 grant),但那个理由换来的代价当时没算清楚。
+    #
+    # 现在改成:Superset 打开 impersonation,把登录用户的身份透传给 Trino,
+    # Trino 看到的是真实的人,后面所有按人判断的规则(grant / 脱敏 / 行过滤 /
+    # platform-team 全权)就都自然生效了。zhenghe 2026-08-26 提的
+    # "admin 应该有全权限" 也随之成立——platform-team 的人在 Superset 里就是
+    # 以自己的身份查,`is_platform_admin` 那条规则照常放行。
+    #
+    # 被代理的用户名来自 Superset 的会话(Keycloak SSO 认证过的),不是终端
+    # 用户能随便填的输入。
+    #
+    # resource 的字段路径是从 Trino 源码核实的,不是猜的:
+    # plugin/trino-opa/.../OpaAccessControl.java 的 checkCanImpersonateUser
+    # 构造的是 `OpaQueryInputResource.builder().user(new TrinoUser(userName))`,
+    # 而 TrinoUser 是 `record TrinoUser(String user, ...)` —— 所以是
+    # input.action.resource.user.user。
+    # notebook_service(2026-08-29 加):JupyterHub 里的 notebook 和 SDK 提交的
+    # 作业连 Trino 用它。**它刻意不在上面的 service_accounts 里** —— 那个集合
+    # 是无条件放行,而 notebook 恰恰是真实用户在查真实数据的地方,必须走和
+    # Superset 一样的代理路径,按登录用户算权限。
+    #
+    # 修的是一个真实的洞:在这之前 SDK 文档让人 export 一个服务账号
+    # (platform_sdk_demo_service,它在 service_accounts 里),于是
+    # **行列级权限对 notebook 完全不生效** —— 分析师在 Superset 里被脱敏的
+    # 手机号,在 notebook 里能直接查出明文。Superset 那条路 2026-08-26 就用
+    # impersonation 修好了(ADR-074),SDK 这条路一直没修。
+    impersonation_allowed_accounts := {"superset_service", "notebook_service"}
+
+    allow if {
+    	input.action.operation == "ImpersonateUser"
+    	input.context.identity.user in impersonation_allowed_accounts
+    }
+
+    allow if {
+    	is_service_account
+    	not is_audit_data(input)
+    	# 代理请求走上面那条专门的规则,不吃"服务账号无条件放行"这一条——
+    	# 否则以后往 impersonation_allowed_accounts 之外加服务账号时,会以为
+    	# 自己没开代理权限,实际上早就开了。
+    	input.action.operation != "ImpersonateUser"
+    }
+
+    # openmetadata_service 是唯一被放行到审计表的服务账号,理由是**它采的是
+    # 元数据不是数据**:scripts/29 配的 sourceConfig 是 `DatabaseMetadata`
+    # (表名/字段名/类型),没有开 profiler 和 sample data,所以它看不到任何
+    # 一行审计记录。
+    #
+    # 为什么值得单独开这个口子:挡住它的后果是**审计表永远不出现在数据目录
+    # 里**(2026-08-23 实测确认 `trino.iceberg.audit.query_events` 在 OpenMetadata
+    # 里是 404)。而数据治理这个角色恰恰需要知道"平台上存在这样一张表、它有
+    # 哪些字段",否则合规审查的人连该去查什么都不知道。
+    #
+    # **如果哪天给 Trino 的采集打开了 profiler 或 sample data,这条必须撤掉**
+    # ——那时候它就能读到真实数据行了。这行字是留给那个时候的。
+    allow if {
+    	is_service_account
+    	is_audit_data(input)
+    	input.context.identity.user == "openmetadata_service"
+    }
+
+    # 表维护作业(jobs/iceberg-maintenance,ADR-033 的配套)也要能碰这两个
+    # schema —— **而且恰恰是它们最需要维护**:审计和推理留痕是持续写入的,
+    # 小文件和过期快照堆得最快。
+    #
+    # **2026-08-30 实机第一次跑就撞到了这一条**:维护作业对
+    # `iceberg.audit.*` 的三个动作全部 PERMISSION_DENIED —— 被上面那条
+    # "敏感 schema 只有 platform-team 能读"挡住了。也就是说**最需要维护的
+    # 两张表,永远不会被维护**。
+    #
+    # 为什么可以开这个口子:`ALTER TABLE ... EXECUTE optimize /
+    # expire_snapshots / remove_orphan_files` **不返回任何数据行** —— 它重写
+    # 和删除文件,但不把内容交给调用方。这和 openmetadata_service 那条是同
+    # 一个理由(采元数据不采数据),不是"因为不方便所以放行"。
+    #
+    # **必须是一个专用账号,不能复用 platform_sdk_demo_service。** 第一版就是
+    # 那么写的,被 `test_other_service_accounts_still_denied_on_audit_schema`
+    # 当场拦下 —— 那个账号是所有 notebook 和作业共用的,给它审计权限等于
+    # **任何能提交作业的人都能读审计表**。那条测试就是为了防这个而写的。
+    #
+    # **如果哪天这个专用账号被用来跑别的东西,这条必须收窄** —— 它现在能读到
+    # 审计表的数据行,而那不是本意。留这行字给那个时候。
+    allow if {
+    	is_service_account
+    	is_audit_data(input)
+    	input.context.identity.user == "iceberg_maintenance_service"
+    }
+
+    # ---- 审计表:只有平台管理组能读 ----
+    #
+    # **审计表泄露比业务表泄露更糟**——它记着每个人查过什么、导出过什么,
+    # 是一份"谁对什么感兴趣"的完整画像。所以它不能沿用普通表那套授权。
+    #
+    # 具体挡的是**服务账号那条口子**。审计表在 `default allow := false` 之下,
+    # 普通用户本来就读不到(要有 table-access-grants.csv 里的 grant 记录);
+    # 但 `is_service_account` 那条是**无条件放行**,意味着任何人只要能在
+    # Superset 里建一个查询,就能借 superset_service 这个账号读到全部审计
+    # 记录。这不是这次新引入的问题,是"服务账号无差别放行"这个既有设计撞上
+    # 一张新的敏感表——但撞上了就得处理,不能因为"老问题"就放着。
+    #
+    # platform-team 仍然能读(is_platform_admin 那条没加限制):合规调查本来
+    # 就是平台管理组的活,而且他们本来就能读所有表,在这里单独挡住没有意义。
+    #
+    # 判定只看 schema 名,不看 catalog:审计数据只会写进 `audit` 这个 schema
+    # (见 scripts/flink_trino_audit_sink.py),而**用 schema 名判断比枚举表名
+    # 安全**——以后往里加一张新的审计表,不用记得回来改这条策略。
+    # **一个集合,不是一个字符串。** 2026-08-30 推理留痕(ADR-085)进来时,
+    # 第一反应是复制一份 `is_inference_data` 规则 —— 那样每加一张敏感表就多一
+    # 条几乎一样的规则,而漏掉一条不会有任何地方报错。改成集合之后,加一个
+    # schema 就是加一个字符串。
+    #
+    # - `audit`:查询审计(ADR-066)—— 记着每个人查过什么、导出过什么
+    # - `ml`:推理留痕(ADR-085)—— 推理输入很可能是用户的个人数据
+    #
+    # 两者的共同点是**它们泄露比业务表泄露更糟**:一份是"谁对什么感兴趣"的
+    # 完整画像,一份是原始的用户输入。
+    sensitive_schemas := {"audit", "ml"}
+
+    is_audit_data(inp) if {
+    	inp.action.resource.table.schemaName in sensitive_schemas
+    }
+
+    # ---- 平台管理组:不受表级授权约束,方便排障 ----
+    # 和 ArgoCD(ADR-028)platform-team -> role:admin 是同一个权限模型,不是
+    # 这次新发明的口子。
+    is_platform_admin if {
+    	"platform-team" in input.context.identity.groups
+    }
+
+    allow if {
+    	is_platform_admin
+    }
+
+    # ---- 基础浏览操作:任何登录用户都放行 ----
+    # 能看到 catalog/schema/table/column 存在,不等于能读到里面的数据——这个
+    # 项目的表目录浏览(建表注册工具 ADR-043、权限申请门户的表访问分级审批
+    # ADR-046)本来就是"任何登录用户都能看目录、决定要不要申请"的模式,这里
+    # 保持一致,不在浏览这一层加限制,只在真正读数据这一层(SelectFromColumns/
+    # ShowCreateTable)卡审批记录。
+    basic_browse_operations := {
+    	"ExecuteQuery",
+    	"AccessCatalog",
+    	"ShowSchemas",
+    	"ShowTables",
+    	"ShowColumns",
+    	"ShowCreateSchema",
+    	"FilterCatalogs",
+    	"FilterSchemas",
+    	"FilterTables",
+    	"FilterColumns",
+    }
+
+    allow if {
+    	input.action.operation in basic_browse_operations
+    }
+
+    # ---- 真正读数据:必须有有效(未过期)的 grant 记录 ----
+    gated_operations := {"SelectFromColumns", "ShowCreateTable"}
+
+    allow if {
+    	input.action.operation in gated_operations
+    	table_fqn := sprintf("%s.%s", [input.action.resource.table.schemaName, input.action.resource.table.tableName])
+    	has_valid_grant(input.context.identity.user, table_fqn)
+    }
+
+    has_valid_grant(user, table_fqn) if {
+    	some g in data.trino.grants
+    	g.username == user
+    	g.table_fqn == table_fqn
+    	not grant_expired(g)
+    }
+
+    grant_expired(g) if {
+    	g.expires_at != ""
+    	time.parse_rfc3339_ns(g.expires_at) < time.now_ns()
+    }
+
+    # 没写明确覆盖的操作(CreateTable/DropTable/InsertIntoTable/DeleteFromTable/
+    # AlterColumn/CreateView/... 等所有写类操作),默认拒绝——这是有意的设计,
+    # 不是漏写:这个平台的建表/改表走 apps/table-registration-app 这个专属
+    # 工具(用上面的 is_service_account 账号),不是让终端用户在 Trino 里直接
+    # 执行 DDL/DML。如果以后真的需要放开某类写操作给终端用户,应该是一次
+    # 独立、有讨论的决定,不是在这份策略里悄悄漏放。
+
+    # ==========================================================================
+    # 列级脱敏 + 行级过滤(ADR-063)
+    # ==========================================================================
+    # Trino OPA 插件原生支持两个额外接口(源码 plugin/trino-opa 的
+    # OpaConfig.java/OpaHighLevelClient.java 核实过完整 wire schema,不是凭
+    # 印象写的,详见 ADR-063):
+    #   - opa.policy.column-masking-uri -> 这份策略里的 columnMask 规则
+    #     (非 batch 模式,请求 operation 是 GetColumnMask,一次一列;响应体
+    #     要么是 {"expression": "<SQL 表达式>"},要么整条规则 undefined 表示
+    #     不脱敏——和 Optional<OpaViewExpression> 的语义对应)。
+    #   - opa.policy.row-filters-uri -> 这份策略里的 rowFilters 规则
+    #     (operation 是 GetRowFilters;响应体是一个数组,每个元素
+    #     {"expression": "<SQL 布尔表达式>"},作为额外的 WHERE 条件 AND 起来;
+    #     空数组/undefined 表示不过滤)。
+    #
+    # 权限判断复用已有的 platform/iam 数据,不新发明模型:
+    #   - 列级脱敏门槛用 data.trino.grants 里本来就有的 security_level 字段
+    #     (apps/permission-request-app 分级审批留下的,数值语义和
+    #     build_approval_steps 一致:level>=2 要多一层主管审批,level>=3 再加
+    #     一层)——把"要看到敏感列明文"和"这张表本身审批到了多高级别"绑在一起,
+    #     不单独维护一套列级权限。
+    #   - 行级过滤按部门,数据来自 platform/iam/employees.csv 的 department
+    #     列,同步机制见 apps/opa/manifests/departments-sync-cronjob.yaml
+    #     (和 grants-sync-cronjob.yaml 同一个模式:5 分钟一次,PUT 进
+    #     data.trino.user_departments)。
+
+    # ---- 列级脱敏:按列名分类敏感字段 ----
+    # 子串匹配(不区分大小写),覆盖手机号/邮箱/身份证这几类最常见的敏感字段
+    # 命名习惯(中英文都配了,这个仓库的表目前是英文列名,中文模式是为以后
+    # 接入中文命名的表留的)。required_level 是"要看到明文,grant 至少要是这个
+    # security_level"——身份证比手机号/邮箱更敏感,门槛更高。
+    sensitive_column_rules := [
+    	{"pattern": "phone", "required_level": 2, "mask_kind": "partial_digits"},
+    	{"pattern": "mobile", "required_level": 2, "mask_kind": "partial_digits"},
+    	{"pattern": "手机", "required_level": 2, "mask_kind": "partial_digits"},
+    	{"pattern": "email", "required_level": 2, "mask_kind": "partial_email"},
+    	{"pattern": "邮箱", "required_level": 2, "mask_kind": "partial_email"},
+    	{"pattern": "id_card", "required_level": 3, "mask_kind": "full"},
+    	{"pattern": "identity_no", "required_level": 3, "mask_kind": "full"},
+    	{"pattern": "身份证", "required_level": 3, "mask_kind": "full"},
+    ]
+
+    matching_sensitive_rule(column_name) := rule if {
+    	lower_name := lower(column_name)
+    	some rule in sensitive_column_rules
+    	contains(lower_name, rule.pattern)
+    }
+
+    # 手机号/邮箱做部分脱敏(保留可用于排障/核对的局部信息),身份证这类更敏感
+    # 的字段直接整段替换,不留任何可反推的片段。
+    mask_expression(rule, column_name) := expr if {
+    	rule.mask_kind == "partial_digits"
+    	expr := sprintf("regexp_replace(CAST(%s AS varchar), '(\\d{3})\\d+(\\d{4})', '$1****$2')", [quoted_identifier(column_name)])
+    }
+
+    mask_expression(rule, column_name) := expr if {
+    	rule.mask_kind == "partial_email"
+    	expr := sprintf("regexp_replace(CAST(%s AS varchar), '(^.{2}).*(@.*$)', '$1***$2')", [quoted_identifier(column_name)])
+    }
+
+    mask_expression(rule, _) := "'***MASKED***'" if {
+    	rule.mask_kind == "full"
+    }
+
+    # Trino 传来的列名本身可信(来自它自己的 catalog 元数据,不是终端用户输入),
+    # 这里只是按 SQL 标识符规则加双引号,不是防注入的边界。
+    quoted_identifier(name) := concat("", ["\"", name, "\""])
+
+    # 服务账号 / 平台管理组和表级 allow 判断用同一条豁免——它们的查询不代表某个
+    # 真实终端用户在看数据,见文件上半部分 service_accounts/is_platform_admin
+    # 的注释。
+    is_exempt_from_masking if {
+    	is_service_account
+    }
+
+    is_exempt_from_masking if {
+    	is_platform_admin
+    }
+
+    # 用户对这张表当前的有效 grant 级别;没有有效 grant 时按 0 处理(比任何
+    # required_level 都低,一定脱敏)——这是纵深防御:正常情况下没有 grant 连
+    # SelectFromColumns 都过不了(见 allow 规则),走不到脱敏这一步,但脱敏判断
+    # 不应该依赖"外面一定先做过判断"这个假设,自己也要 fail-safe。
+    effective_grant_level(user, table_fqn) := level if {
+    	some g in data.trino.grants
+    	g.username == user
+    	g.table_fqn == table_fqn
+    	not grant_expired(g)
+    	level := g.security_level
+    }
+
+    effective_grant_level(user, table_fqn) := 0 if {
+    	not has_valid_grant(user, table_fqn)
+    }
+
+    columnMask := {"expression": expr} if {
+    	input.action.operation == "GetColumnMask"
+    	not is_exempt_from_masking
+    	col := input.action.resource.column
+    	rule := matching_sensitive_rule(col.columnName)
+    	table_fqn := sprintf("%s.%s", [col.schemaName, col.tableName])
+    	effective_grant_level(input.context.identity.user, table_fqn) < rule.required_level
+    	expr := mask_expression(rule, col.columnName)
+    }
+
+    # ---- 行级过滤:按部门 ----
+    # 哪些表要按部门过滤是声明式白名单,和 basic_browse_operations/
+    # gated_operations 一样的写法,table_fqn 格式也和它们(以及 data.trino.grants
+    # 里的 table_fqn)保持一致——schemaName.tableName,不带 catalog 前缀。目前
+    # 这个仓库里唯一的示例表是 demo.regional_sales(还没真的建过,留给下次接
+    # 真实按区域/部门分片的数据时用)。以后要给别的表加行级过滤,在这个集合里
+    # 加一行,不是悄悄对所有表生效。
+    row_level_filtered_tables := {"demo.regional_sales"}
+
+    user_department(user) := dept if {
+    	some d in data.trino.user_departments
+    	d.username == user
+    	dept := d.department
+    }
+
+    user_has_department(user) if {
+    	user_department(user)
+    }
+
+    # 能查到部门:只放行属于自己部门的行。
+    rowFilters := [{"expression": expr}] if {
+    	input.action.operation == "GetRowFilters"
+    	not is_exempt_from_masking
+    	tbl := input.action.resource.table
+    	table_fqn := sprintf("%s.%s", [tbl.schemaName, tbl.tableName])
+    	table_fqn in row_level_filtered_tables
+    	dept := user_department(input.context.identity.user)
+    	expr := sprintf("department = '%s'", [dept])
+    }
+
+    # 查不到部门(employees.csv 里没有这个人,或者数据还没同步过来):按这个
+    # 仓库一贯的"宁可漏权限报错,不要漏配置导致意外授权"原则,不是放行看全部
+    # 数据,是过滤成空结果集(1 = 0),而不是默认不过滤。
+    rowFilters := [{"expression": "1 = 0"}] if {
+    	input.action.operation == "GetRowFilters"
+    	not is_exempt_from_masking
+    	tbl := input.action.resource.table
+    	table_fqn := sprintf("%s.%s", [tbl.schemaName, tbl.tableName])
+    	table_fqn in row_level_filtered_tables
+    	not user_has_department(input.context.identity.user)
+    }
