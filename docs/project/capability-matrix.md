@@ -86,13 +86,13 @@
 |---|---|---|---|---|
 | 登录 / 统一入口 | ✅ | 集成验证 | 2026-08-30 | Keycloak SSO + platform-portal([ADR-047](../decisions/047-platform-portal.md))。**2026-08-30 实机验证按角色显示**:`data-analysts` 身份看不到 ArgoCD/Keycloak、看得到 SQL 工作台;`platform-team` 全部可见;三个自建应用都读得到 groups claim(此前 permission-request-app 读不到,导致组权限审批对所有人 403) |
 | 找数据(有哪些表) | ✅ | 集成验证 | 2026-08-23 | 采集自动发现,目录里 100+ 张表,字段和 Trino 真实表结构一致 |
-| 申请表权限 | 🟡 | demo | 2026-08-18 | [ADR-044](../decisions/044-tiered-approval-workflow.md)/[045](../decisions/045-approval-backend-notifications-escalation.md)。**目录 → 申请表单的联动没验过** |
+| 申请表权限 | 🟡 | demo | 2026-08-30 | [ADR-044](../decisions/044-tiered-approval-workflow.md)/[045](../decisions/045-approval-backend-notifications-escalation.md)。2026-08-30 实机验证:审批链算得对、拒绝接口不返回 500、时区换算和 groups 提示都在。**目录 → 申请表单的联动仍没验过**;组权限申请的批准按钮要真人登录才点得到 |
 | 权限真正生效 | ✅ | 集成验证 | 2026-08-26 | Trino 接 OPA([ADR-051](../decisions/051-trino-opa-access-control.md)) |
 | 权限到期回收 | ✅ | 集成验证 | 2026-08-18 | [ADR-050](../decisions/050-grant-expiry-reclamation.md) |
 | **SQL 工作台** | ✅ | 集成验证 | 2026-08-30 | [ADR-084](../decisions/084-analyst-sql-workbench.md)。从「Trino Web UI」(**那里根本没有 SQL 编辑器**)改成 Superset SQL Lab。**2026-08-30 实机验证四条**:这条连接上 `current_user` 是登录者本人(不是 superset_service)、有 grant 的表查得到、没 grant 的被 `PERMISSION_DENIED` 拒、列级脱敏生效(`138****5678`)。由 `scripts/46-verify-p15.sh sqllab` 可重复跑 |
 | 建表 | ✅ | 集成验证 | 2026-08-30 | [ADR-043](../decisions/043-table-registration-tool.md)。2026-08-29 补完:字段说明、分区、质量断言(建真的 OpenMetadata testCase)、提交前预览、按等级的审批分流、负责人不能冒充。**2026-08-30 实机验证**:提交一张带字段说明和分区的表,`SHOW CREATE TABLE` 里 COMMENT 和 partitioning 都在;非平台组提交 2 级表被挡住并落了说明去哪的记录;预览返回的 DDL 和实际执行的一致 |
 | SQL 数据转换(dbt) | 🟡 | 集成验证 | 2026-08-29 | [ADR-082](../decisions/082-dbt-lineage-ingestion.md),血缘查得到 `orders → stg_orders → daily_order_totals`。**缺**:`schedule=None`,只能手动触发 |
-| 看板 / BI | ✅ | 集成验证 | 2026-08-29 | 组映射实测:`data-analysts` → `Alpha/Gamma/sql_lab`,未分组 → `Gamma`。**修之前所有人都是 Admin**(`AUTH_USER_REGISTRATION_ROLE="Admin"` + scope 里没有 groups) |
+| 看板 / BI | ✅ | 集成验证 | 2026-08-30 | 组映射实测:`data-analysts` → `Alpha/Gamma/sql_lab`,未分组 → `Gamma`。**修之前所有人都是 Admin**(`AUTH_USER_REGISTRATION_ROLE="Admin"` + scope 里没有 groups) |
 | 中文界面 | 🟡 | 集成验证 | 2026-08-28 | Superset 4054 条译文([ADR-077](../decisions/077-superset-chinese-ui.md))。**Airflow/Grafana/OpenMetadata 仍是英文** |
 
 ## 大数据开发
@@ -150,7 +150,7 @@
 
 ---
 
-## 这张表被证伪过几次
+## 这张表(以及验它的工具)被证伪过几次
 
 留这一节不是自责,是因为**它证明这张表需要存在**,也解释了为什么"验证级别"
 那一栏比"状态"重要。
@@ -177,10 +177,29 @@ OPA 的 groups 永远是空的,`is_platform_admin` 从来没触发过。测试�
 后端给的是 `phase`/`started`,模板读的是 `status`/`at`。Jinja 对未定义变量
 渲染成空字符串,**不报错**,30 个测试全绿。
 
-**这四次合起来给出四条判据,现在是硬性的:**
+**2026-08-30,验收脚本自己不可信。** 开机跑 P1.5 的回归验收,脚本本身有
+三个 bug,每个都是"检查跑了、结论不可信":
+
+- `kubectl logs workflow/<name>` 取不到日志(kubectl 不认这个 kind),而
+  `2>/dev/null || true` 把报错吞成空串 —— 两条检查都在拿**空字符串**判断:
+  "有没有 ModuleNotFoundError"必然通过(假阳性),"有没有 2026-08-01"必然
+  失败(假阴性)。两条同时错、方向相反。
+- `echo ... | while read` 起子 shell,里面的 ✅/❌ 记账全丢 —— **失败会被
+  静默吞掉**,一个漏报失败的验证脚本比没有它更危险。
+- 断言 HTTP 302,而 `urlopen` 默认跟随重定向,拿到的永远是 200。
+
+**同一天还差点把一个好功能报成坏的**:验 SQL Lab 的 impersonation 时用
+`flask_login.login_user` 造身份,`current_user` 返回 `superset_service`。
+实际是 Superset 读的不是那个地方(要用它自己的 `override_user`)——
+**测试装置写错,结论方向完全相反。**
+
+**这几次合起来给出的判据,现在是硬性的:**
 
 1. 判据必须是业务结果(查到几行、拿到什么角色、表里有没有数),不是组件状态。
 2. 单元测试的 input 是自己写的,证明不了真实输入长什么样 —— 至少要有一次
    端到端。
 3. 状态有保质期。长期能力靠探针答"现在还成不成立",不靠这张表。
 4. 没有真的跑过一次的,验证级别最多写"未验证",状态最多 🟡。
+5. **验证工具本身也要被怀疑。** 一条检查"通过"之前,先问它的输入是不是
+   真的拿到了东西 —— 空字符串、子 shell 里丢掉的记账、被自动跟随的重定向,
+   都会让检查安静地给出一个和事实无关的结论。
