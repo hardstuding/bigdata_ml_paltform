@@ -63,8 +63,32 @@ spec:
                 - -c
                 - |
                   set -e
-                  mc alias set src http://minio.minio.svc.cluster.local:9000 "$SRC_USER" "$SRC_PASSWORD"
-                  mc alias set backuptarget http://minio.minio.svc.cluster.local:9000 "$BACKUP_S3_USER" "$BACKUP_S3_PASSWORD"
+                  # 实测踩到的真实现象(2026-08-30):这个 Job 每次跑都在第一条
+                  # `mc alias set` 上失败,报的是 **Connection refused**(不是超时、
+                  # 不是 DNS 解析失败)——而同一个命名空间、同一个镜像、同一个
+                  # MinIO 端点的 postgres-backup 却一直是成功的。区别在于
+                  # postgres-backup 先跑了一个几十秒的 initContainer(pg_dumpall),
+                  # 等它的 mc 容器起来时 pod 已经存在一段时间了。
+                  #
+                  # 这和 postgres-backup 那边注释里记的是同一个现象:新建 pod 的
+                  # 头几秒连集群内服务有概率被拒(疑似 k3s/Flannel 上 NetworkPolicy
+                  # 规则对新 pod 生效有编程延迟,见 ADR-035)。没有深挖确认——
+                  # 按这个仓库一贯的原则(网络操作必须自带重试/超时),加重试,
+                  # 不去猜这个延迟具体多长。
+                  alias_with_retry() {
+                    name=$1; endpoint=$2; user=$3; password=$4
+                    for i in 1 2 3 4 5 6; do
+                      if mc alias set "$name" "$endpoint" "$user" "$password"; then
+                        return 0
+                      fi
+                      echo "第 ${i} 次连 ${endpoint} 失败,5 秒后重试" >&2
+                      sleep 5
+                    done
+                    echo "!!! 重试 6 次仍然连不上 ${endpoint},放弃" >&2
+                    return 1
+                  }
+                  alias_with_retry src http://minio.minio.svc.cluster.local:9000 "$SRC_USER" "$SRC_PASSWORD"
+                  alias_with_retry backuptarget http://minio.minio.svc.cluster.local:9000 "$BACKUP_S3_USER" "$BACKUP_S3_PASSWORD"
                   mc mb --ignore-existing backuptarget/backups
 
                   COPIED=0
