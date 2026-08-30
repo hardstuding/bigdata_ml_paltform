@@ -233,6 +233,41 @@ kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str
 
 ---
 
+## 开机后先做:清掉 2026-08-30 验证留下的一个临时凭据
+
+验组权限审批按钮时,给 Keycloak `platform` 域的 `admin` 设了一个临时密码
+(密码模式换 token 用),`directAccessGrantsEnabled` 当时已经关回去了,但
+**密码本身还在**。开发测试环境、那个账号本来也没有已知密码,影响为零 ——
+但属于"验证留下的东西",该清掉:
+
+```bash
+KC=$(kubectl -n keycloak get pod -l app.kubernetes.io/instance=keycloak \
+       -o jsonpath='{.items[0].metadata.name}')
+kubectl -n keycloak exec $KC -- sh -c '
+/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080/auth \
+  --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1
+UID2=$(/opt/keycloak/bin/kcadm.sh get users -r platform -q username=admin --fields id \
+       | grep -o "\"[a-f0-9-]\{36\}\"" | head -1 | tr -d "\"")
+/opt/keycloak/bin/kcadm.sh set-password -r platform --userid $UID2 \
+  --new-password "$(openssl rand -base64 24)"
+'
+```
+
+顺带确认 `directAccessGrantsEnabled` 确实是关的:
+
+```bash
+kubectl -n keycloak exec $KC -- sh -c '
+/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080/auth \
+  --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1
+CID=$(/opt/keycloak/bin/kcadm.sh get clients -r platform -q clientId=permission-request-app \
+      --fields id | grep -o "\"[a-f0-9-]\{36\}\"" | head -1 | tr -d "\"")
+/opt/keycloak/bin/kcadm.sh get clients/$CID -r platform --fields directAccessGrantsEnabled
+'
+# 期望:false
+```
+
+---
+
 ## 跑完之后
 
 把验过的项在 [`capability-matrix.md`](capability-matrix.md) 里从「未验证」
