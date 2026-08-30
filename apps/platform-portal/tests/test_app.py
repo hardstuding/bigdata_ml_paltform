@@ -763,6 +763,36 @@ class TestJobDetailOwnership:
         resp, _ = self._get("/job/job-abc/logs/job-abc-123", "bob", _wf(owner="alice"))
         assert resp.status_code == 404
 
+    def test_日志按原始字节解码_不是_bytes_的_repr(self, monkeypatch):
+        """2026-08-30 实机踩到:kubernetes 客户端默认返回的是一个 **str,
+        内容却是 bytes 的 repr** —— 页面上显示成
+        `b'\\xe5\\xa4\\x84...'` 这种一整坨转义序列。纯英文日志看着只是
+        "多了个 b' 前缀",**中文日志完全不可读**,而这个平台的作业输出
+        基本都是中文。
+
+        所以这条盯的是"走没走 _preload_content=False 那条路":
+        断言拿到的是真正的中文,而且没有 bytes 字面量的痕迹。
+        """
+        # 测试环境里没装 kubernetes 客户端(`_pod_logs` 是函数内 import),
+        # 塞一个假模块进去 —— 不装真依赖,是为了让这套测试在任何机器上
+        # 都能跑,和这个仓库里其它 Flask 应用的测试一致。
+        fake_resp = MagicMock()
+        fake_resp.data = "处理了 13 张表\n".encode("utf-8")
+        core = MagicMock()
+        core.read_namespaced_pod_log.return_value = fake_resp
+        fake_client = MagicMock()
+        fake_client.CoreV1Api.return_value = core
+        fake_k8s = MagicMock()
+        fake_k8s.client = fake_client
+        monkeypatch.setitem(sys.modules, "kubernetes", fake_k8s)
+        monkeypatch.setitem(sys.modules, "kubernetes.client", fake_client)
+        monkeypatch.setattr(portal, "_k8s", lambda: MagicMock())
+        out = portal._pod_logs("some-pod")
+        assert out == "处理了 13 张表\n"
+        assert not out.startswith("b'")
+        # 关键:必须显式关掉 preload,否则客户端会把 bytes str() 掉
+        assert core.read_namespaced_pod_log.call_args.kwargs["_preload_content"] is False
+
     def test_不能拿日志接口读任意_pod(self):
         # pod 名必须真的属于这个 workflow,否则这就是"读 argo 命名空间下
         # 任意 pod 日志"的入口了。

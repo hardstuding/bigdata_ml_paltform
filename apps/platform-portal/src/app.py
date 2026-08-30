@@ -632,8 +632,23 @@ def _pod_logs(pod_name, tail=200):
         # 脆的** —— 以后有人换个地方调这个函数就会拿到一个没配置的客户端,
         # 而报错信息会指向认证失败,和真正的原因差着十万八千里。
         _k8s()
-        return k8s_client.CoreV1Api().read_namespaced_pod_log(
-            pod_name, ARGO_NAMESPACE, container="main", tail_lines=tail) or "(没有输出)"
+        # **必须 _preload_content=False,不能直接拿返回值。**
+        #
+        # 2026-08-30 实机发现:`read_namespaced_pod_log(...)` 默认返回的是
+        # 一个 **str,内容却是 bytes 的 repr** —— 也就是字面量
+        #   b'\xe5\xa4\x84\xe7\x90\x86\xe4\xba\x86 13 ...'
+        # 页面上于是显示成一整坨转义序列。纯英文日志看起来只是"多了个 b'
+        # 前缀和一堆 \n",**中文日志则完全不可读** —— 而这个平台的作业
+        # 输出基本都是中文。
+        #
+        # 这不是配置问题,是 kubernetes 客户端在响应不是 JSON 时的行为:
+        # 它把 body 当对象反序列化,拿到 bytes 就 str() 了一下。要拿到
+        # 原始字节只能关掉 preload,自己 decode。
+        resp = k8s_client.CoreV1Api().read_namespaced_pod_log(
+            pod_name, ARGO_NAMESPACE, container="main", tail_lines=tail,
+            _preload_content=False)
+        text = resp.data.decode("utf-8", errors="replace")
+        return text or "(没有输出)"
     except Exception as exc:
         # Pod 被回收之后日志就没了,这是正常的,不是错误 —— 说清楚是哪种
         # 情况,比抛一个 ApiException 给用户看有用。
