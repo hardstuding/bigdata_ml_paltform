@@ -2005,6 +2005,44 @@ def _read_grants_rows():
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+@app.route("/api/table-governance")
+def api_table_governance():
+    """一张表的治理属性 —— **给 OA(以及别的外部系统)读的那层隔离**。
+
+    **为什么不让 OA 直接调 OpenMetadata**(ADR-086):OM 的实体结构会随
+    版本变,我们 2026-08-26 刚跨过 1.13.3 → 2.0.0 一个大版本。如果 OA 直接
+    耦合到 OM 的 API,**每一次 OM 升级都可能打破 OA 的集成** —— 而 OA 通常
+    不是我们能随时改的系统,修复周期以周计。
+
+    这个接口的**唯一职责就是隔离**:表名进,治理属性出。契约小到几乎不会
+    需要改;OM 怎么变、字段叫什么、认证怎么做,都关在平台这边。
+
+    **不需要 X-Internal-Token** —— 它返回的是"这张表几级、负责人是谁",
+    是数据目录里本来就公开的治理元数据,不是数据本身,也不涉及任何人的
+    权限。加一道 token 只会让对接方多一件事要配。
+    """
+    table_fqn = request.args.get("table", "").strip()
+    if not table_fqn:
+        return {"error": "必须带 table 参数(完整表名,比如 iceberg.demo.orders)"}, 400
+    security_level, table_owner = lookup_table_governance(table_fqn)
+    if security_level is None:
+        return {
+            "table_fqn": table_fqn,
+            "known": False,
+            # **说清楚是"目录里没有"而不是"这张表不存在"** —— 直接在 Trino
+            # 里手写 DDL 建的表就是这种状态,它在 Trino 里是存在的。
+            "reason": "数据目录里查不到这张表的安全等级 —— 它可能是直接在 "
+                      "Trino 里建的(没走建表注册工具),或者元数据采集还没跑到",
+        }, 404
+    return {
+        "table_fqn": table_fqn,
+        "known": True,
+        "security_level": security_level,
+        "table_owner": table_owner or "",
+        "required_approval": approval_policy(security_level, table_owner),
+    }
+
+
 @app.route("/api/my-permissions")
 def api_my_permissions():
     """某个人现在有哪些表权限,以及哪些快到期了。

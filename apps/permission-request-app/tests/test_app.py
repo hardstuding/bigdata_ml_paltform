@@ -1611,3 +1611,62 @@ class TestOaBackend:
         # 测试阶段不该因为这次改动而变行为。
         import os
         assert os.environ.get("APPROVAL_BACKEND", "local") == "local"
+
+
+class TestTableGovernanceApi:
+    """给 OA 读的那层隔离(ADR-086)。
+
+    **它存在的理由不是"多一个接口",是不让 OA 直接耦合到 OpenMetadata** ——
+    OM 的实体结构会随版本变(我们刚跨过 1.13.3 → 2.0.0),而 OA 通常不是
+    能随时改的系统,坏了修复周期以周计。
+    """
+
+    def test_返回治理属性和需要几级审批(self, client, monkeypatch):
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (2, "manager1"))
+        d = client.get("/api/table-governance?table=iceberg.demo.orders").get_json()
+        assert d["known"] is True
+        assert d["security_level"] == 2 and d["table_owner"] == "manager1"
+        assert d["required_approval"]["levels"] == 2
+
+    def test_不返回该谁批(self, client, monkeypatch):
+        # 谁审批是 OA 的事 —— 平台给的是"需要什么强度的审批"。
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (3, "manager1"))
+        import json as _j
+        flat = _j.dumps(client.get("/api/table-governance?table=x.y.z").get_json(),
+                        ensure_ascii=False)
+        assert "approver_username" not in flat
+
+    def test_目录里没有这张表时说清楚原因(self, client, monkeypatch):
+        # "目录里没有" ≠ "这张表不存在" —— 直接在 Trino 里手写 DDL 建的表
+        # 就是这种状态,它在 Trino 里是存在的。
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (None, None))
+        r = client.get("/api/table-governance?table=iceberg.demo.orders")
+        assert r.status_code == 404
+        d = r.get_json()
+        assert d["known"] is False and "建表注册工具" in d["reason"]
+
+    def test_不带表名拒绝(self, client):
+        assert client.get("/api/table-governance").status_code == 400
+
+    def test_不需要内部_token(self, client, monkeypatch):
+        """返回的是数据目录里本来就公开的治理元数据,不是数据本身。
+        加一道 token 只会让对接方多一件事要配。"""
+        monkeypatch.setattr(perm, "lookup_table_governance", lambda fqn: (1, "m"))
+        monkeypatch.setattr(perm, "INTERNAL_TOKEN", "some-token")
+        assert client.get("/api/table-governance?table=a.b.c").status_code == 200
+
+
+class TestApprovalPolicy:
+    """平台该告诉 OA 的是"需要什么强度的审批",不是"该谁批"。"""
+
+    def test_等级决定几级(self):
+        assert perm.approval_policy(1, "owner")["levels"] == 1
+        assert perm.approval_policy(2, "owner")["levels"] == 2
+        assert perm.approval_policy(3, "owner")["levels"] == 3
+
+    def test_带上表负责人_那是平台的知识(self):
+        # OA 不知道 iceberg.demo.orders 的负责人是谁 —— 那来自数据目录。
+        assert perm.approval_policy(2, "manager1")["table_owner"] == "manager1"
+
+    def test_没有负责人时不崩(self):
+        assert perm.approval_policy(1, None)["table_owner"] == ""

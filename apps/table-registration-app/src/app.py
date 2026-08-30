@@ -295,6 +295,28 @@ def om_request(method: str, path: str, json_body=None):
     return resp.json() if resp.content else None
 
 
+_PROPERTY_TYPE_CACHE: dict = {}
+
+
+def _property_type_id(type_name: str):
+    """按名字查自定义属性的 propertyType id。
+
+    **之前这几个 id 是写死的 UUID。** 那是个隐患:2026-08-26 刚把
+    OpenMetadata 从 1.13.3 升到 2.0.0(大版本),而写死 UUID 等于在赌
+    "这些种子数据跨版本不变"。赌输了的表现是 PUT /api/v1/tables 抛 NPE
+    (`Cannot invoke "Object.hashCode()" because "key" is null`)—— 一个和
+    真实原因毫无关系的报错,查起来会很久。改成运行时按名字查。
+    """
+    if type_name in _PROPERTY_TYPE_CACHE:
+        return _PROPERTY_TYPE_CACHE[type_name]
+    try:
+        t = om_request("GET", f"/api/v1/metadata/types/name/{type_name}")
+        _PROPERTY_TYPE_CACHE[type_name] = t.get("id")
+    except Exception:   # noqa: BLE001
+        _PROPERTY_TYPE_CACHE[type_name] = None
+    return _PROPERTY_TYPE_CACHE[type_name]
+
+
 def ensure_table_custom_properties():
     """幂等地在 OpenMetadata 的 Table 实体类型上注册 registeredOwner(字符串)
     /securityLevel(整数)这两个自定义属性——`extension` 字段不是自由 JSON
@@ -312,12 +334,23 @@ def ensure_table_custom_properties():
     existing = {p.get("name") for p in (table_type.get("customProperties") or [])}
     to_add = [
         ("registeredOwner", "建表注册工具记录的负责人(OpenMetadata owner 关联查不到时的降级字段)",
-         "c09a54a2-583b-4662-a37a-a0146fd32568", "string"),
-        ("securityLevel", "建表注册工具记录的数据安全等级(1/2/3)",
-         "c68083c5-bc02-4422-ba94-bfe06d3d90ca", "integer"),
+         "string"),
+        ("securityLevel", "数据安全等级(1/2/3)。等级决定申请这张表的权限要走几级审批,"
+         "也决定敏感字段对谁脱敏。", "integer"),
+        # markdown 类型在表详情页上**渲染成可点的链接** —— 这就是"在
+        # OpenMetadata 里点一个按钮跳去申请"这个需求的实现方式,而且
+        # **一行 OpenMetadata 的代码都没改**(ADR-086)。二开它的代价是
+        # 每次升级都要重新合改动,而我们刚跨过 1.13.3 → 2.0.0。
+        ("accessRequest", "申请访问这张表(跳到平台的权限申请入口,会带上表名)",
+         "markdown"),
     ]
-    for name, description, type_id, type_name in to_add:
+    for name, description, type_name in to_add:
         if name in existing:
+            continue
+        type_id = _property_type_id(type_name)
+        if not type_id:
+            # 查不到就跳过这一个,不让整个建表流程挂掉 —— 少一个自定义属性
+            # 是"目录里少一栏",抛异常是"表建不出来",后者严重得多。
             continue
         resp = requests.request(
             "PATCH", f"{OPENMETADATA_URL}/api/v1/metadata/types/{table_type['id']}",
@@ -446,6 +479,24 @@ def create_quality_tests(catalog, schema, table, rules, key_columns, notnull_col
     return msg
 
 
+# 平台权限申请入口的对外地址。没配就不写那个链接 —— 写一个指向
+# `None/...` 的链接比没有链接更糟。
+PERMISSION_APP_PUBLIC_URL = os.environ.get("PERMISSION_APP_PUBLIC_URL", "")
+
+
+def _access_request_link(catalog: str, schema: str, table: str) -> str:
+    """表详情页上"申请访问"那个链接的 markdown。
+
+    OpenMetadata 的 markdown 类型自定义属性会把它渲染成可点的链接 ——
+    这就是"在 OM 里点一个按钮跳去申请"这个需求的实现,**不用二开 OM**。
+    """
+    if not PERMISSION_APP_PUBLIC_URL:
+        return ""
+    fqn = f"{catalog}.{schema}.{table}"
+    base = PERMISSION_APP_PUBLIC_URL.rstrip("/")
+    return f"[申请访问这张表]({base}/table-access?table={fqn})"
+
+
 def register_table_in_openmetadata(catalog: str, schema: str, table: str, columns, owner: str, security_level: int):
     ensure_om_hierarchy_and_tags()
     om_request("PUT", "/api/v1/databaseSchemas", {"name": schema, "database": f"trino.{catalog}"})
@@ -484,7 +535,16 @@ def register_table_in_openmetadata(catalog: str, schema: str, table: str, column
             "tagFQN": f"SecurityLevel.Level{security_level}",
             "source": "Classification", "labelType": "Manual", "state": "Confirmed",
         }],
-        "extension": {"registeredOwner": owner, "securityLevel": security_level},
+        "extension": {
+            "registeredOwner": owner,
+            "securityLevel": security_level,
+            # 表详情页上的可点链接。**指向平台的申请入口,不是直接指向 OA**
+            # (ADR-086):OA 的地址和单据类型会变,而这个属性是写进**每一张
+            # 表**的 —— 改一次要重写全部表实体。指向平台的话,改的只有一处
+            # 配置;而且平台这一跳还要补上 OA 不知道的东西(安全等级、
+            # 表负责人、需要几级审批)。
+            "accessRequest": _access_request_link(catalog, schema, table),
+        },
     }
     if owners:
         body["owners"] = owners

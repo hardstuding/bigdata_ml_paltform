@@ -238,3 +238,22 @@ ENABLE_PAYLOAD_LOG=1 ./scripts/11-deploy-demo-inference-service.sh
 
 **失败长什么样**:接收端返回 503 说明写 Kafka 失败 —— **那是有意设计的**,
 返回 200 会把"留痕断了"这个唯一的信号也吞掉。
+
+**18. 从数据目录跳去申请 + 给 OA 的治理接口**(ADR-086,**没上过集群**):
+
+```
+建一张表(走建表注册工具)
+→ OpenMetadata 的表详情页上应该出现「申请访问这张表」这个可点链接
+  (自定义属性 accessRequest,markdown 类型,**没有二开 OM**)
+→ 没出现的话先看 PERMISSION_APP_PUBLIC_URL 配了没(没配就不写链接)
+
+curl 平台的治理接口(不需要 token):
+  curl 'http://permission-request.<域名>/api/table-governance?table=iceberg.demo.orders'
+→ 应该返回 security_level / table_owner / required_approval
+→ 对一张没走过建表工具的表(比如 scripts/08 直接建的),应该返回 404 +
+  「数据目录里查不到这张表的安全等级」,而不是 500
+```
+
+**顺带验一个隐患修复**:自定义属性的 propertyType 之前是写死的 UUID,
+现在改成运行时按名字查。如果建表报 `Cannot invoke "Object.hashCode()"`
+这种莫名其妙的 NPE,就是这条没生效。

@@ -58,6 +58,16 @@ spec:
             # 对账重试 CronJob 调 /internal/reconcile-openmetadata 用的共享
             # 密钥。optional: true —— 没建这个 Secret 时应用照常起,只是那两个
             # /internal 端点会拒绝所有请求(拒绝比误开安全)。
+            # 表详情页上"申请访问"那个链接指向哪(ADR-086)。**指向平台的
+            # 申请入口,不是直接指向 OA** —— 这个属性写进每一张表,OA 地址
+            # 变一次要重写全部表实体;指向平台的话改的只有这一处。
+            # 没配就不写那个链接(写一个指向 None 的链接比没有更糟)。
+            - name: PERMISSION_APP_PUBLIC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: table-registration-app-internal
+                  key: permission-app-public-url
+                  optional: true
             - name: INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef:
