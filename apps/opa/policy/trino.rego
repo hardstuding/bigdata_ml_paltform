@@ -167,6 +167,37 @@ allow if {
 	input.context.identity.user == "iceberg_maintenance_service"
 }
 
+# 黄金链路探针(apps/golden-path-probes)要判断"审计链路还活着"。
+#
+# **2026-08-30 实机第一次触发就被这条挡住**:
+#   Access Denied: Cannot select from columns [event_ts] in table or view
+#   iceberg.audit.query_events
+# 后果比看起来严重 —— 审计链路是**断了补不回来**的那种(Trino 的 event
+# listener 配了 terminate-on-initialization-failure=false,Kafka 挂了事件
+# 静默丢失,保留期一到就永久没了,见 ADR-066)。探针跑不了,等于这条
+# 链路断了没人知道。
+#
+# **但不能像上面两个账号那样把整个 audit schema 放开。** 探针要回答的
+# 问题只有一个:"最新一条审计记录有多新" —— 它需要的是
+# `max(event_ts)`,一个时间戳,不是任何一条审计内容。审计表的敏感性在
+# 于"谁查过什么"(query_user + query_text),而 event_ts 一列什么都不
+# 泄露。
+#
+# 所以这条口子按**列**收窄,不是按表:只有 query_events 的 event_ts,
+# 多选一列(比如有人拿这个账号去 `select query_user`)立刻被拒。
+# `every` 在集合为空/字段缺失时的行为是 fail-closed —— 如果哪天 Trino
+# 不再往 input 里塞 columns,这条规则会失效变成拒绝,而不是变成放行。
+allow if {
+	input.context.identity.user == "goldenpath_probe"
+	input.action.operation == "SelectFromColumns"
+	input.action.resource.table.schemaName == "audit"
+	input.action.resource.table.tableName == "query_events"
+	count(input.action.resource.table.columns) > 0
+	every c in input.action.resource.table.columns {
+		c == "event_ts"
+	}
+}
+
 # ---- 审计表:只有平台管理组能读 ----
 #
 # **审计表泄露比业务表泄露更糟**——它记着每个人查过什么、导出过什么,

@@ -338,3 +338,65 @@ test_maintenance_account_allowed_on_sensitive_schema if {
 		"context": {"identity": {"user": "iceberg_maintenance_service", "groups": []}},
 	}
 }
+
+# ---- 黄金链路探针对审计表的窄口子(2026-08-30) ----
+
+test_goldenpath_probe_allowed_event_ts_only if {
+	trino.allow with input as {
+		"context": {"identity": {"user": "goldenpath_probe", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "audit", "tableName": "query_events", "columns": ["event_ts"],
+		}}},
+	}
+}
+
+# 这条是这个口子存在的意义所在:放行的是"链路有多新",不是审计内容。
+test_goldenpath_probe_denied_other_columns if {
+	not trino.allow with input as {
+		"context": {"identity": {"user": "goldenpath_probe", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "audit", "tableName": "query_events", "columns": ["query_user"],
+		}}},
+	}
+}
+
+# 混进去一列也不行 —— `select max(event_ts), query_text ...` 这种。
+test_goldenpath_probe_denied_event_ts_plus_other_column if {
+	not trino.allow with input as {
+		"context": {"identity": {"user": "goldenpath_probe", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "audit", "tableName": "query_events", "columns": ["event_ts", "query_text"],
+		}}},
+	}
+}
+
+# 同一个 schema 里的另一张审计表不在这个口子里。
+test_goldenpath_probe_denied_other_audit_table if {
+	not trino.allow with input as {
+		"context": {"identity": {"user": "goldenpath_probe", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "audit", "tableName": "query_table_access", "columns": ["event_ts"],
+		}}},
+	}
+}
+
+# columns 字段缺失时必须是拒绝(fail-closed),不能因为 every 对空集合
+# 恒真就变成放行 —— 这正是加 count(...) > 0 那一行要挡的。
+test_goldenpath_probe_denied_when_columns_missing if {
+	not trino.allow with input as {
+		"context": {"identity": {"user": "goldenpath_probe", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "audit", "tableName": "query_events",
+		}}},
+	}
+}
+
+# 别的账号不能借这条规则读审计表。
+test_other_user_still_denied_on_audit_event_ts if {
+	not trino.allow with input as {
+		"context": {"identity": {"user": "analyst001", "groups": ["analysts"]}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "audit", "tableName": "query_events", "columns": ["event_ts"],
+		}}},
+	}
+}
