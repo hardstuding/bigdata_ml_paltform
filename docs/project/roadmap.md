@@ -1005,7 +1005,7 @@ MinIO 分布式方案及 Iceberg/MLflow 制品的备份恢复、反亲和/拓扑
 |---|---|
 | A 统一开发工作台 | 🟡 作业模板 + `platform-submit --new` 脚手架;**CI/CD 那半 2026-08-29 已补上**(`jobs/` 写一行 `schedule` → CronWorkflow,支持多文件/依赖对账/参数化补数/按环境晋级,08-30 实机验证)。**还缺**:每作业独立镜像、多层目录结构 |
 | B 数据资产与治理闭环 | 🟡 权限执行 ✅、审计闭环 ✅、数据质量 ✅、dbt 血缘 ✅(ADR-082);**2026-08-30 补上从 Trino 查询历史自动推血缘**(`scripts/47`,OpenMetadata 自带的 `DatabaseLineage`,**不需要人工声明 inputs/outputs**,**待实机验证**)。**还缺**:变更影响分析(有了边之后才谈得上);以及一个已知局限 —— Trino 的 `system.runtime.queries` 是内存里的、coordinator 重启就清空,那段时间的血缘会永久缺失,要做到一条不漏得让采集器读 `audit.query_events`(ADR-066 那张表),那是另一件事 |
-| C 完整 MLOps | 🟡 审批/回滚 ✅(ADR-080)、**推理可观测性 2026-08-29 已做**(`platform-inference` 看板 6 panel,真集群出数 P95 9.7ms);**还缺**:特征漂移(要先把推理输入留痕)。灰度是这套部署形态做不了 —— RawDeployment 无 Knative,`canaryTrafficPercent` 会被收下但完全不生效,脚本现在显式拒绝它 |
+| C 完整 MLOps | 🟡 审批/回滚 ✅(ADR-080)、**推理留痕 2026-08-30 已实现**(ADR-085,KServe 自带 logger → Kafka → Iceberg,**待启用+实机验证**;它是特征漂移的前置)、**推理可观测性 2026-08-29 已做**(`platform-inference` 看板 6 panel,真集群出数 P95 9.7ms);**还缺**:特征漂移本身 —— 但它的前置(推理输入留痕)2026-08-30 已经做了,有了 `iceberg.ml.inference_log` 之后,漂移就是「对同一个字段比较线上分布和训练集分布」,那是 `jobs/` 里写一个作业的事,不是一个新组件。灰度是这套部署形态做不了 —— RawDeployment 无 Knative,`canaryTrafficPercent` 会被收下但完全不生效,脚本现在显式拒绝它 |
 | D 统一运维控制面 | 🟡 黄金链路探针 ✅(**2026-08-30 加到七条**,新增 audit)、Runbook ✅、容量/成本看板 ✅、**服务目录 2026-08-29 已做**([service-catalog.md](../reference/service-catalog.md),35 个服务 + CI 校验归属/owner/依赖不漂移);**还缺**:多节点故障/备份恢复/升级回滚演练 |
 | E 管理驾驶舱 | 🟡 平台总览看板第一版已上;**还缺**:按月聚合和预算对比 —— Prometheus 持久化 2026-08-28 才补上,数据要自己攒 |
 

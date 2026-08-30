@@ -413,6 +413,10 @@ infra_only:
   trino-liveness-fix.yaml: 巡检修复 CronJob,归属 trino
   openmetadata-quality-alerts.yaml: 质量告警 CronJob,归属 openmetadata
   alert-echo-sink.yaml: 告警出口的验证终点,归属告警链路(ADR-081)
+  # inference-log-sink.yaml 暂时不在这里,也不在上面的服务列表里 —— 它
+  # **还没启用**(ADR-085 已实现,等 CI 构建出镜像、把 tag 从 latest 换成
+  # 真实 SHA 之后再加进 enabled_components)。启用的同一次改动里要把它
+  # 加进上面的服务列表,check-service-catalog.py 会拦住"启用了但没登记"。
   argo-training-workflow-template.yaml: WorkflowTemplate,归属 argo-workflows
   dbt-demo.yaml: dbt 项目,归属 airflow 的 dbt_demo DAG
   kafka-producer-device-events.yaml: 造数 CronJob,归属 flink-streaming-demo

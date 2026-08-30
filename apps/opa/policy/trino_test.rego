@@ -265,3 +265,55 @@ test_unlisted_account_cannot_impersonate if {
 		},
 	}
 }
+
+# ---- 推理留痕表和审计表受同一套保护(ADR-085)----
+#
+# **这几条是回归测试,不是新功能的测试**:2026-08-30 把 `audit_schema`
+# 那个字符串改成 `sensitive_schemas` 集合时,行为必须一字不差地保持,
+# 只是多认一个 schema。
+#
+# 测试名用 ASCII —— Rego 的标识符不接受中文(实测 rego_parse_error)。
+
+# 服务账号读不到推理留痕表
+test_service_account_denied_on_ml_schema if {
+	not trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "ml", "tableName": "inference_log"}},
+		},
+		"context": {"identity": {"user": "superset_service", "groups": []}},
+	}
+}
+
+# 平台管理组读得到
+test_platform_admin_allowed_on_ml_schema if {
+	trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "ml", "tableName": "inference_log"}},
+		},
+		"context": {"identity": {"user": "someone", "groups": ["platform-team"]}},
+	}
+}
+
+# openmetadata 采元数据仍然能碰(它只采表名/字段名,不采数据行)
+test_openmetadata_still_allowed_on_ml_schema if {
+	trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "ml", "tableName": "inference_log"}},
+		},
+		"context": {"identity": {"user": "openmetadata_service", "groups": []}},
+	}
+}
+
+# 普通业务表不受这条限制(确认没有误伤)
+test_normal_schema_not_restricted if {
+	trino.allow with input as {
+		"action": {
+			"operation": "SelectFromColumns",
+			"resource": {"table": {"catalogName": "iceberg", "schemaName": "demo", "tableName": "orders"}},
+		},
+		"context": {"identity": {"user": "superset_service", "groups": []}},
+	}
+}

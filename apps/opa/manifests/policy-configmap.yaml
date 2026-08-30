@@ -163,10 +163,20 @@ data:
     # 判定只看 schema 名,不看 catalog:审计数据只会写进 `audit` 这个 schema
     # (见 scripts/flink_trino_audit_sink.py),而**用 schema 名判断比枚举表名
     # 安全**——以后往里加一张新的审计表,不用记得回来改这条策略。
-    audit_schema := "audit"
+    # **一个集合,不是一个字符串。** 2026-08-30 推理留痕(ADR-085)进来时,
+    # 第一反应是复制一份 `is_inference_data` 规则 —— 那样每加一张敏感表就多一
+    # 条几乎一样的规则,而漏掉一条不会有任何地方报错。改成集合之后,加一个
+    # schema 就是加一个字符串。
+    #
+    # - `audit`:查询审计(ADR-066)—— 记着每个人查过什么、导出过什么
+    # - `ml`:推理留痕(ADR-085)—— 推理输入很可能是用户的个人数据
+    #
+    # 两者的共同点是**它们泄露比业务表泄露更糟**:一份是"谁对什么感兴趣"的
+    # 完整画像,一份是原始的用户输入。
+    sensitive_schemas := {"audit", "ml"}
 
     is_audit_data(inp) if {
-    	inp.action.resource.table.schemaName == audit_schema
+    	inp.action.resource.table.schemaName in sensitive_schemas
     }
 
     # ---- 平台管理组:不受表级授权约束,方便排障 ----

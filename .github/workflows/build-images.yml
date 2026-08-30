@@ -58,6 +58,7 @@ on:
       - "apps/spark-iceberg-image/Dockerfile"
       - "apps/flink-iceberg-image/Dockerfile"
       - "apps/kafka-producer-image/Dockerfile"
+      - "apps/inference-log-sink/**"
       - "apps/hive-metastore-image/Dockerfile"
       - "apps/platform-image/**"
       # platform-image 把 platform-sdk 打进镜像,SDK 改了镜像就该重建 ——
@@ -97,6 +98,8 @@ jobs:
             image: flink-iceberg
           - context: apps/kafka-producer-image
             image: kafka-device-events-producer
+          - context: apps/inference-log-sink
+            image: inference-log-sink
           # 平台统一运行时镜像(notebook / 定时作业 / platform-submit 都用它)。
           #
           # **2026-08-29 才接进 CI。** 在这之前它是唯一一个靠手工在云主机上

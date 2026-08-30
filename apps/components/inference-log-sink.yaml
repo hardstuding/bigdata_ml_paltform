@@ -1,0 +1,25 @@
+# 推理留痕的接收端(ADR-085)。收 KServe payload logger 发来的 CloudEvent,
+# 丢进 Kafka;下游由 streams/inference-log/ 那个 Flink 作业落到 Iceberg。
+#
+# **默认不会有流量** —— KServe 的 logger 需要在 InferenceService 上显式开启
+# (`scripts/11` 的 ENABLE_PAYLOAD_LOG=1)。"默认收集所有推理输入"不是一个
+# 应该默默生效的行为,理由见 ADR-085 里"这条链路会记录敏感数据"那节。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: inference-log-sink
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/inference-log-sink/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: inference-log-sink
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: ["CreateNamespace=true"]

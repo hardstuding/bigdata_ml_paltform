@@ -134,6 +134,7 @@
 | [083](083-internal-package-registry.md) | 内部包共享:MinIO 上的静态 PEP 503 索引,不引入包服务器 | **已实机验证**(2026-08-29):pod 里不加任何参数 `pip install platform-helpers` 装上并能用 |
 | [082](082-dbt-lineage-ingestion.md) | 让 dbt 的产物真的被消费:血缘接进 OpenMetadata | **已实现并实机验证通过**(2026-08-29 02:23,cloud-full) |
 | [084](084-analyst-sql-workbench.md) | 分析师的浏览器 SQL 入口:复用 Superset SQL Lab | **已实机验证**(2026-08-30):SQL Lab 上 `current_user` 是登录者本人、没 grant 的表被 `PERMISSION_DENIED` 拒、列级脱敏生效 |
+| [085](085-inference-payload-logging.md) | 推理请求留痕:KServe 自带 logger → Kafka → Iceberg | **已实现,未部署验证** |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 已实现;ACME 那一档**还没有在真实环境验证过**(缺真实域名和 ICP 备案) |
 

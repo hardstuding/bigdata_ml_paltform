@@ -1,0 +1,17 @@
+# 推理留痕落库:Kafka(inference-log)→ Iceberg(ml.inference_log)。
+# 见 ADR-085。
+#
+# **这是 streams/ 这套机制的第二个真实用例。** 第一个(device-events)是从
+# 手写 140 行 FlinkDeployment 迁移过来的;这一个是**从零用这套定义写的**,
+# 也就是说它顺带回答了"新作业用这套机制到底方不方便"——写完是这 8 行。
+name: inference-log
+script: job.py
+parallelism: 1
+# checkpoint 间隔决定"数据多久出现在表里"。给 60s 而不是 device-events 的
+# 30s:漂移分析看的是趋势,不需要秒级新鲜度,而 checkpoint 越密小文件越多。
+checkpoint_interval: "60s"
+jobmanager_memory: "1024m"
+taskmanager_memory: "1792m"
+cpu: 0.3
+environments:
+  - cloud-full

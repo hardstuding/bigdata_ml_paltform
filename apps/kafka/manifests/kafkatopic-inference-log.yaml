@@ -1,0 +1,25 @@
+# 推理请求留痕的 topic(ADR-085)。
+#
+# **保留期给 7 天,比审计那个 topic(30 天)短得多**,理由不是它不重要,
+# 是两者的性质不同:
+#
+# - 审计记录"事后才知道需要它",而且**补不回来** —— 所以 Kafka 这段也要
+#   留久一点当兜底。
+# - 推理留痕的最终用途是**统计分布**(特征漂移),看的是趋势不是单条;
+#   长期留存靠下游的 Iceberg 表,Kafka 这段只是缓冲。
+#
+# **这个 topic 里的数据很可能包含个人信息**(推理输入是用户数据)。表那边
+# 的访问控制和保留期见 ADR-085 —— 那两件事没做完之前不该在生产开启 logger。
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: inference-log
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: platform-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    min.insync.replicas: 1
