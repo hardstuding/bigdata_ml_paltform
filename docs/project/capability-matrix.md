@@ -88,7 +88,7 @@
 | 找数据(有哪些表) | ✅ | 集成验证 | 2026-08-23 | 采集自动发现,目录里 100+ 张表,字段和 Trino 真实表结构一致 |
 | 申请表权限 | 🟡 | demo | 2026-08-30 | [ADR-044](../decisions/044-tiered-approval-workflow.md)/[045](../decisions/045-approval-backend-notifications-escalation.md)。2026-08-30 实机验证:审批链算得对、拒绝接口不返回 500、时区换算和 groups 提示都在。**目录 → 申请表单的联动仍没验过**;组权限申请的批准按钮要真人登录才点得到 |
 | 权限真正生效 | ✅ | 集成验证 | 2026-08-26 | Trino 接 OPA([ADR-051](../decisions/051-trino-opa-access-control.md)) |
-| 权限到期回收 | ✅ | 集成验证 | 2026-08-18 | [ADR-050](../decisions/050-grant-expiry-reclamation.md) |
+| 权限到期回收 / 续期 | ✅ | 集成验证 | 2026-08-30 | [ADR-050](../decisions/050-grant-expiry-reclamation.md)。**2026-08-30 实机验证到期提醒和续期**:门户上快到期的排最前、标黄、显示剩余天数、带续期入口;点续期建出的是 `pending` 的新申请(**不是直接延期**),审批链真的有两级,重复提交被 409 挡住 |
 | **SQL 工作台** | ✅ | 集成验证 | 2026-08-30 | [ADR-084](../decisions/084-analyst-sql-workbench.md)。从「Trino Web UI」(**那里根本没有 SQL 编辑器**)改成 Superset SQL Lab。**2026-08-30 实机验证四条**:这条连接上 `current_user` 是登录者本人(不是 superset_service)、有 grant 的表查得到、没 grant 的被 `PERMISSION_DENIED` 拒、列级脱敏生效(`138****5678`)。由 `scripts/46-verify-p15.sh sqllab` 可重复跑 |
 | 建表 | ✅ | 集成验证 | 2026-08-30 | [ADR-043](../decisions/043-table-registration-tool.md)。2026-08-29 补完:字段说明、分区、质量断言(建真的 OpenMetadata testCase)、提交前预览、按等级的审批分流、负责人不能冒充。**2026-08-30 实机验证**:提交一张带字段说明和分区的表,`SHOW CREATE TABLE` 里 COMMENT 和 partitioning 都在;非平台组提交 2 级表被挡住并落了说明去哪的记录;预览返回的 DDL 和实际执行的一致 |
 | SQL 数据转换(dbt) | 🟡 | 集成验证 | 2026-08-29 | [ADR-082](../decisions/082-dbt-lineage-ingestion.md),血缘查得到 `orders → stg_orders → daily_order_totals`。**缺**:`schedule=None`,只能手动触发 |
