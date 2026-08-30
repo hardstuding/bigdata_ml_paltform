@@ -249,6 +249,16 @@ ensure_trino_service_account dbt_demo_service
 # Postgres 加密保存,不需要哪个 Pod 挂载这个 Secret。
 ensure_trino_service_account openmetadata_service
 
+# Iceberg 表维护作业(jobs/iceberg-maintenance)专用账号。
+#
+# **为什么必须专用,不能复用 platform_sdk_demo_service**:维护作业要动
+# `audit` / `ml` 这两个敏感 schema,而 OPA 里给它开了口子
+# (apps/opa/policy/trino.rego)。platform_sdk_demo_service 是**所有
+# notebook 和作业共用的**账号 —— 给它开这个口子等于"任何能提交作业的人
+# 都能读审计表"。2026-08-30 第一版就是那么写的,被 OPA 的单元测试
+# `test_other_service_accounts_still_denied_on_audit_schema` 当场拦下。
+ensure_trino_service_account iceberg_maintenance_service
+
 ensure_secret data superset-db username=superset password=RANDOM
 
 # Superset chart 默认把 DB_USER/DB_PASS/SUPERSET_SECRET_KEY 这些当明文写进
@@ -497,6 +507,19 @@ else
     --from-literal=PLATFORM_TRINO_USER=notebook_service \
     --from-literal=PLATFORM_TRINO_PASSWORD="$JOB_TRINO_PW" \
     && echo "已创建: argo-workflows/platform-job-credentials"
+fi
+
+# Iceberg 维护作业自己的凭据(见上面 ensure_trino_service_account
+# iceberg_maintenance_service 那段注释:为什么不能复用共用账号)。
+if kubectl -n argo-workflows get secret iceberg-maintenance-credentials >/dev/null 2>&1; then
+  echo "已存在,跳过: argo-workflows/iceberg-maintenance-credentials"
+else
+  MAINT_PW="$(kubectl -n trino get secret trino-service-account \
+    -o jsonpath='{.data.password-iceberg_maintenance_service}' | base64 -d)"
+  kubectl -n argo-workflows create secret generic iceberg-maintenance-credentials \
+    --from-literal=PLATFORM_TRINO_USER=iceberg_maintenance_service \
+    --from-literal=PLATFORM_TRINO_PASSWORD="$MAINT_PW" \
+    && echo "已创建: argo-workflows/iceberg-maintenance-credentials"
 fi
 
 # notebook 也要有同一份凭据。**这是"在 notebook 里 query() 开箱即用"的前提**

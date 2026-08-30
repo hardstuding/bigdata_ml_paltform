@@ -349,8 +349,18 @@ def render_cronworkflow(j: dict) -> dict:
                         "imagePullPolicy": "IfNotPresent",
                         "command": ["python3", f"/scripts/{script}"],
                         "env": [{"name": k, "value": v} for k, v in sorted(env.items())],
-                        "envFrom": [{"secretRef": {"name": "platform-job-credentials",
-                                                   "optional": True}}],
+                        # 默认用共用的作业凭据;`credentials_secret` 可以指定
+                        # 自己的一份。**这不是给某个作业开后门** —— 需要更高
+                        # 权限的作业就该有自己的身份,才追溯得了、也收窄得了
+                        # (2026-08-30 的 iceberg-maintenance 是第一个:它要动
+                        # audit/ml 两个敏感 schema,而共用账号是所有 notebook
+                        # 和作业都在用的)。**后写的排在后面,覆盖前面的同名
+                        # 变量**,这是 k8s envFrom 的语义。
+                        "envFrom": ([{"secretRef": {"name": "platform-job-credentials",
+                                                    "optional": True}}]
+                                    + ([{"secretRef": {"name": j["credentials_secret"],
+                                                       "optional": True}}]
+                                       if j.get("credentials_secret") else [])),
                         "volumeMounts": [{"name": "scripts", "mountPath": "/scripts"}],
                         "resources": {"requests": {"cpu": cpu, "memory": mem},
                                       "limits": {"memory": mem}},

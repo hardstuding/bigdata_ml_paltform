@@ -134,6 +134,33 @@ allow if {
 	input.context.identity.user == "openmetadata_service"
 }
 
+# 表维护作业(jobs/iceberg-maintenance,ADR-033 的配套)也要能碰这两个
+# schema —— **而且恰恰是它们最需要维护**:审计和推理留痕是持续写入的,
+# 小文件和过期快照堆得最快。
+#
+# **2026-08-30 实机第一次跑就撞到了这一条**:维护作业对
+# `iceberg.audit.*` 的三个动作全部 PERMISSION_DENIED —— 被上面那条
+# "敏感 schema 只有 platform-team 能读"挡住了。也就是说**最需要维护的
+# 两张表,永远不会被维护**。
+#
+# 为什么可以开这个口子:`ALTER TABLE ... EXECUTE optimize /
+# expire_snapshots / remove_orphan_files` **不返回任何数据行** —— 它重写
+# 和删除文件,但不把内容交给调用方。这和 openmetadata_service 那条是同
+# 一个理由(采元数据不采数据),不是"因为不方便所以放行"。
+#
+# **必须是一个专用账号,不能复用 platform_sdk_demo_service。** 第一版就是
+# 那么写的,被 `test_other_service_accounts_still_denied_on_audit_schema`
+# 当场拦下 —— 那个账号是所有 notebook 和作业共用的,给它审计权限等于
+# **任何能提交作业的人都能读审计表**。那条测试就是为了防这个而写的。
+#
+# **如果哪天这个专用账号被用来跑别的东西,这条必须收窄** —— 它现在能读到
+# 审计表的数据行,而那不是本意。留这行字给那个时候。
+allow if {
+	is_service_account
+	is_audit_data(input)
+	input.context.identity.user == "iceberg_maintenance_service"
+}
+
 # ---- 审计表:只有平台管理组能读 ----
 #
 # **审计表泄露比业务表泄露更糟**——它记着每个人查过什么、导出过什么,

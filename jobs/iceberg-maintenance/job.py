@@ -27,10 +27,16 @@ SCHEMAS = ["audit", "ml", "demo"]
 
 
 def tables_in(schema):
+    """**只要真正的表,不要视图。**
+
+    2026-08-30 实机第一次跑就撞到:`iceberg.demo.stg_orders` 是 dbt 建的
+    视图,而 `ALTER TABLE ... EXECUTE` 对视图直接报 `NOT_SUPPORTED` ——
+    三个动作全失败。视图没有数据文件也没有快照,本来就不需要维护。
+    """
     try:
         return [r[0] for r in rows_of(query(
             f"SELECT table_name FROM iceberg.information_schema.tables "
-            f"WHERE table_schema = '{schema}'"))]
+            f"WHERE table_schema = '{schema}' AND table_type = 'BASE TABLE'"))]
     except Exception as exc:   # noqa: BLE001
         # schema 不存在是正常的(比如 ml 要等推理留痕启用之后才有)
         print(f"  跳过 schema {schema}:{str(exc).splitlines()[0][:80]}")

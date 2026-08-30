@@ -291,3 +291,46 @@ class TestEnvironments:
         jobs, problems = rj.load_jobs(GROUPS, "cloud-full")
         assert jobs == []
         assert any("tensorflow" in p for p in problems)
+
+
+class TestCredentialsSecret:
+    """作业可以有自己的 Trino 身份(2026-08-30 加,起因是 iceberg-maintenance)。
+
+    **这不是给某个作业开后门**:需要更高权限的作业就该有自己的身份,才
+    追溯得了、也收窄得了。共用账号 `notebook_service` 是所有 notebook 和
+    作业都在用的 —— 给它开敏感 schema 的口子等于"任何能提交作业的人都能
+    读审计表"。
+    """
+
+    def test_不写就只挂共用凭据(self, workspace):
+        _job(workspace, "a", "name: a\nscript: job.py\nschedule: \"0 1 * * *\"\n")
+        jobs, _ = rj.load_jobs(GROUPS)
+        ef = rj.render_cronworkflow(jobs[0])["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
+        assert [e["secretRef"]["name"] for e in ef] == ["platform-job-credentials"]
+
+    def test_写了就追加在后面(self, workspace):
+        """**顺序有意义**:k8s 的 envFrom 后写的覆盖前面的同名变量,所以
+        专用凭据必须排在共用凭据后面,否则覆盖不掉。"""
+        _job(workspace, "a", """
+            name: a
+            script: job.py
+            schedule: "0 1 * * *"
+            credentials_secret: my-own-credentials
+        """)
+        jobs, _ = rj.load_jobs(GROUPS)
+        ef = rj.render_cronworkflow(jobs[0])["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
+        assert [e["secretRef"]["name"] for e in ef] == [
+            "platform-job-credentials", "my-own-credentials"]
+
+    def test_专用凭据也是_optional(self, workspace):
+        # Secret 不存在时 Pod 照常起来,一调 query() 才报 MissingCredential
+        # —— 和共用那份一致,不引入新的失败模式。
+        _job(workspace, "a", """
+            name: a
+            script: job.py
+            schedule: "0 1 * * *"
+            credentials_secret: my-own-credentials
+        """)
+        jobs, _ = rj.load_jobs(GROUPS)
+        ef = rj.render_cronworkflow(jobs[0])["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
+        assert all(e["secretRef"]["optional"] for e in ef)

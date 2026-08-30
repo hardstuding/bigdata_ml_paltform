@@ -22,7 +22,10 @@ def load_job(monkeypatch, queries=None, params=None, tables=None):
     def fake_query(sql):
         executed.append(" ".join(sql.split()))
         if "information_schema.tables" in sql:
-            schema = sql.split("table_schema = ")[1].strip().strip("'").strip("'")
+            # 作业现在会加 `AND table_type = 'BASE TABLE'`(2026-08-30:视图
+            # 用不了 ALTER TABLE EXECUTE,实机撞到过),所以这里要按第一个
+            # 引号对取 schema,不能整段 split。
+            schema = sql.split("table_schema = ")[1].split("'")[1]
             return (["table_name"], [(t,) for t in (tables or {}).get(schema, [])])
         for pat, exc in (queries or {}).items():
             if pat in sql:
@@ -102,6 +105,16 @@ class TestScope:
         """不去动 tpch/tpcds(只读基准数据,没有快照堆积),也不自作主张
         动用户自己建的表 —— 合并小文件会重写数据,那是有副作用的操作。"""
         ex, _ = load_job(monkeypatch, tables={"audit": ["t"], "ml": ["t"], "demo": ["t"]})
-        scanned = {s.split("table_schema = ")[1].strip().strip("'")
+        scanned = {s.split("table_schema = ")[1].split("'")[1]
                    for s in ex if "information_schema" in s}
         assert scanned == {"audit", "ml", "demo"}
+
+
+class TestSkipViews:
+    def test_只查真正的表_不查视图(self, monkeypatch):
+        """**2026-08-30 实机第一次跑就撞到**:`iceberg.demo.stg_orders` 是
+        dbt 建的视图,`ALTER TABLE ... EXECUTE` 对它直接报 NOT_SUPPORTED,
+        三个动作全失败。视图没有数据文件也没有快照,本来就不需要维护。"""
+        ex, _ = load_job(monkeypatch, tables={"audit": ["t"]})
+        q = [s for s in ex if "information_schema" in s]
+        assert q and all("BASE TABLE" in s for s in q)

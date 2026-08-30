@@ -17,6 +17,12 @@ timezone: UTC
 cpu: "500m"
 memory: "1Gi"
 owner_group: platform-team
+# **自己的 Trino 身份,不复用共用的作业账号。**
+# 这个作业要动 audit / ml 两个敏感 schema(OPA 里给它开了口子),而共用的
+# notebook_service 是所有 notebook 和作业都在用的 —— 给那个账号开口子等于
+# "任何能提交作业的人都能读审计表"。2026-08-30 第一版就是那么写的,被 OPA
+# 的单元测试当场拦下。
+credentials_secret: iceberg-maintenance-credentials
 requires:
   - trino
 params:
