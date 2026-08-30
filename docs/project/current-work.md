@@ -75,15 +75,21 @@ urlopen 默认跟随重定向。外加我自己用 `flask_login.login_user` 写 
 
 ### 云主机状态
 
-**已停机**(2026-08-29,经济模式,不产生计算费用;磁盘保留)。
+**已停机**(2026-08-30 03:00 左右,经济模式,不产生计算费用)。这一轮开机
+约 50 分钟,专门用来做 P1.5 的实机验收。
+
 开机 `scripts/32-start-cloud-vm.sh`,停机 `scripts/26-stop-cloud-vm-economical.sh`。
-停机前核对过:77 个 ArgoCD Application 全部 Synced/Healthy,零异常 pod。
 
-> 开机后如果看到一大片 Error 的 pod,先看
-> [troubleshooting 里那条](../operations/troubleshooting.md#kubectl-get-pods--a-里一大片-error但其实什么都没坏)
-> —— 多半是历史残留,不是活故障。
+停机前:77 个 ArgoCD Application 全部 Synced/Healthy,零异常 pod,六条黄金
+链路最近一次全部 Completed,验收产生的临时数据(表、grants、申请记录、
+CronWorkflow)全部清理。
 
-**这台机器不是我们独占的**,`CLAUDE.md` 里那节列了哪些操作必须先问 zhenghe。
+> **判断"现在好没好"的方法**:`kubectl get pods -A` 里的 Error 是**过去
+> 某一刻**的快照,不是现在的状态 —— 开机后总会有一批(组件还没就绪时定时
+> 任务先跑了)。要看的是每个 CronJob **最近一次**那个 pod。
+
+**这台机器不是我们独占的** —— 详见 `CLAUDE.md`:任何会让 k3s 停掉/重装、
+停机释放、或改集群级资源的操作,必须先停下来问。
 
 ---
 
