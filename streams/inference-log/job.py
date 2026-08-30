@@ -10,7 +10,13 @@
    丢弃,表现是"表里少了一些记录" —— 而在留痕场景里这是最不能接受的失败
    模式:它不报错,只在很久以后你想查某一次推理时发现查不到。
 2. **字段名避开 Calcite 保留字。** `value`/`table`/`user` 这类在 Flink SQL
-   里要反引号,踩过两次(ADR-062、ADR-066),这次提前避开。
+   里要反引号,踩过两次(ADR-062、ADR-066)。
+   **这次仍然漏了一个:`model`。** 上面这行字当时就写着"提前避开",然后
+   实机第一次提交就报
+     SqlParserException: Encountered "model" at line 7, column 13
+   ——**"我记得要避开保留字"和"我知道哪些是保留字"是两回事**。Calcite 的
+   保留字表有几百个,靠印象挑不出来。真正可靠的做法只有一个:**所有字段
+   名一律加反引号**,不去判断哪个需要。这里现在就是这么做的。
 """
 import os
 
@@ -30,14 +36,14 @@ def main():
 
     t_env.execute_sql(f"""
         CREATE TABLE kafka_inference_log (
-            request_id        STRING,
-            inference_service STRING,
-            `namespace`       STRING,
-            event_type        STRING,
-            model             STRING,
-            payload           STRING,
-            event_ts          STRING,
-            ingest_ts TIMESTAMP_LTZ(3) METADATA FROM 'timestamp' VIRTUAL
+            `request_id`        STRING,
+            `inference_service` STRING,
+            `namespace`         STRING,
+            `event_type`        STRING,
+            `model`             STRING,
+            `payload`           STRING,
+            `event_ts`          STRING,
+            `ingest_ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp' VIRTUAL
         ) WITH (
             'connector' = 'kafka',
             'topic' = '{KAFKA_TOPIC}',
@@ -65,21 +71,21 @@ def main():
 
     t_env.execute_sql("""
         CREATE TABLE IF NOT EXISTS iceberg_catalog.ml.inference_log (
-            request_id        STRING,
-            inference_service STRING,
-            namespace_name    STRING,
-            event_type        STRING,
-            model             STRING,
-            payload           STRING,
-            event_time_raw    STRING,
-            ingest_ts         TIMESTAMP_LTZ(3)
+            `request_id`        STRING,
+            `inference_service` STRING,
+            `namespace_name`    STRING,
+            `event_type`        STRING,
+            `model`             STRING,
+            `payload`           STRING,
+            `event_time_raw`    STRING,
+            `ingest_ts`         TIMESTAMP_LTZ(3)
         )
     """)
 
     t_env.execute_sql("""
         INSERT INTO iceberg_catalog.ml.inference_log
-        SELECT request_id, inference_service, `namespace`, event_type,
-               model, payload, event_ts, ingest_ts
+        SELECT `request_id`, `inference_service`, `namespace`, `event_type`,
+               `model`, `payload`, `event_ts`, `ingest_ts`
         FROM kafka_inference_log
     """).wait()
 
