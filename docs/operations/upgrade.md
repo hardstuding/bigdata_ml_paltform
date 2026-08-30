@@ -5,18 +5,51 @@ ArgoCD Application,升级一个不应牵动其他组件。版本必须显式锁�
 可追溯这条规则见 [ADR-010](../decisions/010-optional-components-versioning.md)
 (项目一开始就定了,这份文档是把这条规则真正落地)。
 
-## 标准升级流程
+## 升级一个组件
 
-1. 改对应 Application yaml 里的 `targetRevision`(chart 版本号)。
-2. 本地跑 `python3 scripts/validate-charts.py` 确认 `helm template` 能正常
-   渲染,不代表升级安全,只代表"chart 语法/我们的 values 没写错"。
-3. push 到 Git,先在 `local-lite` 用真实功能验证(不是看 Pod 是不是
-   `Running` 就算过,历史上好几次真实的坑——比如 Trino 的 livenessProbe
-   端口打死、KServe CRD 太大——都是"渲染成功、Pod 起来了,但功能其实是坏
-   的",见 [`troubleshooting.md`](troubleshooting.md))。
-4. 验证通过后,把变更同步到 `cloud-full`/`prod` 对应的位置。
-5. 把这次升级验证过的路径记到下面"已知升级路径"表里,不要让下一个人
-   (人或 AI agent)重新摸索一遍。
+统一成六段:**触发条件 / 影响 / 前置检查 / 操作 / 验证 / 回滚**。
+
+**触发条件**:上游发了新版本且我们需要它带的东西(修了我们踩的 bug、
+解开了某个版本约束)。**不为了"跟上最新"而升** —— 每次升级都是一次真实
+的风险。
+
+**影响**:只影响这一个组件(每个组件是独立的 ArgoCD Application,
+[ADR-005](../decisions/005-argocd-gitops.md))。**但要单独想一下版本
+耦合** —— Iceberg 表格式那一层是所有引擎共用的,Spark/Flink/Trino 的
+Iceberg 版本必须一起考虑(见下面 Spark 4 那条)。
+
+**前置检查**:
+
+1. 逐条核对上游的 breaking changes,`helm show values <chart> --version <旧>`
+   和 `--version <新>` diff 一遍我们实际用到的键。
+2. `python3 scripts/validate-charts.py` —— **它只证明 chart 语法和我们的
+   values 没写错,不证明升级安全**。
+3. 如果这个组件的 CRD 很大(kube-prometheus / CloudNativePG /
+   argo-workflows / Kueue 这四个),CRD 要单独装,ArgoCD 装不了。
+
+**操作**:改 `apps/components/<组件>.yaml` 里的 `targetRevision` →
+重新渲染 → commit → push。**不要改 `apps/definitions/` 下的生成物。**
+
+**验证** —— **判据必须是业务结果,不是 Pod 状态**:
+
+这个平台好几次真实的坑都是"渲染成功、Pod Running、ArgoCD 绿,但功能是坏
+的"(Trino 的 livenessProbe 端口打死、KServe CRD 太大、OpenMetadata 连不上
+OpenSearch)。所以:
+
+```bash
+./scripts/46-verify-p15.sh          # 产品层功能回归
+kubectl -n monitoring get pods --sort-by=.metadata.creationTimestamp | grep goldenpath
+```
+
+**回滚**:把 `targetRevision` 改回去、重新渲染、push。
+
+> **回滚不总是可行** —— 数据库 schema 迁移过的组件(OpenMetadata、
+> Keycloak、Airflow)升级时会改表结构,降版本可能起不来。这类组件
+> **升级前先确认当天的 Postgres 备份是好的**(见
+> [`backup.md`](backup.md)),那才是真正的退路。
+
+最后:**把这次验证过的路径记进下面那张表**,不要让下一个人(人或 AI)
+重新摸索一遍。
 
 ## 当前版本清单
 
@@ -66,4 +99,11 @@ issue/升级指南去官方仓库找,不在这个项目里重复维护):
 
 ## 已知升级路径
 
-(留空,遇到真实升级并验证过再补,格式:`组件 X.Y → X.Z,验证日期,验证人/agent,注意事项`)
+| 组件 | 版本 | 日期 | 注意事项 |
+|---|---|---|---|
+| OpenMetadata | 1.13.3 → **2.0.0** | 2026-08-26 | 大版本,**GA 才两天就升的**,所以逐条核对了 breaking changes([ADR-072](../decisions/072-openmetadata-2-upgrade.md))。`targetRevision` 和 `ingestionImage` 两处都要改(只改一处的话采集容器还是旧版)。验证判据是**目录里的表还在不在、采集还能不能跑出新结果**,不是 Pod 状态 |
+| Spark | 3.5.9 → **4.1.3** | 2026-08-29 | **和 Iceberg 1.10.0 → 1.11.0 一起升**,不能分开:Spark 3.5.9 是 Java 11/Scala 2.12,Iceberg 只能停在 1.10.0;Spark 4 换到 Java 17/Scala 2.13 才解得开这个结([ADR-076](../decisions/076-spark-4-evaluation.md))。**所有引擎读写同一份 Iceberg 表格式,版本必须统一** —— 升 Spark 就要同时想 Flink 和 Trino 那边。验证:`SPARK_ICEBERG_DEMO_OK` |
+| Iceberg | 1.10.0 → **1.11.0** | 2026-08-29 | 同上,跟着 Spark 4 一起 |
+
+**格式**:`组件 X.Y → X.Z,日期,注意事项`。注意事项那栏写"下一个人不知道
+就会踩的东西",不是复述 changelog。

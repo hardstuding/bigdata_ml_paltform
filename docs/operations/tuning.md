@@ -21,11 +21,40 @@
 
 ## 资源(CPU/内存)类
 
-每个组件的 Application yaml 里都有 `resources.requests`/`resources.limits`,
-这次没有系统性调过(local-lite 单机资源紧张,基本是"能跑就行"的最小值),
-上 cloud-full/prod 时大概率整体需要往上调,不是这次会话的重点,不在这里
-逐个列——按需要去对应组件的 Application yaml 直接改,原则是先看
-`kubectl top pods` 实际用量再调,不要凭感觉。
+> **⚠️ 不要去改 `apps/definitions/*.yaml`。** 那些是**生成物**,下一次
+> `render-environment-config.py` 一跑,改动被静默覆盖 —— 没有冲突、没有
+> 报错、没有任何提示。这个坑这个仓库撞过 4 次,记在 `CLAUDE.md` 里。
+>
+> **这一段 2026-08-30 更正**:原文写的正是"按需要去对应组件的 Application
+> yaml 直接改" —— 照着做会白改一遍。
+
+资源规格按环境分档,声明在
+[`environments/resource-profiles.yaml`](../../environments/resource-profiles.yaml)
+里(ADR-059),组件源码用 `{{RES:xxx}}` 引用:
+
+```bash
+# 1. 改档位值
+vi environments/resource-profiles.yaml       # 三档:local-lite / cloud-full / prod
+# 2. 重新渲染 + push(ArgoCD 读的是 git 远端)
+python3 scripts/render-environment-config.py cloud-full
+git add -A && git commit -m "tune: 调 xxx 的内存" && git push
+```
+
+**新增一个可调规格**:在组件源码(`apps/components/*.yaml` 或
+`templates/`)里写 `{{RES:新键名}}`,然后在 `resource-profiles.yaml` 的
+**三档里都加**这个键 —— 少一档渲染那一档时会报错(这是有意的:
+不允许"某个环境没定义就悄悄用默认值")。
+
+`scripts/check-resource-profiles.py` 会拦住"把规格写死在组件里而不走档位"。
+
+原则不变:**先看 `kubectl top pods` 的实际用量再调,不要凭感觉。**
+
+> **低配额命名空间要格外小心**:RollingUpdate 需要新旧 Pod 同时占配额。
+> 调大 resources 时如果新旧加起来超了命名空间的 ResourceQuota,新
+> ReplicaSet 会**静默卡在 `exceeded quota`**,而 ArgoCD 显示 Synced/Healthy、
+> 流量还在旧 Pod 上 —— 实测卡了一个多小时才发现。mlflow 已经改成
+> `Recreate` 策略规避;其它低配额命名空间(见
+> `platform/resource-quotas/manifests/quotas.yaml`)改之前先算一下。
 
 ## 权限/组织架构类
 
