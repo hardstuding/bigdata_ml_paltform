@@ -117,6 +117,46 @@ Application,且 `syncPolicy.automated.selfHeal: true`。
 ——这个项目被"看起来成功了"坑过太多次(ArgoCD Synced 不等于生效、
 Pod Running 不等于健康、Job Complete 不等于业务逻辑跑对)。
 
+## 状态别写两遍 —— 一天之内因为这个改了 7 份文档
+
+2026-08-30 一次系统排查,在 **7 处**发现"文档写的状态和现实不符",而且
+**全部是同一个成因:同一份状态被维护在两个地方**。
+
+| 文档 | 写的 | 实际 |
+|---|---|---|
+| `README.md` | OpenMetadata/JupyterHub/MLflow "未部署/未启用" | 早就部署并验证过 |
+| `docs/architecture.md` | "**Trino 现在零访问控制**" | OPA 从 08-16 起就生效了 |
+| `docs/decisions/README.md` | 10 条"未部署验证" | 分别在 08-25~08-30 验过 |
+| `production-readiness-gaps.md` | 3 条"未部署" | 落后现实四五天 |
+| `docs/operations/tuning.md` | 会话超时"部署前必须重新评估" | 早就按环境分档、prod 已收紧 |
+| `roadmap.md` P2/P4 | 服务目录/推理可观测/CI-CD/Flink/Spark4 "没做" | 都做完了 |
+| `CLAUDE.md` 自己 | "一键部署仍是多个手动脚本" | bootstrap-all.sh 27 步 |
+
+**其中两条会直接导致错误判断**:说"Trino 零访问控制"的架构文档,和说
+三个核心组件"未部署"的 README —— 后者是任何人和 AI 第一眼看到的文件。
+
+### 判据:发现状态过期时,先问"这份状态该不该在这里"
+
+**"更新一遍"几乎总是错的答案** —— 它几天后会再次过期。按这个顺序选:
+
+1. **能删掉重复的就删掉。** `architecture.md` 里"哪个环境启用了什么"那三
+   列直接删了(权威在 `enabled_components`);`production-readiness-gaps.md`
+   不再自己记状态(权威在 `capability-matrix.md`)。
+2. **删不掉就生成。** ADR 索引的状态列改成从每份 ADR 自己的 `状态:` 行
+   生成(`scripts/sync-adr-index.py`),`--check` 进 CI。
+3. **两者都不行,才手写 + 加检查。** 能力表就是这一类
+   (`check-capability-matrix.py` 拦住"✅ 但未验证")。
+
+**一个需要读者"记得不要相信"的表格,不该继续存在。** `architecture.md`
+那张组件表烂过两次,第一次的处理是在表上方加一段警告 —— 然后它又烂了。
+
+### 现在有哪些检查在拦这一类
+
+`check-capability-matrix` / `sync-adr-index --check` /
+`check-bootstrap-coverage` / `check-doc-commands` /
+`check-docs-dont-teach-editing-generated` / `list-manual-credentials --check`
+—— 每一个都是在某次真实翻车之后加的,加的时候都当场抓到了东西。
+
 ## 改文件之前,先看它是不是生成物
 
 这个坑撞了 **4 次**(改 `platform/apps/keycloak.yaml`、
