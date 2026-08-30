@@ -381,6 +381,64 @@ except urllib.error.HTTPError as e:
   fi
 fi
 
+# ---------------------------------------------------------------- sqllab
+# SQL Lab 走的那条 Trino 连接,身份到底是谁(ADR-084 唯一没验过的一环)。
+#
+# **原本以为这条只能靠人点浏览器**,后来发现不用:SQL Lab 用的就是
+# `Database.get_sqla_engine()` 这条路,在 pod 里用 Superset 自己的
+# `override_user` 把身份放进去,走的是同一份代码。
+#
+# **注意别用 `flask_login.login_user`**:2026-08-30 第一次就是这么写的,
+# 结果 `current_user` 返回 `superset_service`,差点当成"impersonation 坏了"
+# 报出去 —— 实际是 Superset 读的不是 login_user 设的那个地方。
+# 一个测试装置写错、结论方向完全相反,和这个脚本自己那三个 bug 是一类。
+if want sqllab; then
+  log "== SQL Lab 的身份和权限 =="
+  if ! kubectl -n superset get deploy/superset >/dev/null 2>&1; then
+    skip "superset 没部署"
+  else
+    OUT="$(kubectl -n superset exec deploy/superset -c superset -- python3 -c "
+import sys, warnings; sys.path.insert(0,'/app/pythonpath'); warnings.filterwarnings('ignore')
+from superset.app import create_app
+app = create_app()
+with app.app_context():
+    from superset.models.core import Database
+    from superset.extensions import db, security_manager as sm
+    from superset.utils.core import override_user
+    d = db.session.query(Database).filter_by(database_name='Trino').one()
+    print('IMPERSONATE=' + str(d.impersonate_user))
+    u = sm.find_user(username='analyst001')
+    if not u:
+        print('NOUSER'); raise SystemExit
+    with app.test_request_context(), override_user(u):
+        with d.get_sqla_engine() as eng:
+            print('WHOAMI=' + str(eng.execute('SELECT current_user').fetchall()[0][0]))
+            try:
+                eng.execute('SELECT count(*) FROM iceberg.demo.access_test_l1').fetchall()
+                print('GRANTED=ok')
+            except Exception as e:
+                print('GRANTED=fail:' + str(e)[:60])
+            try:
+                eng.execute('SELECT count(*) FROM iceberg.demo.orders').fetchall()
+                print('UNGRANTED=allowed')
+            except Exception as e:
+                print('UNGRANTED=denied' if 'PERMISSION_DENIED' in str(e) else 'UNGRANTED=other')
+            try:
+                row = eng.execute('SELECT phone FROM iceberg.demo.access_test_l1 LIMIT 1').fetchall()[0][0]
+                print('MASKED=' + ('yes' if '*' in str(row) else 'no:' + str(row)))
+            except Exception as e:
+                print('MASKED=err')
+" 2>/dev/null || true)"
+    echo "$OUT" | grep -q "IMPERSONATE=True"   && ok "Trino 这个 database 开着 impersonation" || bad "Trino database 没开 impersonation"
+    echo "$OUT" | grep -q "NOUSER" && skip "Superset 里还没有 analyst001,后面几条跳过" || {
+      echo "$OUT" | grep -q "WHOAMI=analyst001"  && ok "SQL Lab 的连接上 current_user 是登录者本人" || bad "current_user 不是 analyst001($(echo "$OUT" | grep WHOAMI))"
+      echo "$OUT" | grep -q "GRANTED=ok"         && ok "有 grant 的表查得到" || bad "有 grant 的表查不到"
+      echo "$OUT" | grep -q "UNGRANTED=denied"   && ok "没 grant 的表被 PERMISSION_DENIED 拒掉" || bad "没 grant 的表**没有**被拒($(echo "$OUT" | grep UNGRANTED))"
+      echo "$OUT" | grep -q "MASKED=yes"         && ok "列级脱敏在这条路径上生效" || bad "脱敏没生效($(echo "$OUT" | grep MASKED))"
+    }
+  fi
+fi
+
 # ------------------------------------------------------------- 汇总
 log ""
 log "================ 汇总 ================"
@@ -391,7 +449,6 @@ if [ ${#FAIL[@]} -gt 0 ]; then
 fi
 log ""
 log "这个脚本**验不了**的(必须人点一次,见 docs/project/next-boot-checklist.md):"
-log "  - SQL Lab 里 SELECT current_user 是不是登录者本人(要走浏览器 SSO)"
 log "  - 用两个真实账号验越权(A 打不开 B 的作业详情)"
 log "  - 组权限申请的批准按钮(要 platform-team 真实登录)"
 log "  - 门户上「我的作业」点进去的详情页外观"

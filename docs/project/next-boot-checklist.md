@@ -10,8 +10,18 @@
 > `logs/verify-p15.log`。**全部跳过会退出码 2,不会被当成通过** —— 一个
 > "什么都没验"的运行报告成成功,是这个项目栽过四次的那个模式。
 >
-> 脚本**验不了**的是必须走浏览器 SSO 的那几条(SQL Lab 里真的点一下、
-> 用两个真实账号验越权、组权限申请的批准按钮),下面标了「要人点」。
+> 脚本**验不了**的:用两个真实账号验越权、组权限申请的批准按钮、作业详情页
+> 的外观。
+>
+> **SQL Lab 那条原本以为要人点,后来发现不用** —— SQL Lab 用的就是
+> `Database.get_sqla_engine()` 这条路,在 pod 里用 Superset 自己的
+> `override_user` 把身份放进去走的是同一份代码。`./scripts/46-verify-p15.sh
+> sqllab` 会验四条:current_user 是本人、有 grant 的能查、没 grant 的被拒、
+> 脱敏生效。
+>
+> ⚠ **别用 `flask_login.login_user` 写这类测试** —— 2026-08-30 第一次就是
+> 这么写的,`current_user` 返回 `superset_service`,差点当成"impersonation
+> 坏了"报出去。Superset 读的不是 `login_user` 设的那个地方。
 
 > 这份单独成文,是因为它在 [`current-work.md`](current-work.md) 里已经涨到
 > 60 多行,把"现在的主线是什么"挤到看不见了 —— 而那份文件的规则是超过
