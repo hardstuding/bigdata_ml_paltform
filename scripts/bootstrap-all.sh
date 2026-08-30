@@ -250,6 +250,24 @@ step "等 namespace 建出来,然后补建第一次漏掉的 Secret(全新集群
 wait_for_namespaces 600
 run_required "scripts/00-generate-secrets.sh(第二遍,补 namespace 建好之后才能建的 Secret)" ./scripts/00-generate-secrets.sh
 
+step "配私有镜像仓库的拉取凭据(用了 ACR 的环境是硬前置,不是可选)"
+# **位置很关键**:必须在等 Application 收敛之前。自建镜像(门户、权限门户、
+# 建表工具、Superset、Flink、Spark…)都在私有仓库上,没有这个 Secret,
+# 那些 Pod 一律 ImagePullBackOff,而 wait_apps_converged 会一直等到超时。
+#
+# **2026-08-30 补进来的**:在这之前它只存在于 scripts/ 目录里,既不在这份
+# 一键脚本里、也不在 scripts/README.md 的部署主线表里 —— 跑一键脚本的人
+# 不会知道少了这一步,而报错指向的是"某个 Pod 拉不到镜像",不是"你漏了
+# 一个步骤"。scripts/check-bootstrap-coverage.py 现在会拦住这类遗漏。
+#
+# 没用私有仓库的环境(比如镜像都在 GHCR 公开仓库、或者 local-lite 全部
+# 用本地缓存)跳过是对的,所以走 run_optional。
+if grep -rq "aliyuncs.com\|registry.cn-" apps/definitions/ platform/apps/ 2>/dev/null; then
+  run_optional "scripts/45-configure-acr-pull.sh" ./scripts/45-configure-acr-pull.sh
+else
+  log "  跳过:当前渲染的环境里没有引用私有镜像仓库"
+fi
+
 step "等所有 Application 收敛,再做组件专属初始化"
 # 顺序很重要:下面那些"建 Airflow 账号""配 Superset 数据源"的步骤,前提是
 # 对应组件已经跑起来了。2026-08-22 之前这些步骤紧跟在配 Keycloak 后面,

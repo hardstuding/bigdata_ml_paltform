@@ -114,6 +114,13 @@ jobs:
       - name: 复制源码防漂移
         run: python3 scripts/check-duplicated-sources.py
 
+      # 一键拉起路径和 scripts/README.md 的部署主线表两边一致。这个仓库的
+      # 核心要求之一就是"从空环境可恢复、可重复的一键部署",它的失效方式
+      # 很隐蔽:新加了一个部署必需的步骤,只写进文档没进 bootstrap-all.sh
+      # (或者反过来)。2026-08-30 加这个检查时当场发现文档漏了 11 步。
+      - name: 一键拉起路径覆盖检查
+        run: python3 scripts/check-bootstrap-coverage.py
+
       # 文档里的 SDK 调用示例,参数要真的能和签名对上。
       # 2026-08-29 发现 usage-guide 里写着 `submit_job("train.py")`,而真实
       # 签名第一个参数是 name —— 照着文档写必然报错,而这种错不会被任何

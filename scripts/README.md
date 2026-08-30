@@ -14,24 +14,60 @@
 
 ## 1. 从空集群拉起(部署主线)
 
-**直接跑 [`bootstrap-all.sh`](bootstrap-all.sh) 就行**,它按正确顺序串起
-下面这些,每一步都幂等,中途失败直接重跑整份脚本没有副作用。
+**直接跑 [`bootstrap-all.sh`](bootstrap-all.sh) 就行**,它按下面这个顺序
+串起全部步骤,每一步都幂等,中途失败直接重跑整份脚本没有副作用。
 
-| 脚本 | 作用 |
-|---|---|
-| `00-generate-secrets.sh` | 生成各组件管理员密码 + 建对应 Secret(幂等,不轮换已有密码) |
-| `01-bootstrap-argocd.sh` | 装 ArgoCD 本身(唯一允许手动 helm install 的例外) |
-| `02-bootstrap-root-apps.sh` | 把两个 app-of-apps 交给 ArgoCD,之后全部走 GitOps |
-| `04-install-kube-prometheus-crds.sh` | kube-prometheus CRD 太大,ArgoCD 装不了,单独装 |
-| `16-install-cloudnative-pg-crds.sh` | 同上,CloudNativePG 的 CRD |
-| `25-install-argo-workflows-crds.sh` | 同上,Argo Workflows 的 CRD |
-| `03-configure-keycloak.sh` | 建 platform realm + 各组件 OIDC client(**生成产物**,改要改 `templates/scripts/`) |
-| `12-sync-iam.py` | `platform/iam/` 的组织架构/角色数据 → Keycloak |
-| `05-configure-airflow.sh` | 建 Airflow 初始管理员 |
-| `06-configure-superset-datasources.sh` | 给 Superset 注册 Trino 数据源 |
-| `14-configure-airflow-seatunnel-variable.sh` | 给 SeaTunnel DAG 写 MinIO 凭据 |
-| `07-fix-trino-liveness-probe.sh` | 修 chart 硬编码的坏探针(**现在是可选**:`apps/trino-liveness-fix/` 那个 CronJob 会自动巡检修复,这个脚本只是"不想等 5 分钟"的快捷方式) |
-| `20-configure-openmetadata-search-truststore.sh` | OpenMetadata 连 OpenSearch 的自签证书信任 |
+```bash
+./scripts/bootstrap-all.sh                 # 默认 cloud-full
+TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
+```
+
+下面这张表是**它实际执行的顺序**,不是脚本编号顺序 —— 编号是按历史加进来
+的先后排的,和执行顺序无关。想手动逐步执行(调试某一步、或者只想理解它
+在做什么)就照这个顺序来。
+
+**`scripts/check-bootstrap-coverage.py` 会校验这张表和 `bootstrap-all.sh`
+两边一致**:表里列了而脚本没调、或者脚本调了而表里没列,CI 都会红。
+2026-08-30 加这个检查时当场发现表里**漏了 11 步**,其中
+`45-configure-acr-pull.sh` 是 cloud-full 的硬前置 —— 没有它自建镜像一个
+都拉不下来,而报错指向的是"某个 Pod 拉不到镜像",不是"你漏了一步"。
+
+**「必需」失败会让整个脚本停下来;「尽力」对应的组件没启用就自动跳过**,
+不会拖垮部署。
+
+| # | 脚本 | 必需? | 作用 |
+|---|---|---|---|
+| 0 | *(无)* | 必需 | 校验工作区当前渲染的就是 `TARGET_ENV` 那个环境 —— 拿 local-lite 的渲染结果去部署 cloud-full,每个 Pod 都会 Running、ArgoCD 全绿,但装出来的是错的那套 |
+| 1 | `00-generate-secrets.sh` | 必需 | 生成各组件管理员密码 + 建对应 Secret(幂等,不轮换已有密码) |
+| 2 | `17-load-image-cache.sh` | 尽力 | 本地有镜像缓存就灌回去(只对 local-lite 有意义;cloud-full 走 `22`/`23` 那套远程流程) |
+| 3 | `01-bootstrap-argocd.sh` | 必需 | 装 ArgoCD 本身 —— **唯一允许手动 helm install 的例外**,之后全部走 GitOps |
+| 4 | `02-bootstrap-root-apps.sh` | 必需 | 把两个 app-of-apps 交给 ArgoCD |
+| 5 | `04-install-kube-prometheus-crds.sh` | 必需 | CRD 太大,ArgoCD 装不了,单独装 |
+| 6 | `16-install-cloudnative-pg-crds.sh` | 必需 | 同上,CloudNativePG([ADR-038](../docs/decisions/038-cloudnativepg-evaluation.md)) |
+| 7 | `25-install-argo-workflows-crds.sh` | 必需 | 同上,Argo Workflows |
+| 8 | `33-install-kueue-crds.sh` | 必需 | 同上,Kueue([ADR-064](../docs/decisions/064-role-based-resource-quota.md)) |
+| 9 | *(等待)* | 必需 | 等 Keycloak 这个 Application Healthy —— 下一步要连它 |
+| 10 | `03-configure-keycloak.sh` | 必需 | 建 platform realm + 各组件 OIDC client + 初始登录用户(**生成产物**,改要改 `templates/scripts/`) |
+| 11 | `00-generate-secrets.sh`(第二遍) | 必需 | 补建"要等 namespace 建出来才能建"的那些 Secret。**全新集群上这一遍是必需的**,不是重复劳动 |
+| 12 | `45-configure-acr-pull.sh` | 尽力 | 私有镜像仓库的拉取凭据。**用了 ACR 的环境这是硬前置** —— 没有它自建镜像全部 ImagePullBackOff,下一步会一直等到超时。当前渲染结果里没引用私有仓库就跳过 |
+| 13 | *(等待)* | 必需 | 等所有 Application 收敛。**顺序很重要**:下面那些"建账号""配数据源"的前提是对应组件已经跑起来了 —— 2026-08-22 之前这些步骤紧跟在配 Keycloak 后面,全新集群上组件一个都没起来,于是全部打印"跳过"然后过去,**脚本报全部完成、实际一件都没做** |
+| 14 | `07-fix-trino-liveness-probe.sh` | 尽力 | 修 chart 硬编码的坏探针([ADR-017](../docs/decisions/017-trino-oauth2-sso.md))。`apps/trino-liveness-fix/` 那个 CronJob 每 5 分钟也会自动修,这里跑一次是为了不等那 5 分钟 |
+| 15 | `05-configure-airflow.sh` | 尽力 | 建 Airflow 初始管理员 |
+| 16 | `06-configure-superset-datasources.sh` | 尽力 | 给 Superset 注册 Trino 数据源 |
+| 17 | `10-install-kserve-serving-runtimes.sh` | 尽力 | 装 ClusterServingRuntime(官方 chart 不带,不装的话模型上线时没有 runtime 可用) |
+| 18 | `20-configure-openmetadata-search-truststore.sh` | 尽力 | OpenMetadata 连 OpenSearch 的自签证书信任 |
+| 19 | `27-configure-openmetadata-bot.sh` | 尽力 | 取 ingestion-bot token,给建表工具 / 权限门户 / 血缘推送用 |
+| 20 | `29-configure-openmetadata-trino-ingestion.sh` | 尽力 | Trino 元数据自动采集(不配的话数据目录里只有人工录入的表) |
+| 21 | `34-configure-openmetadata-data-quality.sh` | 尽力 | 数据质量断言([ADR-065](../docs/decisions/065-data-quality-on-openmetadata.md)) |
+| 22 | `43-configure-openmetadata-dbt-ingestion.sh` | 尽力 | dbt 血缘接进目录([ADR-082](../docs/decisions/082-dbt-lineage-ingestion.md)) |
+| 23 | `12-sync-iam.py` | 尽力 | `platform/iam/` 的组织架构/角色数据 → Keycloak |
+| 24 | `14-configure-airflow-seatunnel-variable.sh` | 尽力 | 给 SeaTunnel DAG 写 MinIO 凭据 |
+| 25 | `08-create-demo-data.sh` | 尽力 | 建 demo 数据。**不是装饰** —— 黄金链路探针依赖这几张表 |
+| 26 | `09-train-demo-model.sh` | 尽力 | 训一个 demo 模型。同样不是装饰 —— `model` 那条探针要求 MLflow 里有 READY 版本 |
+| 27 | *(报告)* | 必需 | 检查必需能力、出部署报告(`logs/bootstrap-report.json`)。**必需项没达标会非零退出** |
+
+**完整日志**在 `logs/bootstrap-all.log`(不进 git)。
+
 
 ## 2. 端到端 demo / 能力验证
 
