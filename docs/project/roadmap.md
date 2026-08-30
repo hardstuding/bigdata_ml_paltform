@@ -502,7 +502,18 @@ seatunnel 命名空间的 pod,DAG 源码里没有 `namespace="seatunnel"`)——
 想彻底解决间接连接这类,得换个思路(比如从"按命名空间名枚举"改成"按
 命名空间 label 选择",让消费方自己声明),那是架构级改动,单独评估。
 
-### 2.9 alloy/loki 的 chart 源仍然依赖境外巨型 index.yaml
+### 2.9 alloy/loki 的 chart 源依赖境外巨型 index.yaml —— 已解决(2026-08-22,ADR-061)
+
+**选了下面的方案 2:chart vendor 进仓库**(`platform/loki-chart/`、
+`platform/alloy-chart/`),Application 的 `repoURL` 指向本仓库、`path` 指向
+那两个目录,不再走 Grafana 的 Helm 仓库。见
+[ADR-061](../decisions/061-vendor-grafana-charts.md)。
+
+**2026-08-30 更正**:这一条一直挂在"未解决"里,而它 08-22 就做完了。下面
+保留原始分析 —— 那部分(为什么 OCI 走不通、三个方案各自的代价)仍然有效,
+以后再遇到同类问题可以直接照着判断。
+
+
 
 **2026-08-22 实测量化过的问题,不是猜测。** 传统 Helm 仓库每次同步都要先
 拉整个 `index.yaml`,`grafana.github.io/helm-charts` 那份超过 1.4MB,从
@@ -535,7 +546,26 @@ OCI 不需要 index,按名字+版本直接取,实测几秒钟拉完。
 GitHub Pages 巨型 index.yaml 的 Application,一旦需要真正重新同步
 (升版本、改 values)就会卡死。
 
-### 2.10 自建镜像在境内怎么拉——已找到可行路径,但需要定方案
+### 2.10 自建镜像在境内怎么拉 —— 已解决(2026-08-29,选了方案 1:阿里云 ACR)
+
+**方案 1 已落地并实测**:CI 把 12 个自建镜像推到阿里云 ACR
+(`.github/workflows/build-images.yml`,没配 secret 时自动跳过、不让流水线
+变红),集群侧由 `scripts/45-configure-acr-pull.sh` 给每个命名空间配拉取
+凭据(2026-08-30 起已在 `bootstrap-all.sh` 里)。
+
+**实测对比**:同一个 3.44GB 的镜像,GHCR 上 `docker pull` **25 秒 0 字节**,
+ACR 上 **1 分 59 秒拉完**。
+
+踩到并修掉的一个坑:buildx 的 `provenance`/`sbom` 会额外推一个
+`application/vnd.oci.empty.v1+json` 的 attestation manifest,**阿里云 ACR
+个人版不认这个类型**,报 `denied: unknown manifest class`。关掉那两个开关
+即可(GHCR 认,所以会出现"GHCR 成功、ACR 失败"这种一半一半的现象)。
+
+**2026-08-30 更正**:这一条一直挂在"需要定方案",而方案 08-29 就定了并
+验证过了。下面保留原始分析 —— 那部分(为什么 DaoCloud 白名单盖不住自建
+镜像、digest 固定和 `docker tag` 互斥)仍然有效。
+
+
 
 **⚠️ 先更正一个我自己测错的数字。** 这一条最初写的是"直连 ghcr.io 约
 80KB/s、镜像站 2.3MB/s",那组数字**是错的**:测法是看 `/data/docker` 的
@@ -607,11 +637,27 @@ provenance 证明清单用 `application/vnd.oci.empty.v1+json`,ACR 个人版不�
 `scripts/38-ship-image-to-cloud.sh` 那条手工搬 tar 的路留着当兜底,不再是
 日常路径。
 
-### 2.5 扩大 CI
+### 2.5 扩大 CI —— 持续在做,2026-08-30 又加了 5 条
 
-**已迈出几步**(chart 渲染校验、DAG 单一源码、app ConfigMap 单一源码、
-环境配置渲染防漂移、3 个 Flask 应用的测试)。原评审 P1-3 清单里更大的
-扩展(镜像构建 —— 见 2.1、集成测试)还没做。
+现在 CI 里的检查(`.github/workflows/validate.yml`):chart 渲染校验、
+DAG / ConfigMap / 应用源码 三种单一源码防漂移、环境配置渲染防漂移、
+镜像 tag 不许浮动、NetworkPolicy 消费方、资源规格、IAM 一致性、
+服务目录、文档死链、文档里的 SDK 示例、prod 不许出现开发域名、
+OPA 策略单测、四个应用的单元测试、render-jobs/render-streams 防漂移。
+
+**2026-08-30 新增 5 条,每条都对应一次真实踩过的坑**:
+
+| 检查 | 拦的是什么 |
+|---|---|
+| `check-capability-matrix.py` | 能力表里 ✅ 的行写"未验证";缺口文档自己记状态 |
+| `check-bootstrap-coverage.py` | 一键脚本和文档的部署主线表不一致(加的时候发现文档漏了 11 步) |
+| `sync-adr-index.py --check` | ADR 索引的状态和 ADR 原文分叉(加的时候发现 10 条过期) |
+| `list-manual-credentials.py --check` | 有 Secret 被引用却没人创建、也没登记进"必须人工提供" |
+| `check-doc-commands.py` | 文档里让人跑一个不存在的脚本(加的时候抓到 1 条) |
+
+**还没做的**:真正的集成测试(在 CI 里起一个临时集群跑端到端)。代价很大,
+而目前"实机验收脚本 + 黄金链路探针"这条路的性价比更高 —— 前者在真集群上
+跑 28 条,后者持续回答"现在还成不成立"。
 
 ### 2.6 notebook 里直接调 `submit_job()` 被 singleuser NetworkPolicy 挡住 —— 已解决(2026-08-20,之前的"未解决"是记录错误)
 
