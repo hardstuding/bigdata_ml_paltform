@@ -140,6 +140,13 @@ jobs:
       - name: 文档里的命令真的存在
         run: python3 scripts/check-doc-commands.py
 
+      # 文档教人去改生成物 —— 照着做会白改一遍,而且是**静默**的:下一次
+      # 渲染直接覆盖,没有冲突、没有报错。这个仓库自己撞过 4 次(CLAUDE.md
+      # 里记着),2026-08-30 又发现两处**教别人这么做**的文档。
+      # 文档比代码更糟:代码只坑写它的人一次,文档坑每个照着做的人。
+      - name: 文档不许教人改生成物
+        run: python3 scripts/check-docs-dont-teach-editing-generated.py
+
       # 文档里的 SDK 调用示例,参数要真的能和签名对上。
       # 2026-08-29 发现 usage-guide 里写着 `submit_job("train.py")`,而真实
       # 签名第一个参数是 name —— 照着文档写必然报错,而这种错不会被任何

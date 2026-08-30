@@ -16,8 +16,8 @@
 
 | 参数 | 文件 | 默认值 | 什么时候要调 |
 |---|---|---|---|
-| JupyterHub notebook 空闲自动关闭 | `apps/definitions/jupyterhub.yaml` 的 `cull.timeout`(秒) | 7200(2 小时) | 团队习惯不一样——写代码中途开会/思考的人多,调大;资源紧张、想更快回收,调小。`cull.every` 是检查频率,不用跟着改 |
-| Keycloak 会话超时 | `scripts/03-configure-keycloak.sh` 的 `ssoSessionIdleTimeout`/`ssoSessionMaxLifespan`(秒) | 28800/86400(8/24 小时) | **这两个值目前是为 local-lite 开发联调场景放宽的,cloud-full/prod 部署前必须按公司安全基线重新评估**,不能直接照抄这个值上生产 |
+| JupyterHub notebook 空闲自动关闭 | **`apps/components/jupyterhub.yaml`** 的 `cull.timeout`(秒) —— 不是 `apps/definitions/` 下那份生成物 | 7200(2 小时) | 团队习惯不一样——写代码中途开会/思考的人多,调大;资源紧张、想更快回收,调小。`cull.every` 是检查频率,不用跟着改 |
+| Keycloak 会话超时 | **`templates/scripts/03-configure-keycloak.sh`** 的 `ssoSessionIdleTimeout`/`ssoSessionMaxLifespan`(秒) —— `scripts/` 下那份是生成物 | 28800/86400(8/24 小时) | **这两个值目前是为 local-lite 开发联调场景放宽的,cloud-full/prod 部署前必须按公司安全基线重新评估**,不能直接照抄这个值上生产 |
 
 ## 资源(CPU/内存)类
 
