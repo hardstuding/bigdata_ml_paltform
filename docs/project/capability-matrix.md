@@ -84,13 +84,13 @@
 
 | 环节 | 状态 | 验证级别 | 最后验证 | 证据 |
 |---|---|---|---|---|
-| 登录 / 统一入口 | ✅ | 集成验证 | 2026-08-19 | Keycloak SSO + platform-portal([ADR-047](../decisions/047-platform-portal.md)) |
+| 登录 / 统一入口 | ✅ | 集成验证 | 2026-08-30 | Keycloak SSO + platform-portal([ADR-047](../decisions/047-platform-portal.md))。**2026-08-30 实机验证按角色显示**:`data-analysts` 身份看不到 ArgoCD/Keycloak、看得到 SQL 工作台;`platform-team` 全部可见;三个自建应用都读得到 groups claim(此前 permission-request-app 读不到,导致组权限审批对所有人 403) |
 | 找数据(有哪些表) | ✅ | 集成验证 | 2026-08-23 | 采集自动发现,目录里 100+ 张表,字段和 Trino 真实表结构一致 |
 | 申请表权限 | 🟡 | demo | 2026-08-18 | [ADR-044](../decisions/044-tiered-approval-workflow.md)/[045](../decisions/045-approval-backend-notifications-escalation.md)。**目录 → 申请表单的联动没验过** |
 | 权限真正生效 | ✅ | 集成验证 | 2026-08-26 | Trino 接 OPA([ADR-051](../decisions/051-trino-opa-access-control.md)) |
 | 权限到期回收 | ✅ | 集成验证 | 2026-08-18 | [ADR-050](../decisions/050-grant-expiry-reclamation.md) |
 | **SQL 工作台** | 🟡 | 未验证 | — | [ADR-084](../decisions/084-analyst-sql-workbench.md)。刚从"Trino Web UI"(**那里根本没有 SQL 编辑器**)改成 Superset SQL Lab。**下次开机验**:`analyst001` 登录 → SQL Lab → `SELECT current_user` 应是他本人、查没 grant 的表应被拒 |
-| 建表 | 🟡 | 未验证 | — | [ADR-043](../decisions/043-table-registration-tool.md)。2026-08-29 补完:字段说明、分区、质量断言(建真的 OpenMetadata testCase)、提交前预览、按等级的审批分流、负责人不能冒充。**全部只有单元测试,没上过集群** |
+| 建表 | ✅ | 集成验证 | 2026-08-30 | [ADR-043](../decisions/043-table-registration-tool.md)。2026-08-29 补完:字段说明、分区、质量断言(建真的 OpenMetadata testCase)、提交前预览、按等级的审批分流、负责人不能冒充。**2026-08-30 实机验证**:提交一张带字段说明和分区的表,`SHOW CREATE TABLE` 里 COMMENT 和 partitioning 都在;非平台组提交 2 级表被挡住并落了说明去哪的记录;预览返回的 DDL 和实际执行的一致 |
 | SQL 数据转换(dbt) | 🟡 | 集成验证 | 2026-08-29 | [ADR-082](../decisions/082-dbt-lineage-ingestion.md),血缘查得到 `orders → stg_orders → daily_order_totals`。**缺**:`schedule=None`,只能手动触发 |
 | 看板 / BI | ✅ | 集成验证 | 2026-08-29 | 组映射实测:`data-analysts` → `Alpha/Gamma/sql_lab`,未分组 → `Gamma`。**修之前所有人都是 Admin**(`AUTH_USER_REGISTRATION_ROLE="Admin"` + scope 里没有 groups) |
 | 中文界面 | 🟡 | 集成验证 | 2026-08-28 | Superset 4054 条译文([ADR-077](../decisions/077-superset-chinese-ui.md))。**Airflow/Grafana/OpenMetadata 仍是英文** |
@@ -110,7 +110,7 @@
 | 作业可观测 | ✅ | 集成验证 | 2026-08-21 | Spark History Server `/api/v1/applications` 列得出刚跑完的作业 |
 | 血缘 | ✅ | 集成验证 | 2026-08-22 | 直接查 lineage API 确认边存在。**Spark 血缘([ADR-014](../decisions/014-spark-lineage-official-agent.md))仍仅设计** |
 | 数据质量 / 契约 | ✅ | demo | 2026-08-25 | 质量 [ADR-065](../decisions/065-data-quality-on-openmetadata.md)/[070](../decisions/070-data-freshness-slo.md) + 契约 [ADR-068](../decisions/068-schema-registry.md)。**断言失败没有告警出口** |
-| 作业发布(定时) | 🟡 | 集成验证 | 2026-08-29 | `jobs/<名字>/job.yaml` 写一行 `schedule` → Argo CronWorkflow;支持多文件、依赖声明(和镜像清单对账,CI 拦)、参数化补数、按环境晋级(见 [`jobs/README.md`](../../jobs/README.md))。手工提交验过;**定时路径从没被触发过**(UTC 01:30,云主机那时是关的),多文件/参数那几项**只有单元测试、没上过集群** |
+| 作业发布(定时) | 🟡 | 集成验证 | 2026-08-30 | `jobs/<名字>/job.yaml` 写一行 `schedule` → Argo CronWorkflow;支持多文件、依赖声明(和镜像清单对账,CI 拦)、参数化补数、按环境晋级(见 [`jobs/README.md`](../../jobs/README.md))。**2026-08-30 实机验证**:多文件(`import jobkit` 成功)、参数化补数(`-p run_date=2026-08-01` → 表里真的多出那一天的 4 行,不是只看日志)。**定时路径仍然从没被触发过**(UTC 01:30,云主机那时基本是关的),所以还是 🟡 |
 | 流作业发布 | ✅ | 集成验证 | 2026-08-29 | `streams/<名字>/stream.yaml` → FlinkDeployment;门户「流作业」一栏显示状态 |
 | 内部包共享 | ✅ | 集成验证 | 2026-08-29 | [ADR-083](../decisions/083-internal-package-registry.md)。pod 里**不加任何参数** `pip install platform-helpers` 装得上并能用 |
 

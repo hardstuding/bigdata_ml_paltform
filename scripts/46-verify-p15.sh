@@ -205,17 +205,20 @@ print(json.dumps(out))" 2>/dev/null | tail -1)"
     if [ -z "$RESULT" ]; then
       bad "建表工具没有返回结果"
     else
-      echo "$RESULT" | python3 -c "
+      # **不要写成 `... | while read`。** 管道右边是子 shell,里面调 ok/bad
+      # 改的是子 shell 里的数组副本 —— 汇总时全部丢失。2026-08-30 实测:
+      # 这里明明打了 ✅,汇总里却少一条;更糟的是**这段里的 ❌ 也会被静默
+      # 吞掉**,一个验证脚本漏报失败,比没有这个脚本更危险。
+      PREVIEW_CHECK="$(echo "$RESULT" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 p = json.loads(d['preview']) if d['preview'].strip().startswith('{') else {}
 print('PREVIEW_OK' if 'COMMENT' in p.get('ddl','') and 'partitioning' in p.get('ddl','') else 'PREVIEW_BAD:' + str(p)[:200])
-" | while read -r line; do
-        case "$line" in
-          PREVIEW_OK) ok "预览返回的 DDL 带 COMMENT 和 partitioning" ;;
-          *)          bad "预览 DDL 不对:$line" ;;
-        esac
-      done
+")"
+      case "$PREVIEW_CHECK" in
+        PREVIEW_OK) ok "预览返回的 DDL 带 COMMENT 和 partitioning" ;;
+        *)          bad "预览 DDL 不对:$PREVIEW_CHECK" ;;
+      esac
 
       # 真实表结构 —— 这才是判据,不是"提交没报错"
       DDL="$(kubectl -n table-registration-app exec "$T_POD" -- python3 -c "
@@ -243,9 +246,10 @@ cur = c.cursor(); cur.execute('DROP TABLE IF EXISTS iceberg.demo.$TBL'); cur.fet
 print('dropped')" >/dev/null 2>&1 && log "  (已清理临时表 demo.$TBL)"
       fi
 
-      echo "$RESULT" | grep -q '"l2_status": 302' \
-        && ok "2 级表的提交被受理(下一步看它有没有被落成 rejected)" \
-        || bad "2 级表提交返回的不是 302"
+      # 这里**不看状态码**。第一版断言的是 302,结果永远失败 ——
+      # `urllib.request.urlopen` 默认会跟随重定向,拿到的是最终那个 200。
+      # 而且状态码本来就不是这条的判据:"被挡住了没有"要看库里那条记录,
+      # 下面那条查的就是它。
       L2NOTE="$(kubectl -n table-registration-app exec "$T_POD" -- python3 -c "
 import sqlite3, os
 c = sqlite3.connect(os.environ.get('DB_PATH', '/data/registrations.db'))
@@ -284,15 +288,52 @@ print(json.dumps({'apiVersion': 'argoproj.io/v1alpha1', 'kind': 'Workflow',
       log "  提交了补数作业 $WF(run_date=2026-08-01),等它跑完…"
       kubectl -n argo-workflows wait --for=condition=Completed "workflow/$WF" --timeout=420s >/dev/null 2>&1
       PHASE="$(kubectl -n argo-workflows get workflow "$WF" -o jsonpath='{.status.phase}' 2>/dev/null)"
-      LOGS="$(kubectl -n argo-workflows logs "workflow/$WF" -c main 2>/dev/null || true)"
-      [ "$PHASE" = "Succeeded" ] && ok "补数作业跑成功(多文件 import jobkit 没问题)" \
-                                 || bad "补数作业状态是 $PHASE"
-      echo "$LOGS" | grep -q "ModuleNotFoundError" \
-        && bad "日志里有 ModuleNotFoundError —— 多文件挂载没生效" \
-        || ok "日志里没有 ModuleNotFoundError"
-      echo "$LOGS" | grep -q "2026-08-01" \
-        && ok "作业真的按 run_date=2026-08-01 跑的(参数生效)" \
-        || bad "日志里没看到 2026-08-01 —— 参数没传进去"
+      # **从 Pod 取日志,不要写 `kubectl logs workflow/<name>`。**
+      # 后者会报 `no kind "Workflow" is registered ... for logs`,而
+      # `2>/dev/null || true` 把它吞成空字符串 —— 于是下面两条检查都在拿
+      # **空串**做判断:"有没有 ModuleNotFoundError"必然通过(假阳性),
+      # "有没有 2026-08-01"必然失败(假阴性)。2026-08-30 实测撞到,两条
+      # 检查同时是错的、而且方向相反,差点让人以为参数功能坏了。
+      WFPOD="$(kubectl -n argo-workflows get pods \
+                 -l "workflows.argoproj.io/workflow=$WF" \
+                 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+      LOGS=""
+      [ -n "$WFPOD" ] && LOGS="$(kubectl -n argo-workflows logs "$WFPOD" -c main 2>/dev/null || true)"
+
+      [ "$PHASE" = "Succeeded" ] && ok "补数作业跑成功" || bad "补数作业状态是 $PHASE"
+      if [ -z "$LOGS" ]; then
+        # 取不到日志就**明说取不到**,不要拿空串继续判断后面两条。
+        bad "取不到作业日志(pod=$WFPOD),下面两条无法判断"
+      else
+        echo "$LOGS" | grep -q "ModuleNotFoundError" \
+          && bad "日志里有 ModuleNotFoundError —— 多文件挂载没生效" \
+          || ok "多文件挂载生效(import jobkit 没报错)"
+        echo "$LOGS" | grep -q "2026-08-01" \
+          && ok "作业真的按 run_date=2026-08-01 跑的(参数生效)" \
+          || bad "日志里没看到 2026-08-01 —— 参数没传进去"
+      fi
+      # **最强的判据是表里真的有那一天的数据**,不是日志里出现了那个字符串。
+      # 这个仓库反复强调的"判据要是业务结果" —— 日志能被打印语句骗过去,
+      # 表里的行骗不了。
+      T_POD2="$(pod table-registration-app 'app=table-registration-app')"
+      if [ -n "$T_POD2" ]; then
+        ROWS="$(kubectl -n table-registration-app exec "$T_POD2" -- python3 -c "
+import os, trino, warnings
+warnings.filterwarnings('ignore')
+from trino.auth import BasicAuthentication
+c = trino.dbapi.connect(host=os.environ['TRINO_HOST'], port=int(os.environ['TRINO_PORT']),
+    user=os.environ['TRINO_USER'], http_scheme='https', verify=False,
+    auth=BasicAuthentication(os.environ['TRINO_USER'], os.environ['TRINO_PASSWORD']), catalog='iceberg')
+cur = c.cursor()
+cur.execute(\"SELECT count(*) FROM iceberg.demo.orders_by_region_daily WHERE run_date = DATE '2026-08-01'\")
+print(cur.fetchall()[0][0])" 2>/dev/null | tail -1)"
+        [ "${ROWS:-0}" -gt 0 ] 2>/dev/null \
+          && ok "补数结果真的落进表里了(run_date=2026-08-01 有 $ROWS 行)" \
+          || bad "表里没有 run_date=2026-08-01 的数据(拿到:$ROWS)"
+      else
+        skip "没有 table-registration-app pod,查不了 Trino,补数结果无法从表侧确认"
+      fi
+
       kubectl -n argo-workflows delete "workflow/$WF" >/dev/null 2>&1 && log "  (已清理 $WF)"
     fi
   fi
