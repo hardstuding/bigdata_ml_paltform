@@ -91,17 +91,38 @@ spec:
                   alias_with_retry backuptarget {{BACKUP_S3_ENDPOINT}} "$BACKUP_S3_USER" "$BACKUP_S3_PASSWORD"
                   mc mb --ignore-existing backuptarget/{{BACKUP_S3_BUCKET}}
 
+                  # **schema 在对象存储里的实际位置有两种,不能写死一个。**
+                  # 实测(2026-08-30):`audit` 落在 lakehouse/warehouse/audit.db/,
+                  # 因为 scripts/flink_trino_audit_sink.py 里 warehouse 配的是
+                  # `s3a://lakehouse/warehouse`;而推理留痕那条链路
+                  # (streams/inference-log/job.py)默认的是 `s3a://lakehouse/`,
+                  # 它的 `ml` 会落在 lakehouse/ml.db/。两边不一致本身是个待收敛的
+                  # 问题,但备份不能因此漏掉任何一边 —— 两个位置都找,找到哪个备哪个。
+                  #
+                  # 另外注意 Iceberg/Hive 的目录名带 `.db` 后缀,不是裸 schema 名。
+                  #
+                  # **`mc ls` 对不存在的前缀退出码是 0**(实测确认),所以判断
+                  # "存在不存在"必须看输出是不是空的,不能看退出码 —— 上一版就是
+                  # 栽在这里:守卫形同虚设,一路走到 mc mirror 才报
+                  # "Unable to stat source ... Object does not exist",整个 Job 失败。
                   COPIED=0
                   for schema in audit ml; do
-                    if ! mc ls "src/lakehouse/${schema}/" >/dev/null 2>&1; then
+                    SRC_PATH=""
+                    for candidate in "src/lakehouse/warehouse/${schema}.db/" "src/lakehouse/${schema}.db/"; do
+                      if [ -n "$(mc ls "$candidate" 2>/dev/null)" ]; then
+                        SRC_PATH="$candidate"
+                        break
+                      fi
+                    done
+                    if [ -z "$SRC_PATH" ]; then
                       echo "== schema ${schema} 还不存在,跳过(组件可能还没启用)"
                       continue
                     fi
-                    echo "== 镜像 lakehouse/${schema}/ -> {{BACKUP_S3_BUCKET}}/iceberg/${schema}/"
+                    echo "== 镜像 ${SRC_PATH} -> {{BACKUP_S3_BUCKET}}/iceberg/${schema}/"
                     # **不加 --remove**:镜像端不该跟着源端删。审计数据被误删
                     # (或者被 expire_snapshots 清掉)时,备份里还留着才有意义。
                     mc mirror --overwrite \
-                      "src/lakehouse/${schema}/" \
+                      "$SRC_PATH" \
                       "backuptarget/{{BACKUP_S3_BUCKET}}/iceberg/${schema}/"
                     COPIED=$((COPIED + 1))
                   done
