@@ -55,9 +55,44 @@ st="$(status_of)"
 log "--> 当前状态:${st}"
 
 if [ "$st" = "Stopped" ]; then
-  aliyun ecs StartInstance --profile "$ALIYUN_PROFILE" \
-    --InstanceId "$CLOUD_VM_INSTANCE_ID" >>"$LOG_FILE" 2>&1 \
-    || { log "!! StartInstance 调用失败,详见 ${LOG_FILE}"; exit 1; }
+  # **抢占式实例开不起来是常态,不是异常。** 2026-08-30 实测撞到:
+  # `OperationDenied.NoStock` —— 这台机器所在可用区(cn-wulanchabu-a)的
+  # g9i 售罄,而且**同代族的 r9i/c9i 一起售罄**(改规格也解决不了,阿里云
+  # 只允许在同代族之间换)。库存是分钟级波动的,所以这里支持重试等待:
+  #
+  #   WAIT_FOR_STOCK_MIN=30 ./scripts/32-start-cloud-vm.sh
+  #
+  # 默认不等(WAIT_FOR_STOCK_MIN=0),因为大多数时候是有库存的,静默等
+  # 半小时不如立刻告诉人"现在开不了"。
+  WAIT_MIN="${WAIT_FOR_STOCK_MIN:-0}"
+  deadline=$(( $(date +%s) + WAIT_MIN * 60 ))
+  attempt=0
+  while :; do
+    attempt=$((attempt + 1))
+    if aliyun ecs StartInstance --profile "$ALIYUN_PROFILE" \
+         --InstanceId "$CLOUD_VM_INSTANCE_ID" >>"$LOG_FILE" 2>&1; then
+      break
+    fi
+    if ! grep -q "NoStock" "$LOG_FILE"; then
+      log "!! StartInstance 调用失败(不是库存问题),详见 ${LOG_FILE}"
+      exit 1
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      log "!! 开不了机:可用区库存售罄(OperationDenied.NoStock),已试 ${attempt} 次"
+      log "   这是抢占式实例的固有风险,不是配置问题。可以:"
+      log "     1) 等一会儿再试,或者 WAIT_FOR_STOCK_MIN=30 ./scripts/32-start-cloud-vm.sh"
+      log "     2) 查同可用区还有什么规格可用:"
+      log "        aliyun ecs DescribeAvailableResource --RegionId <region> \\"
+      log "          --DestinationResource InstanceType --ZoneId <zone> \\"
+      log "          --InstanceChargeType PostPaid --SpotStrategy SpotAsPriceGo"
+      log "        **注意改规格只能在同代族之间换**(g9i↔r9i↔c9i),"
+      log "        跨族会报 InvalidInstanceType.ValueNotSupported"
+      log "     3) 换可用区要走「快照→建新盘→挂载」那条完整路径,不是改个参数"
+      exit 1
+    fi
+    log "--> 库存售罄,${attempt} 次尝试;还剩 $(( (deadline - $(date +%s)) / 60 )) 分钟继续重试"
+    sleep 60
+  done
   log "--> 已发起开机,等实例变 Running"
 elif [ "$st" = "Running" ]; then
   log "--> 已经在运行,跳过开机"

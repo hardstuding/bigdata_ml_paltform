@@ -18,6 +18,46 @@
 > 下面的**症状索引**是整份文档最重要的部分,出事时先看这个,不要从头
 > 往下翻。
 
+## 开机报 `OperationDenied.NoStock`,机器起不来
+
+**症状**:`./scripts/32-start-cloud-vm.sh` 停在
+`ERROR: SDK.ServerError / ErrorCode: OperationDenied.NoStock`。
+
+**这不是配置问题,是抢占式实例的固有风险** —— 那个可用区的这个规格暂时
+卖光了。2026-08-30 实测撞到过一次。
+
+**先确认到底是不是库存**:
+
+```bash
+aliyun ecs DescribeAvailableResource --RegionId cn-wulanchabu \
+  --DestinationResource InstanceType --ZoneId cn-wulanchabu-a \
+  --InstanceChargeType PostPaid --SpotStrategy SpotAsPriceGo --Cores 16 --Memory 64
+```
+
+`Status: SoldOut` 就是库存问题。
+
+**处置,按代价从小到大**:
+
+1. **等一会儿再试。** 库存是分钟级波动的:
+   ```bash
+   WAIT_FOR_STOCK_MIN=30 ./scripts/32-start-cloud-vm.sh
+   ```
+2. **换规格** —— 但**只能在同代族之间换**(g9i ↔ r9i ↔ c9i)。跨族会报
+   `InvalidInstanceType.ValueNotSupported`。而且 2026-08-30 那次
+   **整个代族在那个可用区一起售罄**,换规格没用。可换列表:
+   ```bash
+   aliyun ecs DescribeResourcesModification --RegionId <region> \
+     --ResourceId <实例ID> --DestinationResource InstanceType
+   ```
+   ⚠️ 注意 `c9i.4xlarge` 只有 32G 内存(g9i/r9i 是 64G/128G),这个平台
+   跑不下,别为了能开机换到它。
+3. **换可用区** —— 要走「快照 → 在新可用区建盘 → 建新实例 → 挂载」那条
+   完整路径,不是改个参数。这是真正的迁移,**需要先问用户**。
+
+**这条对上生产的意义**:生产不该用抢占式实例。现在这台是为了省钱,代价
+就是"随时可能开不起来、也随时可能被回收"。
+
+
 ## 症状索引
 
 ### ArgoCD / GitOps 层(2026-08-23 追加)
