@@ -66,7 +66,7 @@ backup_s3_secret: minio-root
 # 和这个仓库其它四个自建镜像同一套做法。
 # 升级方式:改了 apps/platform-image/ 或 platform-sdk/ 之后,等 CI 构建完
 # 那个 commit,把这里的 SHA 换掉。
-platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176
+platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298
 
 enabled_components:
   - airflow-db-init.yaml

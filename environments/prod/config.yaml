@@ -91,7 +91,7 @@ backup_s3_secret: postgres-backup-target
 # 和这里一致(CI 里跑)。
 # 和 cloud-full 用同一个 tag:同一份构建产物一路走到生产,不重新构建 ——
 # "测试环境验过的和生产跑的是同一个东西"这条要成立就不能各建各的。
-platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176
+platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298
 
 enabled_components:
   - airflow-db-init.yaml

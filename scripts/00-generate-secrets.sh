@@ -259,6 +259,14 @@ ensure_trino_service_account openmetadata_service
 # `test_other_service_accounts_still_denied_on_audit_schema` 当场拦下。
 ensure_trino_service_account iceberg_maintenance_service
 
+# 特征漂移作业(jobs/feature-drift,ADR-087)专用账号。
+#
+# **这个账号比上面那个还敏感**:它要把 `ml.inference_log` 里的推理输入
+# **一行一行读出来**才能算分布,而那是模型的原始输入,很可能包含个人数据。
+# OPA 里给它开的口子刻意**只放行 ml、不放行 audit**(维护作业那个是两个
+# 都放行的),而且有一条专门的测试盯着这个区别。
+ensure_trino_service_account feature_drift_service
+
 ensure_secret data superset-db username=superset password=RANDOM
 
 # Superset chart 默认把 DB_USER/DB_PASS/SUPERSET_SECRET_KEY 这些当明文写进
@@ -520,6 +528,19 @@ else
     --from-literal=PLATFORM_TRINO_USER=iceberg_maintenance_service \
     --from-literal=PLATFORM_TRINO_PASSWORD="$MAINT_PW" \
     && echo "已创建: argo-workflows/iceberg-maintenance-credentials"
+fi
+
+# 特征漂移作业自己的凭据(理由见上面 ensure_trino_service_account
+# feature_drift_service 那段)。
+if kubectl -n argo-workflows get secret feature-drift-credentials >/dev/null 2>&1; then
+  echo "已存在,跳过: argo-workflows/feature-drift-credentials"
+else
+  DRIFT_PW="$(kubectl -n trino get secret trino-service-account \
+    -o jsonpath='{.data.password-feature_drift_service}' | base64 -d)"
+  kubectl -n argo-workflows create secret generic feature-drift-credentials \
+    --from-literal=PLATFORM_TRINO_USER=feature_drift_service \
+    --from-literal=PLATFORM_TRINO_PASSWORD="$DRIFT_PW" \
+    && echo "已创建: argo-workflows/feature-drift-credentials"
 fi
 
 # notebook 也要有同一份凭据。**这是"在 notebook 里 query() 开箱即用"的前提**

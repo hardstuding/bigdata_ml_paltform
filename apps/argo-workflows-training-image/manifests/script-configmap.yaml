@@ -84,6 +84,40 @@ data:
         mlflow.log_metric("accuracy", acc)
         mlflow.log_metric("f1_score", f1)
 
+        # ---- 特征基线:留给漂移监控用(ADR-087)----
+        #
+        # **基线必须和模型版本绑在一起。** 漂移问的是"线上进来的数据,和当初
+        # 训练它的数据比,变了没有" —— 那个"当初"只有训练的这一刻知道。等到
+        # 几周后想做漂移分析时再去重建训练集分布,重建出来的是**那时**的数据,
+        # 不是训练时的,得到的结论会是错的而且不会有任何地方报错。
+        #
+        # **存成 MLflow tag,不是 artifact**:artifact 要走 S3/MinIO,而作业镜像
+        # 里是 `mlflow-skinny`(没有 boto3)—— 下载 artifact 会在运行时才炸。
+        # tag 走 REST,skinny 就够。20 个特征的分位数边界约 1.5KB,远低于限制。
+        #
+        # 存**分位数边界**而不只是均值方差:PSI(群体稳定性指数,业界做漂移的
+        # 标准做法)需要把线上样本按训练时的分箱去分桶。只存均值方差的话,
+        # 分布形状变了但均值没变的漂移(比如双峰化)完全看不出来。
+        import json as _json
+
+        import numpy as _np
+
+        baseline = {
+            "n_features": int(X_train.shape[1]),
+            "n_samples": int(X_train.shape[0]),
+            # 10 个等频桶 -> 11 条边界。首尾用 ±inf,免得线上出现训练集范围外的
+            # 值时落不进任何桶(那种值恰恰是最该被算成漂移的)。
+            "bin_edges": [
+                [float("-inf")]
+                + [float(v) for v in _np.quantile(X_train[:, i], _np.linspace(0.1, 0.9, 9))]
+                + [float("inf")]
+                for i in range(X_train.shape[1])
+            ],
+            "mean": [float(v) for v in X_train.mean(axis=0)],
+            "std": [float(v) for v in X_train.std(axis=0)],
+        }
+        mlflow.set_tag("feature_baseline", _json.dumps(baseline, separators=(",", ":")))
+
         # serialization_format="pickle":MLflow 3.x 默认改用 skops(更安全,避免
         # pickle 反序列化风险),但 KServe mlserver runtime 镜像(seldonio/mlserver
         # :1.7.1)自带的 mlflow 客户端版本较老,不认 skops 格式,加载会报

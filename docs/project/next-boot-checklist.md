@@ -233,10 +233,47 @@ kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str
 
 ---
 
-## ~~开机后必验:统一运行时镜像切到 ACR~~ **2026-08-30 已验完**
+## 开机后必验:特征漂移作业(ADR-087,**没上过集群**)
+
+```bash
+# 0. 前置:先重新训一次,模型版本上才会有 feature_baseline tag
+#    (2026-08-30 之前训的版本没有它,漂移作业会明确报"算不了")
+kubectl -n argo-workflows submit --from workflowtemplate/train-demo-model 2>/dev/null \
+  || argo submit -n argo-workflows --from workflowtemplate/train-demo-model
+#    验:MLflow 上那个新版本有 feature_baseline tag
+
+# 1. 造一点线上流量(不然窗口内没有推理请求,作业会正常退出但什么都算不出)
+kubectl -n monitoring create job --from=cronjob/goldenpath-inference drift-traffic
+#    多跑几次;等一个 Flink checkpoint(60s)让它们落进 iceberg.ml.inference_log
+
+# 2. 先 dry-run,看它算出什么
+argo submit -n argo-workflows --from cronwf/feature-drift -p dry_run=1
+#    期望:打印每个模型版本的窗口样本数 + 超阈值的特征
+#    **探针发的是固定向量([0.1]*20),所以 PSI 会非常高** —— 那不是 bug,
+#    是真的漂移(线上分布是一个常数点)。这恰恰验证了空桶那条处理是对的。
+
+# 3. 正式跑一次,确认写进了表
+argo submit -n argo-workflows --from cronwf/feature-drift
+# 用 platform-team 账号查(ml 是敏感 schema):
+#   SELECT model, feature_index, psi, drifted FROM iceberg.ml.feature_drift
+#   ORDER BY psi DESC LIMIT 10
+
+# 4. 验 OPA 那条收窄真的生效:feature_drift_service 不该读得了审计表
+#   用 feature-drift-credentials 里的账号查 iceberg.audit.query_events
+#   期望:PERMISSION_DENIED
+```
+
+---
+
+## ~~开机后必验:统一运行时镜像切到 ACR~~ **2026-08-30 已验完(SHA 已换,见下)**
+
+**2026-08-30 晚补**:切 ACR 那次提交自己动了 `platform_sdk/config.py`
+(只是注释),于是 `check-image-tag-freshness` 把 SHA 推到了 `9aeb810a`。
+**这个新 tag 没验过在不在 ACR 上** —— 开机后第一件事仍然是下面那条
+"只验镜像在不在"。
 
 `environments/<env>/config.yaml` 新增 `platform_job_image`,cloud-full 指向
-`.../platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176`。
+`.../platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298`。
 在这之前 notebook 和定时作业用的是 `local/platform-runtime:0.1.0` ——
 一个**只存在于那台云主机上、靠手工 docker build 出来的**镜像。
 
@@ -255,7 +292,7 @@ ACR 那份;用和 singleuser 相同的镜像/环境/SA 起的 pod 里,
 ```bash
 # 1. 先确认这个 tag 真的存在(别的都不用做,几十秒)
 kubectl -n argo-workflows run pulltest --restart=Never --command \
-  --image=crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176 \
+  --image=crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298 \
   -- sleep 5
 kubectl -n argo-workflows get pod pulltest -w
 # ImagePullBackOff -> CI 没在那个 commit 上构建过 platform-runtime。

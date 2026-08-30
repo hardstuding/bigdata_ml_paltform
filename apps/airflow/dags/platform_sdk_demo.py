@@ -26,7 +26,7 @@ from kubernetes.client import models as k8s
 # 环境变量优先:Airflow worker 上如果注入了 PLATFORM_JOB_IMAGE 就用它。
 PLATFORM_IMAGE = os.environ.get(
     "PLATFORM_JOB_IMAGE",
-    "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176")
+    "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298")
 
 SCRIPT_VOLUME = k8s.V1Volume(
     name="job-script",

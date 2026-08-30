@@ -46,7 +46,7 @@ spec:
         - secretRef:
             name: platform-job-credentials
             optional: true
-        image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176
+        image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298
         imagePullPolicy: IfNotPresent
         resources:
           limits:
@@ -68,6 +68,92 @@ spec:
           - key: daily-order-summary--job.py
             path: job.py
           - key: daily-order-summary--jobkit.py
+            path: jobkit.py
+          name: platform-jobs-scripts
+        name: scripts
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: render-jobs
+    platform-jobs/name: feature-drift
+  name: feature-drift
+  namespace: argo-workflows
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  schedules:
+  - 0 5 * * *
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  timezone: UTC
+  workflowSpec:
+    arguments:
+      parameters:
+      - name: dry_run
+        value: ''
+      - name: model
+        value: ''
+      - name: psi_threshold
+        value: '0.2'
+      - name: window_days
+        value: '7'
+    entrypoint: main
+    serviceAccountName: argo-workflow
+    templates:
+    - container:
+        command:
+        - python3
+        - /scripts/job.py
+        env:
+        - name: MLFLOW_S3_ENDPOINT_URL
+          value: http://minio.minio.svc.cluster.local:9000
+        - name: MLFLOW_TRACKING_URI
+          value: http://mlflow.mlflow.svc.cluster.local:5000
+        - name: PARAM_DRY_RUN
+          value: '{{workflow.parameters.dry_run}}'
+        - name: PARAM_MODEL
+          value: '{{workflow.parameters.model}}'
+        - name: PARAM_PSI_THRESHOLD
+          value: '{{workflow.parameters.psi_threshold}}'
+        - name: PARAM_WINDOW_DAYS
+          value: '{{workflow.parameters.window_days}}'
+        - name: PLATFORM_TRINO_HOST
+          value: trino.trino.svc.cluster.local
+        - name: PLATFORM_TRINO_PORT
+          value: '8443'
+        - name: PYTHONPATH
+          value: /scripts
+        envFrom:
+        - secretRef:
+            name: platform-job-credentials
+            optional: true
+        - secretRef:
+            name: feature-drift-credentials
+            optional: true
+        image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            memory: 1Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - mountPath: /scripts
+          name: scripts
+      metadata:
+        labels:
+          app.kubernetes.io/managed-by: render-jobs
+          kueue.x-k8s.io/queue-name: platform-team
+      name: main
+      volumes:
+      - configMap:
+          items:
+          - key: feature-drift--job.py
+            path: job.py
+          - key: feature-drift--jobkit.py
             path: jobkit.py
           name: platform-jobs-scripts
         name: scripts
@@ -124,7 +210,7 @@ spec:
         - secretRef:
             name: iceberg-maintenance-credentials
             optional: true
-        image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176
+        image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298
         imagePullPolicy: IfNotPresent
         resources:
           limits:

@@ -125,7 +125,7 @@
 | 训练执行 | ✅ | 集成验证 | 2026-08-21 | `ml-pipeline` WorkflowTemplate,三步按依赖顺序执行 |
 | 实验跟踪 / 模型注册 | ✅ | 集成验证 | 2026-08-27 | MLflow。**这一格被探针证伪过一次**,见下面那节 |
 | 模型部署 | ✅ | demo | 2026-08-20 | KServe V2 协议推理([ADR-027](../decisions/027-kserve-model-serving.md)) |
-| 推理可观测 | ✅ | 集成验证 | 2026-08-30 | `platform-inference` 看板 6 panel,真集群出数(P95 9.7ms)。**推理留痕 2026-08-30 端到端验过**([ADR-085](../decisions/085-inference-payload-logging.md)):发一次真实推理 → 接收端 202 → `iceberg.ml.inference_log` 里 request/response 成对落库、`inference_service = demo-rf-classifier`、非 platform-team 账号 `PERMISSION_DENIED`。**特征漂移分析本身还没做**,但它的数据前提有了 |
+| 推理可观测 | ✅ | 集成验证 | 2026-08-30 | `platform-inference` 看板 6 panel,真集群出数(P95 9.7ms)。**推理留痕 2026-08-30 端到端验过**([ADR-085](../decisions/085-inference-payload-logging.md)):发一次真实推理 → 接收端 202 → `iceberg.ml.inference_log` 里 request/response 成对落库、`inference_service = demo-rf-classifier`、非 platform-team 账号 `PERMISSION_DENIED`。**特征漂移 2026-08-30 已实现**([ADR-087](../decisions/087-feature-drift-monitoring.md)):训练时把特征基线(分位数边界+均值方差)写进 MLflow tag,`jobs/feature-drift` 按 PSI 比线上分布和训练分布,结果落 `ml.feature_drift`。**没上过集群**,验证步骤在 next-boot-checklist |
 | 模型审批 / 回滚 | ✅ | 集成验证 | 2026-08-28 | [ADR-080](../decisions/080-model-approval-and-rollback.md)。关键守卫验过:存在更新的未批准 v2 时,部署仍只用已批准的 v1 |
 | 模型灰度 / A-B | ❌ | 计划中 | — | **实测确认这套架构不支持**:RawDeployment 模式下 `canaryTrafficPercent` 会被收下但完全不生效,`scripts/11` 现在显式拒绝它 —— 留一个不生效的参数比没有更糟 |
 

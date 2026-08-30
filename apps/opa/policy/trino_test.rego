@@ -400,3 +400,56 @@ test_other_user_still_denied_on_audit_event_ts if {
 		}}},
 	}
 }
+
+# ---- 特征漂移作业对 ml schema 的专用口子(2026-08-30,ADR-087) ----
+
+test_feature_drift_service_allowed_on_ml if {
+	trino.allow with input as {
+		"context": {"identity": {"user": "feature_drift_service", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "ml", "tableName": "inference_log", "columns": ["payload"],
+		}}},
+	}
+}
+
+# **这条是这个口子最关键的收窄**:漂移作业没有任何理由读查询审计。
+# 上面两个服务账号(openmetadata / iceberg_maintenance)是 audit + ml 都放行的,
+# 这个刻意只放行 ml —— 如果哪天有人图省事把它并进那两条规则,这条会红。
+test_feature_drift_service_denied_on_audit if {
+	not trino.allow with input as {
+		"context": {"identity": {"user": "feature_drift_service", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "audit", "tableName": "query_events", "columns": ["query_text"],
+		}}},
+	}
+}
+
+# 别的服务账号不能借这条规则读 ml。
+test_other_service_accounts_still_denied_on_ml_schema if {
+	not trino.allow with input as {
+		"context": {"identity": {"user": "platform_sdk_demo_service", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "ml", "tableName": "inference_log", "columns": ["payload"],
+		}}},
+	}
+}
+
+# 普通用户更不行。
+test_normal_user_denied_on_ml_schema if {
+	not trino.allow with input as {
+		"context": {"identity": {"user": "analyst001", "groups": ["analysts"]}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "ml", "tableName": "inference_log", "columns": ["payload"],
+		}}},
+	}
+}
+
+# 它在普通 schema 上是服务账号的常规行为(建结果表、读 demo 数据都要能做)。
+test_feature_drift_service_normal_on_demo if {
+	trino.allow with input as {
+		"context": {"identity": {"user": "feature_drift_service", "groups": []}},
+		"action": {"operation": "SelectFromColumns", "resource": {"table": {
+			"schemaName": "demo", "tableName": "orders", "columns": ["amount"],
+		}}},
+	}
+}

@@ -1,0 +1,42 @@
+# 特征漂移监控(ADR-087)。
+#
+# **这是 C 线(完整 MLOps)最后缺的一块。** roadmap 里那句判断
+# ——"有了 iceberg.ml.inference_log 之后,漂移就是「对同一个字段比较线上
+# 分布和训练集分布」,那是 jobs/ 里写一个作业的事,不是一个新组件"——
+# 这个作业就是它的落地。
+#
+# 它依赖两件 2026-08-30 才验通的事:推理留痕(ADR-085,提供线上分布)、
+# 训练时记录特征基线(scripts/train_demo_model.py 的 feature_baseline
+# tag,提供训练分布)。
+name: feature-drift
+script: job.py
+# 每天 05:00 UTC:在 iceberg-maintenance(03:00)和 iceberg-backup(04:00)
+# 之后,读到的是刚合并过小文件的表。
+schedule: "0 5 * * *"
+timezone: UTC
+cpu: "500m"
+memory: "1Gi"
+owner_group: platform-team
+# **自己的 Trino 身份。** 这个作业要读 `ml.inference_log` —— 推理留痕里
+# 是原始的模型输入,很可能包含个人数据,和审计表同属 OPA 的敏感 schema。
+# 不能复用共用的 notebook_service:给那个账号开口子等于"任何能提交作业的
+# 人都能读全部推理输入"。理由和 iceberg-maintenance 那个账号完全一样。
+credentials_secret: feature-drift-credentials
+requires:
+  - trino
+  - mlflow-skinny
+  - pandas
+params:
+  # 看最近多少天的推理请求。默认 7 天:太短的话样本不够(PSI 在小样本上
+  # 噪声很大),太长的话真的发生漂移时会被历史数据稀释、发现得晚。
+  window_days: "7"
+  # PSI 超过多少算"有漂移"。0.2 是业界常用的分界(0.1 以下基本没变化,
+  # 0.1~0.2 轻微,0.2 以上需要关注)。**这不是一个有理论依据的阈值**,
+  # 是经验值 —— 真实模型上线后应该按它自己的历史 PSI 分布重新校准。
+  psi_threshold: "0.2"
+  # 只看这个模型。留空 = 看 inference_log 里出现过的全部模型。
+  model: ""
+  # 只打印不写表(第一次上线时看看它算出来什么)
+  dry_run: ""
+environments:
+  - cloud-full

@@ -108,8 +108,15 @@ def main():
     # `environments/<env>/config.yaml` 的 `platform_job_image`。
     # local-lite 那档是本地构建的、没有 commit SHA,跳过。
     import yaml as _yaml
+    #
+    # **只看真正影响镜像行为的路径。** Dockerfile 是 `COPY platform-sdk/`
+    # 整个目录,所以严格说改 README 也会让镜像字节变化 —— 但那不改变任何
+    # 行为,而一个会因为改文档而变红的检查,只会训练出"看到红就忽略"。
+    # 和上面四个应用同一个取舍(那边看的是 src/requirements/Dockerfile,
+    # 不是整个应用目录)。
     runtime_sources = [REPO_ROOT / "apps" / "platform-image",
-                       REPO_ROOT / "platform-sdk"]
+                       REPO_ROOT / "platform-sdk" / "platform_sdk",
+                       REPO_ROOT / "platform-sdk" / "pyproject.toml"]
     runtime_latest = last_commit(runtime_sources)
     if runtime_latest and runtime_latest != head_commit:
         for env in ("cloud-full", "prod"):

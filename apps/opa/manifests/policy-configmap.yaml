@@ -72,7 +72,7 @@ data:
     #     (`default allow := false`),作业报"一张表都没处理到"。
     #     这两处**都要加**:这个集合决定"它算不算服务账号",下面那条例外
     #     决定"服务账号里谁能碰敏感 schema"。
-    service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service", "platform_sdk_demo_service", "openmetadata_service", "iceberg_maintenance_service"}
+    service_accounts := {"table_registration_service", "superset_service", "dbt_demo_service", "platform_sdk_demo_service", "openmetadata_service", "iceberg_maintenance_service", "feature_drift_service"}
 
     is_service_account if {
     	input.context.identity.user in service_accounts
@@ -207,6 +207,40 @@ data:
     	every c in input.action.resource.table.columns {
     		c == "event_ts"
     	}
+    }
+
+    # 特征漂移作业(jobs/feature-drift,ADR-087)要读 `ml.inference_log`,并往
+    # `ml.feature_drift` 写结果。
+    #
+    # **这个口子比上面两个都危险,必须说清楚。** openmetadata_service 采的是
+    # 元数据(看不到任何一行),iceberg_maintenance_service 执行的是
+    # `ALTER TABLE ... EXECUTE`(不返回数据行)。而这个账号是**真的要把推理
+    # 输入一行一行读出来**才能算分布 —— 那里面是模型的原始输入,很可能包含
+    # 个人数据。
+    #
+    # 为什么仍然值得开:
+    #
+    # - 漂移监控**在数据上就是做不到"不看数据"**。它要的就是分布本身。
+    #   替代方案(在推理链路上实时算统计量、只落聚合值)是另一套架构,代价
+    #   高得多,而且会把统计口径钉死在写入时 —— 想换一个分箱方式就得重放。
+    # - 挡住它的后果不是"更安全",是**模型静默失效没人知道**:输入分布慢慢
+    #   变了,服务照样 200、延迟正常、Pod 健康,只有比分布才看得见。
+    #
+    # 三条收窄,让"值得"成立:
+    #
+    # 1. **只放行 `ml`,不放行 `audit`。** 它没有任何理由读查询审计。
+    # 2. **专用账号,不复用共用的 notebook_service** —— 那个账号是所有
+    #    notebook 和作业共用的,给它开口子等于"任何能提交作业的人都能读全部
+    #    推理输入"。
+    # 3. 结果表 `ml.feature_drift` 建在同一个敏感 schema 里(见作业里的注释):
+    #    虽然是聚合值,仍然是从个人数据推出来的,不该因为"只是统计量"就漏出去。
+    #
+    # **如果哪天这个账号被拿去跑别的东西,这条必须重新审。**
+    allow if {
+    	is_service_account
+    	is_audit_data(input)
+    	input.context.identity.user == "feature_drift_service"
+    	input.action.resource.table.schemaName == "ml"
     }
 
     # ---- 审计表:只有平台管理组能读 ----
