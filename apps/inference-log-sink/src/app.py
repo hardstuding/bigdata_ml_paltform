@@ -20,7 +20,7 @@ import sys
 from flask import Flask, request
 
 KAFKA_BOOTSTRAP = os.environ.get(
-    "KAFKA_BOOTSTRAP_SERVERS", "kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092")
+    "KAFKA_BOOTSTRAP_SERVERS", "platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092")
 KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "inference-log")
 
 app = Flask(__name__)

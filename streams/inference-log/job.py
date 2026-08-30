@@ -17,7 +17,7 @@ import os
 from pyflink.table import EnvironmentSettings, TableEnvironment
 
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
-    "KAFKA_BOOTSTRAP_SERVERS", "kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092")
+    "KAFKA_BOOTSTRAP_SERVERS", "platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092")
 KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "inference-log")
 WAREHOUSE = os.environ.get("ICEBERG_WAREHOUSE", "s3a://lakehouse/")
 HMS_URI = os.environ.get("HIVE_METASTORE_URI", "thrift://hive-metastore.data.svc.cluster.local:9083")

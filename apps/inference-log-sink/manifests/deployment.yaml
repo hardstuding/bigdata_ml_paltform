@@ -34,7 +34,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092
+              value: platform-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
             - name: KAFKA_TOPIC
               value: inference-log
           ports:
