@@ -164,6 +164,17 @@ def render_text(text: str, config: dict) -> str:
         .replace("{{HTTP_PORT_SUFFIX}}", config["http_port_suffix"])
         .replace("{{HTTPS_PORT_SUFFIX}}", config["https_port_suffix"])
         .replace("{{EXTERNAL_SCHEME}}", config["external_scheme"])
+        # 统一运行时镜像(notebook / 定时作业 / platform-submit 共用一份)。
+        # local-lite 是本地构建的 local/platform-runtime:0.1.0,
+        # cloud-full/prod 是 ACR 上带 commit SHA 的那份。
+        .replace("{{PLATFORM_JOB_IMAGE}}", config["platform_job_image"])
+        # JupyterHub 的 chart 要 name / tag 分开两个字段,所以额外给两个
+        # 拆好的占位符。**按最后一个冒号拆** —— ACR 的地址里含端口的话
+        # (`host:5000/ns/img:tag`)按第一个冒号拆会拆错。
+        .replace("{{PLATFORM_JOB_IMAGE_NAME}}",
+                 config["platform_job_image"].rsplit(":", 1)[0])
+        .replace("{{PLATFORM_JOB_IMAGE_TAG}}",
+                 config["platform_job_image"].rsplit(":", 1)[1])
     )
 
     # TLS/ACME 相关的占位符只有走 ACME 那一档的环境才用得上,所以**不放进
@@ -391,7 +402,8 @@ def main():
     # 服务 cloud-full 的工作区,这等于悄悄把部署配置改脏了。
     # 校验前置之后,配置不完整就在写任何文件之前直接退出。
     missing = [k for k in ("domain_suffix", "http_port_suffix", "https_port_suffix",
-                           "external_scheme", "tls_issuer_mode") if k not in config]
+                           "external_scheme", "tls_issuer_mode",
+                           "platform_job_image") if k not in config]
     if missing:
         print(f"!! environments/{env}/config.yaml 缺这些必填项: {missing}", file=sys.stderr)
         sys.exit(1)

@@ -75,6 +75,24 @@ backup_s3_secret: postgres-backup-target
 # 生产硬件上不改,等于用一台笔记本的配置跑生产。这一层是
 # `docs/project/roadmap.md` 1.1 明确押后的后半段,没做完之前 prod 只能算
 # "配置结构完整",不能算"可用"。
+# ---------------------------------------------------------------- 统一运行时镜像
+#
+# notebook(JupyterHub singleuser)、定时作业(Argo CronWorkflow)、
+# `platform-submit` 提交的作业,用的是**同一个镜像** —— "交互开发和调度
+# 执行环境一致"这条能力就靠它成立(ADR-058)。
+#
+# **2026-08-30 之前这个值硬编码在 6 个地方**(render-jobs.py 的默认值、
+# platform_sdk/config.py 的默认值、JupyterHub 组件、Airflow 的 DAG、
+# 以及两处文档/示例),而且指向 `local/platform-runtime:0.1.0` —— 一个
+# **只存在于当时那台机器上、靠手工 docker build 出来的**镜像,没有任何
+# 地方记录它是从哪个 commit 来的。换台机器/重装一次就没了。
+#
+# 现在它是一个配置项,`scripts/check-platform-image-refs.py` 保证那 6 处
+# 和这里一致(CI 里跑)。
+# 和 cloud-full 用同一个 tag:同一份构建产物一路走到生产,不重新构建 ——
+# "测试环境验过的和生产跑的是同一个东西"这条要成立就不能各建各的。
+platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176
+
 enabled_components:
   - airflow-db-init.yaml
   - airflow.yaml

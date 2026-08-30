@@ -46,7 +46,7 @@ spec:
         - secretRef:
             name: platform-job-credentials
             optional: true
-        image: local/platform-runtime:0.1.0
+        image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176
         imagePullPolicy: IfNotPresent
         resources:
           limits:
@@ -124,7 +124,7 @@ spec:
         - secretRef:
             name: iceberg-maintenance-credentials
             optional: true
-        image: local/platform-runtime:0.1.0
+        image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176
         imagePullPolicy: IfNotPresent
         resources:
           limits:

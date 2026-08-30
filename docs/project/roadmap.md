@@ -29,18 +29,35 @@
 runner 在境外)。`platform-sdk/**` 也进了触发路径 —— SDK 改了镜像就该重建,
 不然 notebook 和定时作业用的还是老 SDK,**而且不会有任何提示**。
 
-**还没做,而且刻意不在同一轮做**:把各处对 `local/platform-runtime:0.1.0`
-的引用切到 ACR 上带 commit SHA 的那份。原因是顺序不能颠倒 ——
+**2026-08-30 做完了第 2 步(切引用),第 3 步(集群验证)待下次开机。**
 
-1. 先让 CI 真的构建成功一次,拿到一个**确实存在**的 SHA 标签;
-2. 再把这几处切过去:`scripts/render-jobs.py` 的默认 image、
-   `platform_sdk/config.py` 的 `PLATFORM_JOB_IMAGE` 默认值、JupyterHub 的
-   singleuser 镜像;
-3. 然后在集群上验一次 notebook 和一个定时作业真的能起来。
+原计划的三步:
 
-同一轮做完的话,一旦 CI 构建失败或者镜像名拼错,**集群上所有 notebook 和
-定时作业会同时 ImagePullBackOff**,而这是没法在本地验证的。这个仓库已经
-因为"一次改太多、失败了分不清是哪一步"吃过亏。
+1. ~~先让 CI 真的构建成功一次,拿到一个**确实存在**的 SHA 标签~~ 已完成
+2. ~~再把这几处切过去~~ **已完成,而且做法比原计划更进一步** —— 不是"把
+   六个写死的字符串各自改成新值",那样只是把一个过期的硬编码换成另一个。
+   现在它是 `environments/<env>/config.yaml` 里的 **`platform_job_image`
+   一个配置项**:
+   - local-lite:`local/platform-runtime:0.1.0`(本地构建,这台机器上
+     没有 ACR 凭据,而且本地开发该能改完立刻用)
+   - cloud-full / prod:ACR 上带 commit SHA 的那份,**两档用同一个 tag**
+     (同一份构建产物一路走到生产,不各建各的)
+
+   能渲染的都改成渲染了(JupyterHub 组件、Argo CronWorkflow、
+   singleuser 的 `PLATFORM_JOB_IMAGE` 环境变量);渲染不了的两处
+   (`platform_sdk/config.py` 的兜底默认值、Airflow 的 DAG)由
+   `scripts/check-platform-image-refs.py` 盯着,进 CI。文档和示例里原来
+   写死的那两处**直接删掉了值** —— 镜像按环境不同,文档里名指哪一档都会
+   误导另一档的读者(CLAUDE.md「能删掉重复的就删掉」)。
+
+   `check-image-tag-freshness.py` 也一并覆盖了它:改了
+   `apps/platform-image/` 或 `platform-sdk/` 却没换 SHA,CI 会红。
+3. **还没做**:在集群上验一次 notebook 和一个定时作业真的能起来。
+   见 `docs/project/next-boot-checklist.md`。
+
+**为什么第 3 步必须单独做**:一旦 ACR 上那个 tag 不存在或者名字拼错,
+**集群上所有 notebook 和定时作业会同时 ImagePullBackOff**,而这是没法在
+本地验证的。
 
 ---
 

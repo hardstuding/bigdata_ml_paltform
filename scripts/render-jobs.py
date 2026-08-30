@@ -278,7 +278,26 @@ def _script_items(j: dict) -> list[dict]:
     return [{"key": f"{j['name']}--{f}", "path": f} for f in j["_files"]]
 
 
-def render_cronworkflow(j: dict) -> dict:
+def platform_job_image(env_name: str) -> str:
+    """这个环境的统一运行时镜像。
+
+    **不写死。** 2026-08-30 之前这个值硬编码成 `local/platform-runtime:0.1.0`
+    —— 一个只存在于当时那台机器上、靠手工 `docker build` 出来的镜像,没有
+    任何地方记录它是从哪个 commit 来的。现在它是
+    `environments/<env>/config.yaml` 里的 `platform_job_image`,
+    cloud-full/prod 指向 ACR 上带 commit SHA 的那份。
+    """
+    cfg = yaml.safe_load(
+        (REPO / "environments" / env_name / "config.yaml").read_text(encoding="utf-8"))
+    img = (cfg or {}).get("platform_job_image")
+    if not img:
+        print(f"!! environments/{env_name}/config.yaml 里没有 platform_job_image",
+              file=sys.stderr)
+        sys.exit(1)
+    return img
+
+
+def render_cronworkflow(j: dict, default_image: str) -> dict:
     name, script = j["name"], j["script"]
     env = {
         # 和 platform_sdk.submit 用的是同一套集群内地址,作业不用自己填连接串。
@@ -345,7 +364,7 @@ def render_cronworkflow(j: dict) -> dict:
                     "name": "main",
                     "metadata": {"labels": pod_labels},
                     "container": {
-                        "image": j.get("image", "local/platform-runtime:0.1.0"),
+                        "image": j.get("image", default_image),
                         "imagePullPolicy": "IfNotPresent",
                         "command": ["python3", f"/scripts/{script}"],
                         "env": [{"name": k, "value": v} for k, v in sorted(env.items())],
@@ -398,7 +417,9 @@ def main() -> None:
     scheduled = [j for j in jobs if j.get("schedule")]
     files = {"scripts-configmap.yaml": render_configmap(jobs)}
     if scheduled:
-        docs = [yaml.safe_dump(render_cronworkflow(j), allow_unicode=True, sort_keys=True)
+        default_image = platform_job_image(env_name)
+        docs = [yaml.safe_dump(render_cronworkflow(j, default_image),
+                               allow_unicode=True, sort_keys=True)
                 for j in scheduled]
         files["cronworkflows.yaml"] = GENERATED_HEADER + "---\n".join(docs)
 

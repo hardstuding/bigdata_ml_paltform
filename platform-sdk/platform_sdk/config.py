@@ -149,6 +149,13 @@ def default_job_image() -> str:
     默认值必须指向这个平台的统一镜像(apps/platform-image/)——"交互开发
     和调度执行环境一致"这条要成立,默认值就不能指向某个通用 python 基础
     镜像,否则用户很容易在不知情的情况下跑在一个缺依赖的环境里。
+
+    **正常情况下轮不到这个写死的兜底值**:JupyterHub 的 singleuser pod 和
+    Argo 作业都会带上 `PLATFORM_JOB_IMAGE` 环境变量,值从
+    `environments/<env>/config.yaml` 的 `platform_job_image` 渲染而来。
+    这里保留一个兜底,是为了在本机直接 `import platform_sdk` 试用时不至于
+    炸掉 —— 所以它刻意用 local-lite 那一档的值。
+    `scripts/check-platform-image-refs.py` 保证它和 local-lite 的配置一致。
     """
     return _get("PLATFORM_JOB_IMAGE", "local/platform-runtime:0.1.0")
 

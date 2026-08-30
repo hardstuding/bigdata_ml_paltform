@@ -12,6 +12,11 @@ from pathlib import Path
 
 import pytest
 
+# 测试里用一个**明显不是真实值**的镜像名:真实值来自
+# environments/<env>/config.yaml,写死在测试里的话,配置改了测试照样绿,
+# 就失去了意义。真实值那条由 TestPlatformJobImage 单独盯。
+TEST_IMAGE = "test-registry.invalid/platform-runtime:testtag"
+
 REPO = Path(__file__).resolve().parent.parent
 
 
@@ -200,7 +205,7 @@ class TestMultiFile:
             schedule: "0 1 * * *"
         """, files=("job.py", "jobkit.py"))
         jobs, _ = rj.load_jobs(GROUPS)
-        cw = rj.render_cronworkflow(jobs[0])
+        cw = rj.render_cronworkflow(jobs[0], TEST_IMAGE)
         c = cw["spec"]["workflowSpec"]["templates"][0]["container"]
         assert c["command"] == ["python3", "/scripts/job.py"]
         assert {"name": "PYTHONPATH", "value": "/scripts"} in c["env"]
@@ -226,7 +231,7 @@ class TestParams:
               region: east
         """)
         jobs, _ = rj.load_jobs(GROUPS)
-        cw = rj.render_cronworkflow(jobs[0])
+        cw = rj.render_cronworkflow(jobs[0], TEST_IMAGE)
         names = {p["name"] for p in cw["spec"]["workflowSpec"]["arguments"]["parameters"]}
         assert names == {"run_date", "region"}
         env = {e["name"]: e["value"]
@@ -241,7 +246,7 @@ class TestParams:
             schedule: "0 1 * * *"
         """)
         jobs, _ = rj.load_jobs(GROUPS)
-        assert "arguments" not in rj.render_cronworkflow(jobs[0])["spec"]["workflowSpec"]
+        assert "arguments" not in rj.render_cronworkflow(jobs[0], TEST_IMAGE)["spec"]["workflowSpec"]
 
     def test_参数名不合法被挡住(self, workspace):
         _job(workspace, "a", """
@@ -305,7 +310,7 @@ class TestCredentialsSecret:
     def test_不写就只挂共用凭据(self, workspace):
         _job(workspace, "a", "name: a\nscript: job.py\nschedule: \"0 1 * * *\"\n")
         jobs, _ = rj.load_jobs(GROUPS)
-        ef = rj.render_cronworkflow(jobs[0])["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
+        ef = rj.render_cronworkflow(jobs[0], TEST_IMAGE)["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
         assert [e["secretRef"]["name"] for e in ef] == ["platform-job-credentials"]
 
     def test_写了就追加在后面(self, workspace):
@@ -318,7 +323,7 @@ class TestCredentialsSecret:
             credentials_secret: my-own-credentials
         """)
         jobs, _ = rj.load_jobs(GROUPS)
-        ef = rj.render_cronworkflow(jobs[0])["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
+        ef = rj.render_cronworkflow(jobs[0], TEST_IMAGE)["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
         assert [e["secretRef"]["name"] for e in ef] == [
             "platform-job-credentials", "my-own-credentials"]
 
@@ -332,5 +337,40 @@ class TestCredentialsSecret:
             credentials_secret: my-own-credentials
         """)
         jobs, _ = rj.load_jobs(GROUPS)
-        ef = rj.render_cronworkflow(jobs[0])["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
+        ef = rj.render_cronworkflow(jobs[0], TEST_IMAGE)["spec"]["workflowSpec"]["templates"][0]["container"]["envFrom"]
         assert all(e["secretRef"]["optional"] for e in ef)
+
+
+class TestPlatformJobImage:
+    """统一运行时镜像来自环境配置,不是写死的。
+
+    2026-08-30 之前它硬编码成 `local/platform-runtime:0.1.0` —— 一个只
+    存在于当时那台机器上、靠手工 docker build 出来的镜像。换台机器就没了,
+    而且没有任何地方记录它是从哪个 commit 构建的。
+    """
+
+    def test_三个环境都配了这个键(self):
+        for env in sorted(rj.ENVIRONMENTS):
+            img = rj.platform_job_image(env)
+            assert img, f"{env} 没有 platform_job_image"
+            assert ":" in img, f"{env} 的镜像没带 tag:{img}"
+
+    def test_云端两档指向_ACR_且_tag_是_commit_SHA(self):
+        import re as _re
+        for env in ("cloud-full", "prod"):
+            img = rj.platform_job_image(env)
+            assert "aliyuncs.com" in img, f"{env} 应该指向 ACR,实际是 {img}"
+            tag = img.rsplit(":", 1)[1]
+            assert _re.fullmatch(r"[0-9a-f]{40}", tag), (
+                f"{env} 的 tag 应该是 40 位 commit SHA,实际是 {tag} —— "
+                "浮动 tag 会让'集群上跑的是哪个 commit'不可追溯")
+
+    def test_本地那档仍然用本地构建的镜像(self):
+        # local-lite 上没有 ACR 拉取凭据,而且本地开发该能改完立刻用。
+        assert rj.platform_job_image("local-lite") == "local/platform-runtime:0.1.0"
+
+    def test_作业自己写了_image_就用它自己的(self):
+        jobs, _ = rj.load_jobs(set())
+        j = dict(jobs[0]); j["image"] = "my/own:1"
+        cw = rj.render_cronworkflow(j, TEST_IMAGE)
+        assert cw["spec"]["workflowSpec"]["templates"][0]["container"]["image"] == "my/own:1"

@@ -120,6 +120,12 @@ jobs:
       - name: 镜像 tag 不落后于源码
         run: python3 scripts/check-image-tag-freshness.py
 
+      # notebook / 定时作业 / platform-submit 必须用同一个运行时镜像
+      # (ADR-058)。能渲染的都渲染了,剩下两处渲染不了的(SDK 的兜底默认值、
+      # Airflow 的 DAG)靠这个检查和 environments/<env>/config.yaml 对齐。
+      - name: 统一运行时镜像引用一致
+        run: python3 scripts/check-platform-image-refs.py
+
       # 同一份源码被复制进多个应用的那几份副本(现在是 shared/flask_identity.py
       # → 三个 Flask 应用的 src/identity.py)。和 check-embedded-scripts 是
       # 不同场景:那个管 ConfigMap 里的副本,这个管应用 src/ 里的副本。

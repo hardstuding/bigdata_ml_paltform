@@ -124,7 +124,7 @@ spec:
           # 并写回这里(CI 用 --check 校验不漂移)。DAG 一改,哈希就变,
           # pod 模板就变,ArgoCD 自动滚更——不依赖任何人记得去重启。
           podAnnotations:
-            platform/dags-checksum: "757026e0a500d25e"
+            platform/dags-checksum: "6cfb574f11a5d981"
           # 规格分档,见 environments/resource-profiles.yaml
           replicas: 1
           resources:
@@ -178,7 +178,7 @@ spec:
           # 并写回这里(CI 用 --check 校验不漂移)。DAG 一改,哈希就变,
           # pod 模板就变,ArgoCD 自动滚更——不依赖任何人记得去重启。
           podAnnotations:
-            platform/dags-checksum: "757026e0a500d25e"
+            platform/dags-checksum: "6cfb574f11a5d981"
           # 规格分档,见 environments/resource-profiles.yaml
           replicas: 1
           resources:
@@ -230,7 +230,7 @@ spec:
           # 并写回这里(CI 用 --check 校验不漂移)。DAG 一改,哈希就变,
           # pod 模板就变,ArgoCD 自动滚更——不依赖任何人记得去重启。
           podAnnotations:
-            platform/dags-checksum: "757026e0a500d25e"
+            platform/dags-checksum: "6cfb574f11a5d981"
           # 规格分档,见 environments/resource-profiles.yaml
           replicas: 1
           resources:
@@ -310,7 +310,7 @@ spec:
           # 并写回这里(CI 用 --check 校验不漂移)。DAG 一改,哈希就变,
           # pod 模板就变,ArgoCD 自动滚更——不依赖任何人记得去重启。
           podAnnotations:
-            platform/dags-checksum: "757026e0a500d25e"
+            platform/dags-checksum: "6cfb574f11a5d981"
           kubernetes:
             # 2026-08-13 补上:这是 KubernetesExecutor 每个任务起 pod 用的
             # 默认模板,没配置的话是 BestEffort QoS——排查

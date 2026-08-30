@@ -3,4 +3,7 @@
 name: hello-job
 script: job.py
 # image、cpu、memory、env、namespace、service_account 都不填,用 SDK 默认值
-# (统一镜像 local/platform-runtime:0.1.0、200m/512Mi、argo-workflows 命名空间)。
+# (平台统一镜像、200m/512Mi、argo-workflows 命名空间)。
+# **统一镜像的具体名字这里刻意不写** —— 它按环境不同(本地开发是本地构建
+# 的那份,云端是 ACR 上带 commit SHA 的那份),写在这里就会过期。真实值在
+# environments/<env>/config.yaml 的 platform_job_image。

@@ -233,6 +233,49 @@ kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str
 
 ---
 
+## 开机后必验:统一运行时镜像切到 ACR(2026-08-30 改的,**没上过集群**)
+
+`environments/<env>/config.yaml` 新增 `platform_job_image`,cloud-full 指向
+`.../platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176`。
+在这之前 notebook 和定时作业用的是 `local/platform-runtime:0.1.0` ——
+一个**只存在于那台云主机上、靠手工 docker build 出来的**镜像。
+
+**风险点很集中**:那个 tag 如果 ACR 上不存在(或者名字拼错),
+**集群上所有 notebook 和定时作业会同时 ImagePullBackOff**。所以第一步
+先只验镜像在不在,再往下走。
+
+```bash
+# 1. 先确认这个 tag 真的存在(别的都不用做,几十秒)
+kubectl -n argo-workflows run pulltest --restart=Never --command \
+  --image=crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176 \
+  -- sleep 5
+kubectl -n argo-workflows get pod pulltest -w
+# ImagePullBackOff -> CI 没在那个 commit 上构建过 platform-runtime。
+#   换成一个更近的、确实构建过的 commit SHA(工作流是全矩阵构建,
+#   任何一次触发都会连它一起建),改 environments/{cloud-full,prod}/config.yaml
+#   然后 render-environment-config + render-jobs 重新生成。
+kubectl -n argo-workflows delete pod pulltest
+
+# 2. 拉取凭据。scripts/45 是从仓库内容推导命名空间的,argo-workflows 和
+#    jupyterhub 都在推导结果里,但它把 secret 挂到**当时存在的**每个
+#    ServiceAccount 上 —— 新建的 SA 不会自动带上,所以重跑一次。
+./scripts/45-configure-acr-pull.sh
+
+# 3. 定时作业:手动触发一个,确认能拉起来并跑完
+kubectl -n argo-workflows create job --from=cronjob/... 2>/dev/null || \
+  kubectl -n argo-workflows get cronworkflows
+#   (CronWorkflow 不能用 create job --from;克隆一份、把 schedules 改成
+#    两分钟后,做法见本文件「定时路径」那条)
+
+# 4. notebook:JupyterHub 起一个 singleuser,确认用的是新镜像
+kubectl -n jupyterhub get pods -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[0].image}{"\n"}{end}'
+#   进 notebook 跑一次 platform_sdk.query("select 1"),再 submit_job() 一个
+#   最小作业 —— 验的是"交互开发和调度执行环境一致"(ADR-058)这条能力
+#   本身,不是镜像能不能拉。
+```
+
+---
+
 ## 开机后先做:清掉 2026-08-30 验证留下的一个临时凭据
 
 验组权限审批按钮时,给 Keycloak `platform` 域的 `admin` 设了一个临时密码

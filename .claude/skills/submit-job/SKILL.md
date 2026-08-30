@@ -36,7 +36,9 @@ differences are pushed into environment variables, never into the code.
 ```yaml
 name: my-job          # required — must be a valid Kubernetes name (lowercase, digits, hyphens)
 script: job.py         # required — path relative to this job.yaml
-# image: local/platform-runtime:0.1.0   # optional, this is already the default
+# image: <your-own-image>   # optional; the platform runtime image is the default
+#   (its exact name differs per environment — see platform_job_image in
+#    environments/<env>/config.yaml; do not hardcode it here)
 # cpu: 200m
 # memory: 512Mi
 # env:

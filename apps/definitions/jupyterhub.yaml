@@ -145,9 +145,17 @@ spec:
           # 本地构建镜像,pullPolicy 必须是 IfNotPresent(和这个项目其它
           # 自建镜像同一个坑:kubelet 会尝试联网拉一个不存在的远程镜像,
           # 直接 ErrImagePull)。
+          # **镜像名和 tag 从环境配置来**(`platform_job_image`),不再硬编码
+          # —— notebook 和定时作业必须是同一个镜像,而"同一个"这件事以前
+          # 靠六个地方各自写对同一个字符串来保证。
+          #
+          # pullPolicy 保持 IfNotPresent:local-lite 那档是本地构建的镜像,
+          # 远端根本不存在这个 tag,用 Always 会直接 ErrImagePull;
+          # cloud-full/prod 那档 tag 是 commit SHA、不可变,IfNotPresent
+          # 也不会拿到过期的东西。
           image:
-            name: local/platform-runtime
-            tag: "0.1.0"
+            name: "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime"
+            tag: "49d1d1cd0392a161a22a9184659ebdba1159c176"
             pullPolicy: IfNotPresent
           # 2026-08-19 真实踩坑(镜像/RBAC 都配好之后,platform_sdk.query()
           # 报 ConnectionRefused,一开始怀疑是 Trino/MLflow 本身没起来,
@@ -240,6 +248,13 @@ spec:
               value: trino.trino.svc.cluster.local
             - name: PLATFORM_TRINO_PORT
               value: "8443"
+            # notebook 里 `platform_sdk.submit_job()` 不指定镜像时用哪个。
+            # **必须和 notebook 自己跑的镜像是同一个** —— "交互开发和调度
+            # 执行环境一致"(ADR-058)靠的就是这一条。以前它靠
+            # platform_sdk/config.py 里的默认值兜着,而那个默认值和这里的
+            # singleuser 镜像是两个独立写死的字符串,谁也不保证一致。
+            - name: PLATFORM_JOB_IMAGE
+              value: "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176"
           memory:
             # 这两个字段最终传进 KubeSpawner 自己的 mem_guarantee/mem_limit
             # traitlet(ByteSpecification),只认 K/M/G/T(十进制)后缀,不认

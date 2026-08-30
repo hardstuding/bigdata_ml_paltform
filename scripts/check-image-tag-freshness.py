@@ -102,6 +102,38 @@ def main():
                 f"    -> 集群上跑的是旧代码。等 CI 构建完 {latest[:8]},把\n"
                 f"       {manifest.relative_to(REPO_ROOT)} 里的 tag 改成 {latest}")
 
+    # ---- 统一运行时镜像:pin 不在 deployment.yaml 里,而在环境配置里 ----
+    #
+    # 它和上面四个是同一个失败模式,只是 pin 的位置不同:
+    # `environments/<env>/config.yaml` 的 `platform_job_image`。
+    # local-lite 那档是本地构建的、没有 commit SHA,跳过。
+    import yaml as _yaml
+    runtime_sources = [REPO_ROOT / "apps" / "platform-image",
+                       REPO_ROOT / "platform-sdk"]
+    runtime_latest = last_commit(runtime_sources)
+    if runtime_latest and runtime_latest != head_commit:
+        for env in ("cloud-full", "prod"):
+            cfg_path = REPO_ROOT / "environments" / env / "config.yaml"
+            if not cfg_path.exists():
+                continue
+            cfg = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            img = cfg.get("platform_job_image", "")
+            tag = img.rsplit(":", 1)[-1] if ":" in img else ""
+            if not re.fullmatch(r"[0-9a-f]{40}", tag):
+                # local 构建那种写法(0.1.0)在云端两档不该出现,但这里不是
+                # 判断这个的地方 —— check-platform-image-refs.py 管一致性,
+                # tests/test_render_jobs.py 管"云端必须是 40 位 SHA"。
+                continue
+            if tag != runtime_latest:
+                problems.append(
+                    f"platform-runtime({env}):镜像钉在 {tag[:8]},但 "
+                    f"apps/platform-image/ 或 platform-sdk/ 最后一次提交是 "
+                    f"{runtime_latest[:8]}\n"
+                    f"    -> notebook 和定时作业跑的是旧运行时。等 CI 构建完 "
+                    f"{runtime_latest[:8]},\n"
+                    f"       把 environments/{env}/config.yaml 的 "
+                    f"platform_job_image 换成那个 SHA")
+
     if problems:
         print("镜像 tag 落后于源码:\n")
         for p in problems:
@@ -110,7 +142,7 @@ def main():
               "单测会全绿 —— 唯独集群上跑的不是你写的那份代码。")
         return 1
 
-    print(f"检查了 {len(APPS)} 个自建应用,镜像 tag 都和源码最新提交一致。")
+    print(f"检查了 {len(APPS)} 个自建应用 + 统一运行时镜像,tag 都和各自源码的最新提交一致。")
     return 0
 
 

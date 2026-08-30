@@ -71,7 +71,10 @@ print(job_logs(wf_name))
 name: my-training
 script: train.py
 # 下面这些都有默认值,不填就用平台统一镜像/默认资源配额:
-# image: local/platform-runtime:0.1.0
+# **不写死镜像名**:统一镜像按环境不同(本地开发是本地构建的那份,云端是
+# ACR 上带 commit SHA 的那份),值在 environments/<env>/config.yaml 的
+# platform_job_image。要覆盖才写这一行。
+# image: <你自己的镜像>
 # cpu: 200m
 # memory: 512Mi
 ```

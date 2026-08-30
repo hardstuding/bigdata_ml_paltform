@@ -42,6 +42,26 @@ backup_s3_secret: minio-root
 # 强行猜一个"应该"的答案,这次先不收进 local-lite,等真正需要在本机验证
 # Feast 时再决定要不要连带把 Spark Operator 也一起启用,不在这里悄悄
 # 绕过依赖关系。
+# ---------------------------------------------------------------- 统一运行时镜像
+#
+# notebook(JupyterHub singleuser)、定时作业(Argo CronWorkflow)、
+# `platform-submit` 提交的作业,用的是**同一个镜像** —— "交互开发和调度
+# 执行环境一致"这条能力就靠它成立(ADR-058)。
+#
+# **2026-08-30 之前这个值硬编码在 6 个地方**(render-jobs.py 的默认值、
+# platform_sdk/config.py 的默认值、JupyterHub 组件、Airflow 的 DAG、
+# 以及两处文档/示例),而且指向 `local/platform-runtime:0.1.0` —— 一个
+# **只存在于当时那台机器上、靠手工 docker build 出来的**镜像,没有任何
+# 地方记录它是从哪个 commit 来的。换台机器/重装一次就没了。
+#
+# 现在它是一个配置项,`scripts/check-platform-image-refs.py` 保证那 6 处
+# 和这里一致(CI 里跑)。
+# local-lite 仍然用本地构建的那份:这台机器上没有 ACR 拉取凭据,而且
+# 本地开发本来就该能改完镜像立刻用,不必绕一圈 CI。
+# 本地构建 = 远端不存在这个 tag,pullPolicy 必须是 IfNotPresent,否则
+# kubelet 会去联网拉一个不存在的镜像,直接 ErrImagePull。
+platform_job_image: local/platform-runtime:0.1.0
+
 enabled_components:
   - hive-metastore.yaml
   - iam-sync.yaml

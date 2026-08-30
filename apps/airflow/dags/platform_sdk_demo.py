@@ -10,7 +10,10 @@
 # 2026-08-19 晚些时候新增,回应 zhenghe 之前的追问"同时 airflow 里也能用
 # 等同的环境吗"——当时只是设计上承诺了"是同一个镜像,不是等同",这个 DAG
 # 才是真正把这条承诺落地验证。
+
 from __future__ import annotations
+
+import os
 
 from datetime import datetime
 
@@ -18,7 +21,12 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from airflow.sdk import DAG
 from kubernetes.client import models as k8s
 
-PLATFORM_IMAGE = "local/platform-runtime:0.1.0"
+# **不写死。** 值来自 environments/<env>/config.yaml 的 platform_job_image,
+# 由 scripts/check-platform-image-refs.py 保证这行和配置一致(CI 里跑)。
+# 环境变量优先:Airflow worker 上如果注入了 PLATFORM_JOB_IMAGE 就用它。
+PLATFORM_IMAGE = os.environ.get(
+    "PLATFORM_JOB_IMAGE",
+    "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:49d1d1cd0392a161a22a9184659ebdba1159c176")
 
 SCRIPT_VOLUME = k8s.V1Volume(
     name="job-script",
