@@ -63,7 +63,7 @@
 | 告警产生 | ✅ | 集成验证 | 2026-08-19 | [ADR-034](../decisions/034-alertmanager.md),抓到过真实问题 |
 | 告警送达 | ✅ | 集成验证 | 2026-08-28 | [ADR-081](../decisions/081-alert-delivery-verified-with-echo-sink.md)。终点是集群内 echo sink,**换真实渠道只改一个 Secret 的 url** |
 | 数据质量断言 | ✅ | demo | 2026-08-23 | [ADR-065](../decisions/065-data-quality-on-openmetadata.md)/[070](../decisions/070-data-freshness-slo.md)。只覆盖两张表,失败时没有告警通道 |
-| 备份 / 恢复 | ✅ | 集成验证 | 2026-08-18 | [ADR-033](../decisions/033-postgres-backup.md),做过恢复演练 |
+| 备份 / 恢复 | ✅ | 集成验证 | 2026-08-30 | Postgres:[ADR-033](../decisions/033-postgres-backup.md),做过恢复演练。Iceberg:2026-08-30 实机跑通(audit 33MiB / 1239 个对象;`ml` 不存在时正常跳过)。**局限**:cloud-full 的备份目的地就是同一个 MinIO —— 验的是"备份任务能跑通",不是"数据安全了" |
 | 资源治理(组件级上限) | ✅ | 集成验证 | 2026-08-20 | [ADR-041](../decisions/041-queue-resource-management.md) |
 | 资源治理(按组分配 + 借用) | ✅ | 集成验证 | 2026-08-23 | [ADR-064](../decisions/064-role-based-resource-quota.md)。实测借用生效、超额被挡 |
 | 查询审计留痕 | ✅ | 集成验证 | 2026-08-24 | [ADR-066](../decisions/066-trino-query-audit.md)。**还差**"审计流断了"的告警 |
@@ -86,7 +86,7 @@
 |---|---|---|---|---|
 | 登录 / 统一入口 | ✅ | 集成验证 | 2026-08-30 | Keycloak SSO + platform-portal([ADR-047](../decisions/047-platform-portal.md))。**2026-08-30 实机验证按角色显示**:`data-analysts` 身份看不到 ArgoCD/Keycloak、看得到 SQL 工作台;`platform-team` 全部可见;三个自建应用都读得到 groups claim(此前 permission-request-app 读不到,导致组权限审批对所有人 403) |
 | 找数据(有哪些表) | ✅ | 集成验证 | 2026-08-23 | 采集自动发现,目录里 100+ 张表,字段和 Trino 真实表结构一致 |
-| 申请表权限 | 🟡 | demo | 2026-08-30 | [ADR-044](../decisions/044-tiered-approval-workflow.md)/[045](../decisions/045-approval-backend-notifications-escalation.md)。2026-08-30 实机验证:审批链算得对、拒绝接口不返回 500、时区换算和 groups 提示都在。**目录 → 申请表单的联动仍没验过**;组权限申请的批准按钮要真人登录才点得到 |
+| 申请表权限 | 🟡 | demo | 2026-08-30 | [ADR-044](../decisions/044-tiered-approval-workflow.md)/[045](../decisions/045-approval-backend-notifications-escalation.md)。2026-08-30 实机验证:审批链算得对、拒绝接口不返回 500、时区换算和 groups 提示都在。2026-08-30 补验:**组权限申请的批准按钮**用真 access token 验过(platform-team 看得到按钮、批准返回 302 且待审批清零;非 platform-team POST 同一接口 403);**从数据目录跳去申请**([ADR-086](../decisions/086-approval-belongs-to-oa.md))也验过 —— OpenMetadata 表详情页上的 `accessRequest` 是可点的 markdown 链接,`/api/table-governance` 两种表名写法都返回治理属性。**这个功能之前部署了但从来没工作过**(公网地址读一个从没人建过的 secret key),现在改成按环境渲染 |
 | 权限真正生效 | ✅ | 集成验证 | 2026-08-26 | Trino 接 OPA([ADR-051](../decisions/051-trino-opa-access-control.md)) |
 | 权限到期回收 / 续期 | ✅ | 集成验证 | 2026-08-30 | [ADR-050](../decisions/050-grant-expiry-reclamation.md)。**2026-08-30 实机验证到期提醒和续期**:门户上快到期的排最前、标黄、显示剩余天数、带续期入口;点续期建出的是 `pending` 的新申请(**不是直接延期**),审批链真的有两级,重复提交被 409 挡住 |
 | **SQL 工作台** | ✅ | 集成验证 | 2026-08-30 | [ADR-084](../decisions/084-analyst-sql-workbench.md)。从「Trino Web UI」(**那里根本没有 SQL 编辑器**)改成 Superset SQL Lab。**2026-08-30 实机验证四条**:这条连接上 `current_user` 是登录者本人(不是 superset_service)、有 grant 的表查得到、没 grant 的被 `PERMISSION_DENIED` 拒、列级脱敏生效(`138****5678`)。由 `scripts/46-verify-p15.sh sqllab` 可重复跑 |
@@ -125,7 +125,7 @@
 | 训练执行 | ✅ | 集成验证 | 2026-08-21 | `ml-pipeline` WorkflowTemplate,三步按依赖顺序执行 |
 | 实验跟踪 / 模型注册 | ✅ | 集成验证 | 2026-08-27 | MLflow。**这一格被探针证伪过一次**,见下面那节 |
 | 模型部署 | ✅ | demo | 2026-08-20 | KServe V2 协议推理([ADR-027](../decisions/027-kserve-model-serving.md)) |
-| 推理可观测 | ✅ | 集成验证 | 2026-08-29 | `platform-inference` 看板 6 panel,真集群出数(P95 9.7ms)。**特征漂移监控没有** |
+| 推理可观测 | ✅ | 集成验证 | 2026-08-30 | `platform-inference` 看板 6 panel,真集群出数(P95 9.7ms)。**推理留痕 2026-08-30 端到端验过**([ADR-085](../decisions/085-inference-payload-logging.md)):发一次真实推理 → 接收端 202 → `iceberg.ml.inference_log` 里 request/response 成对落库、`inference_service = demo-rf-classifier`、非 platform-team 账号 `PERMISSION_DENIED`。**特征漂移分析本身还没做**,但它的数据前提有了 |
 | 模型审批 / 回滚 | ✅ | 集成验证 | 2026-08-28 | [ADR-080](../decisions/080-model-approval-and-rollback.md)。关键守卫验过:存在更新的未批准 v2 时,部署仍只用已批准的 v1 |
 | 模型灰度 / A-B | ❌ | 计划中 | — | **实测确认这套架构不支持**:RawDeployment 模式下 `canaryTrafficPercent` 会被收下但完全不生效,`scripts/11` 现在显式拒绝它 —— 留一个不生效的参数比没有更糟 |
 
