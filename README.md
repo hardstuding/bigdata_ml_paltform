@@ -198,11 +198,19 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 127.0.0.1 argocd.local-lite.test grafana.local-lite.test keycloak.local-lite.test jupyterhub.local-lite.test argo-workflows.local-lite.test permission-request.local-lite.test table-registration.local-lite.test portal.local-lite.test trino.local-lite.test superset.local-lite.test openmetadata.local-lite.test mlflow.local-lite.test spark-history.local-lite.test
 ```
 
-**后续所有变更**(加组件、改配置、升级版本)都是:改 `platform/apps/*.yaml` 或 `apps/definitions/*.yaml` → commit → push,ArgoCD 自动同步,不需要再手动跑脚本或 `kubectl apply`。上面 7 步只在"一个全新的空集群"上需要做一次(第 7 步例外——见下面)。
+**后续所有变更**(加组件、改配置、升级版本)都是:改 `apps/components/*.yaml` 或 `templates/` 下的源 → 重新渲染 → commit → push,ArgoCD 自动同步,不需要再手动跑脚本或 `kubectl apply`。
 
-### 组件专属的初始化脚本(不在上面 7 步里,按需跑)
+上面这些只在"一个全新的空集群"上做一次。**完整、按真实执行顺序、标了必需/尽力的那份清单在 [`scripts/README.md` 的「从空集群拉起」](scripts/README.md#1-从空集群拉起部署主线)** —— 那张表由 `scripts/check-bootstrap-coverage.py` 保证和 `bootstrap-all.sh` 一致,这里这份手动版只是给想理解每一步在做什么的人看的。
 
-这些脚本是各组件自己的命令式初始化,不归 GitOps 管(要么是账号/密码这类不该进 git 的东西,要么是官方 chart 就没提供声明式配置的能力)。**每次对应组件的 Application 第一次 Sync、或者它的 Deployment/StatefulSet 被整个重建(不是简单重启)时都要重新跑**,不是跑一次就永久生效:
+### 组件专属的初始化脚本(什么时候要**重新**跑)
+
+**这些现在都已经在 `bootstrap-all.sh` 里了**,全新集群不用单独跑。这张表
+回答的是另一个问题:**它们什么时候需要重新跑一次**。
+
+这些是各组件自己的命令式初始化,不归 GitOps 管(要么是账号/密码这类不该
+进 git 的东西,要么是官方 chart 就没提供声明式配置的能力)。**每次对应
+组件的 Application 第一次 Sync、或者它的 Deployment/StatefulSet 被整个重建
+(不是简单重启)时都要重新跑**,不是跑一次就永久生效:
 
 | 脚本 | 做什么 | 什么时候要(重新)跑 |
 |---|---|---|
@@ -214,6 +222,9 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 | `scripts/10-install-kserve-serving-runtimes.sh` | 装 KServe 的 ClusterServingRuntime(sklearn/xgboost/mlserver 等,官方 chart 不带) | **2026-08-21 起已并入 `bootstrap-all.sh`,不用单独跑**。不装的话 KServe 起来了但一个 runtime 都没有,要等真去上线模型才发现 |
 | `scripts/20-configure-openmetadata-search-truststore.sh` | 让 OpenMetadata 信任 OpenSearch 的自签证书 | **2026-08-21 起已并入 `bootstrap-all.sh`**。不跑的话 OpenMetadata 连不上 OpenSearch,搜索/目录是坏的,但首页能打开,容易被误判成部署成功 |
 | `scripts/14-configure-airflow-seatunnel-variable.sh` | 给 `seatunnel_device_events` 这个 DAG 写 MinIO 凭据(Airflow Variable) | Airflow 从 `enabled_components` 里启用、webserver 第一次起来之后 |
+| `scripts/45-configure-acr-pull.sh` | 给各命名空间配私有镜像仓库的拉取凭据 | **新增一个命名空间之后**(它按命名空间逐个建 Secret 并 patch ServiceAccount,新 namespace 不会自动有)。ACR 凭据本身要人工提供一次,见 [`docs/operations/image-registry.md`](docs/operations/image-registry.md) |
+| `scripts/34-configure-openmetadata-data-quality.sh` | 建数据质量断言 | OpenMetadata 重建之后,或者要给新表加断言时 |
+| `scripts/43-configure-openmetadata-dbt-ingestion.sh` | dbt 血缘接进目录 | 同上。**注意顺序**:元数据采集(`29`)必须先跑过,否则这一步会报 `Success 100%` 而血缘一条都没建(表还没进目录,边无处可挂) |
 
 ### Demo / 演示脚本(可选,验证平台端到端能力用)
 
@@ -236,7 +247,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
   每节统一成**前置条件 → 操作 → 预期结果 → 常见失败**。不是运维文档
 - [`docs/project/roadmap.md`](docs/project/roadmap.md) —— 记下来但先不做的想法,按优先级排,不打断当前主线
 - [`docs/architecture.md`](docs/architecture.md) —— 架构总览、分层设计、组件清单、路线图(Phase 0-4)、还没定的设计决策
-- [`docs/decisions/README.md`](docs/decisions/README.md) —— **ADR 主题索引**(57 份,按平台底座/湖仓/SSO/权限治理/可观测性等分组,带验证状态)
+- [`docs/decisions/README.md`](docs/decisions/README.md) —— **ADR 主题索引**(按平台底座/湖仓/SSO/权限治理/可观测性等分组,带验证状态)。**这里刻意不写份数** —— 写了就会过期(原来写的是 57,实际早就 80 多了),而一个会过期的数字对读者没有任何用处
 - [`docs/decisions/`](docs/decisions/) —— ADR 原文,每个非显而易见的技术选择,包含理由、踩过的坑、后续更正(是不是验证过、验证到什么程度都写在里面,不是"我们决定这么做"就完了)
 - [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md) —— 真实踩过的坑,排障时先查这里
 - [`docs/journal/`](docs/journal/) —— 按月归档的排障与验证日志(2026-08-19 从 `project/current-work.md` 拆出来的,那份文件只留当前状态)
@@ -250,14 +261,25 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 
 ## 当前状态
 
-**权威来源是 [`docs/project/capability-matrix.md`](docs/project/capability-matrix.md)**——这里不再维护第二份会
+**权威来源是 [`docs/project/capability-matrix.md`](docs/project/capability-matrix.md)** —— 这里不维护第二份会
 过时的进度清单(2026-08-19 起,见
-[ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))。
+[ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))。那份表
+每一行带**验证级别**(生产验证 / 集成验证 / demo / 未验证)、最后验证时间
+和证据链接,并且有 CI 检查拦着"没验就标已完成"。
 
-一句话现状:**平台对运维角色基本完整,对数据分析师大体可用(卡在"找数据"
-这一步,OpenMetadata 未部署),对大数据开发和算法工程师是结构性缺失
-(它们依赖的 Spark Operator / SeaTunnel / JupyterHub / MLflow 都还没在
-cloud-full 上启用),管理角色的驾驶舱尚未开始。**
+一句话现状(2026-08-30):**五个角色里四个能独立开工** —— 运维、数据分析师、
+大数据开发、算法工程师;管理角色只有第一版驾驶舱。**没有任何一格是"生产
+验证"** —— 这套东西还没上过生产,门禁条件写在
+[`docs/project/production-readiness-gaps.md`](docs/project/production-readiness-gaps.md)。
+
+> **2026-08-30 更正**:这段原来写着"数据分析师卡在找数据(OpenMetadata
+> 未部署)""大数据开发和算法工程师是结构性缺失(Spark Operator /
+> SeaTunnel / JupyterHub / MLflow 都还没启用)" —— 那是 2026-08-19 之前的
+> 状态,这些组件早就部署并端到端验证过了。
+>
+> **README 是任何人和 AI 第一眼看到的文件**,它上面的过期状态比别处更贵:
+> 会让接手的人对整个项目的判断从第一分钟就是错的。这也是为什么这里只留
+> 一句话 + 一个指针,不再展开。
 
 底座部分已经比较扎实:GitOps 单一变更入口、从空集群一键拉起(真的推倒
 重建跑通过,ADR-039)、企业级权限治理全链路(分级审批/到期回收/权限交接,
