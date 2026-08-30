@@ -247,8 +247,36 @@ Trino 的 `system.runtime.queries` 里已经没有那条 CTAS 了 —— 它是�
 受 `query.max-history` 限制,coordinator 一重启就清空。**这是已知局限,
 不是配置错了**,脚本的输出里会直接这么说。
 
-**17. 推理留痕**(ADR-085。**第一步已完成** —— CI 构建成功、tag 已钉到
-`7d42658`、组件已启用):
+**17. 推理留痕**(**2026-08-30 端到端实机验证通过**:接收端 202、
+`iceberg.ml.inference_log` 里 request/response 成对落库、
+`inference_service = demo-rf-classifier`、非 platform-team 账号
+`PERMISSION_DENIED`):
+
+**这一条上集群跑出四个真问题**,是这批里最多的:
+
+1. 镜像还钉在 `7d42658`(改 kafka-python 之前的 commit),`/readyz` 永远
+   503。修 kafka-python 那次没把 tag 跟着改。
+2. `KAFKA_BOOTSTRAP_SERVERS` 写的是 `kafka-cluster-kafka-bootstrap`,
+   这个集群的 Kafka 叫 `platform-kafka`。三处都错(接收端 env、接收端
+   源码默认值、Flink sink 默认值)。
+3. Flink sink 提交即失败:**`model` 是 Calcite 保留字**。这个文件顶部
+   写着"字段名避开保留字,踩过两次,这次提前避开",还是漏了 —— 现在
+   改成所有字段名一律加反引号。
+4. **`kserve/agent` 这个镜像不在镜像清单里。** 它只有配了 logger 才被
+   KServe 注入,躺在 `inferenceservice-config` ConfigMap 的 JSON 字符串
+   里,`scripts/list-project-images.py` 扫 `image:` 行永远看不到它 ——
+   于是在这台连不上 Docker Hub 的机器上直接 ImagePullBackOff,而
+   "打开留痕"这个动作看起来跟镜像毫无关系。已补
+   `apps/kserve-runtimes/inferenceservice-config-images.json`。
+
+**外加一个"跑通了但没用"的问题**:留痕存下来了,但
+`inference_service` 是 `http://localhost:9081/`(agent 自己的地址)、
+`model` 是空 —— 查不出这次调的是哪个模型,而 ADR-085 记这份数据就是为了
+特征漂移。临时起了个只打印 `ce-*` 头的接收端抓到真实头,改成
+`ce-inferenceservicename`。单测没抓到是因为**夹具里的假数据比真数据
+"好看"**。
+
+原验证步骤:
 
 ```
 ENABLE_PAYLOAD_LOG=1 ./scripts/11-deploy-demo-inference-service.sh
