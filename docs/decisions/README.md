@@ -49,7 +49,7 @@
 | # | 标题 | 状态 |
 |---|---|---|
 | [015](015-openmetadata-architecture.md) | OpenMetadata:Postgres 后端 + k8s 原生采集编排 | 已验证(**cloud-full 上未部署**,见 project/capability-matrix.md) |
-| [014](014-spark-lineage-official-agent.md) | Spark 血缘用官方 agent,不自己解析 SQL | 已采纳,**仅设计未实现** |
+| [014](014-spark-lineage-official-agent.md) | Spark 血缘用官方 agent,不自己解析 SQL | **设计成立但 artifact 需重选** —— 选定的 openmetadata-spark-agent 只有 2024 年的 1.0-beta(Java 11 + OpenLineage 1.7),不认 Spark 4;Spark 血缘至今没落地 |
 | [052](052-seatunnel-lineage.md) | SeaTunnel 表级血缘推 OpenMetadata | 已实现,API 机制已验证 |
 | [012](012-dbt-analyst-platform.md) | 分析师开发平台:dbt + Cosmos + OpenMetadata | 方向已定 |
 | [053](053-dbt-analyst-platform-mvp.md) | dbt MVP:在 Trino/Iceberg 上跑,先不接 Cosmos | 最小骨架已实现 |
