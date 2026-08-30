@@ -335,6 +335,46 @@ print(cur.fetchall()[0][0])" 2>/dev/null | tail -1)"
       fi
 
       kubectl -n argo-workflows delete "workflow/$WF" >/dev/null 2>&1 && log "  (已清理 $WF)"
+
+      # **定时那一跳单独验。** 手工提交跑通 ≠ 定时跑通 —— 真实的
+      # daily-order-summary 定在 UTC 01:30,而云主机那个点基本是关的,
+      # 所以它的 `status` 一直是空的,这条从来没被真正触发过。
+      # 这里克隆一份、把时间改到两分钟后,等它**自己**起一个 workflow。
+      PROBE_MIN=$(( ($(date -u +%-M) + 2) % 60 ))
+      kubectl -n argo-workflows get cronworkflow daily-order-summary -o json | python3 -c "
+import json, sys
+cw = json.load(sys.stdin)
+cw['metadata'] = {'name': 'p15sched-probe', 'namespace': 'argo-workflows', 'labels': {'p15': 'probe'}}
+cw['spec']['schedules'] = ['$PROBE_MIN * * * *']
+cw['spec']['startingDeadlineSeconds'] = 120
+# 注意字段是 workflowMetadata,不是 workflowSpec.metadata —— 后者会被
+# CRD 的 strict decoding 直接拒掉(2026-08-30 实测)。
+cw['spec']['workflowMetadata'] = {'labels': {'platform-sdk/submitted-by': 'p15verify'}}
+for k in ('status', 'resourceVersion', 'uid', 'creationTimestamp', 'generation'):
+    cw.pop(k, None)
+print(json.dumps(cw))" | kubectl -n argo-workflows create -f - >/dev/null 2>&1
+
+      log "  等定时触发(最多 3 分半)…"
+      SCHED_WF=""
+      for _ in $(seq 1 14); do
+        SCHED_WF="$(kubectl -n argo-workflows get workflows \
+          -l workflows.argoproj.io/cron-workflow=p15sched-probe \
+          -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+        [ -n "$SCHED_WF" ] && break
+        sleep 15
+      done
+      if [ -z "$SCHED_WF" ]; then
+        bad "CronWorkflow 到点没有自己触发 —— 定时那一跳是断的"
+      else
+        ok "CronWorkflow 到点自己触发了($SCHED_WF)"
+        kubectl -n argo-workflows wait --for=condition=Completed "workflow/$SCHED_WF" --timeout=300s >/dev/null 2>&1
+        SPHASE="$(kubectl -n argo-workflows get workflow "$SCHED_WF" -o jsonpath='{.status.phase}' 2>/dev/null)"
+        [ "$SPHASE" = "Succeeded" ] && ok "定时触发的那次真的跑成功了" \
+                                    || bad "定时触发的那次状态是 $SPHASE"
+      fi
+      kubectl -n argo-workflows delete cronworkflow p15sched-probe >/dev/null 2>&1
+      kubectl -n argo-workflows delete workflow -l workflows.argoproj.io/cron-workflow=p15sched-probe >/dev/null 2>&1
+      log "  (已清理定时探针)"
     fi
   fi
 fi

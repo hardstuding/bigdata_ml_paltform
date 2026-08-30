@@ -110,7 +110,7 @@
 | 作业可观测 | ✅ | 集成验证 | 2026-08-21 | Spark History Server `/api/v1/applications` 列得出刚跑完的作业 |
 | 血缘 | ✅ | 集成验证 | 2026-08-22 | 直接查 lineage API 确认边存在。**Spark 血缘([ADR-014](../decisions/014-spark-lineage-official-agent.md))仍仅设计** |
 | 数据质量 / 契约 | ✅ | demo | 2026-08-25 | 质量 [ADR-065](../decisions/065-data-quality-on-openmetadata.md)/[070](../decisions/070-data-freshness-slo.md) + 契约 [ADR-068](../decisions/068-schema-registry.md)。**断言失败没有告警出口** |
-| 作业发布(定时) | 🟡 | 集成验证 | 2026-08-30 | `jobs/<名字>/job.yaml` 写一行 `schedule` → Argo CronWorkflow;支持多文件、依赖声明(和镜像清单对账,CI 拦)、参数化补数、按环境晋级(见 [`jobs/README.md`](../../jobs/README.md))。**2026-08-30 实机验证**:多文件(`import jobkit` 成功)、参数化补数(`-p run_date=2026-08-01` → 表里真的多出那一天的 4 行,不是只看日志)。**定时路径仍然从没被触发过**(UTC 01:30,云主机那时基本是关的),所以还是 🟡 |
+| 作业发布(定时) | ✅ | 集成验证 | 2026-08-30 | `jobs/<名字>/job.yaml` 写一行 `schedule` → Argo CronWorkflow;支持多文件、依赖声明(和镜像清单对账,CI 拦)、参数化补数、按环境晋级([`jobs/README.md`](../../jobs/README.md))。**2026-08-30 实机验证四条**:多文件 `import jobkit` 成功;补数 `-p run_date=2026-08-01` 后**表里真的多出那一天的 4 行**;**定时那一跳也验了** —— 克隆一份改成两分钟后触发,CronWorkflow 自己起了 workflow 并跑成功(真实那条定在 UTC 01:30,云主机那个点基本关着,所以一直没被触发过) |
 | 流作业发布 | ✅ | 集成验证 | 2026-08-29 | `streams/<名字>/stream.yaml` → FlinkDeployment;门户「流作业」一栏显示状态 |
 | 内部包共享 | ✅ | 集成验证 | 2026-08-29 | [ADR-083](../decisions/083-internal-package-registry.md)。pod 里**不加任何参数** `pip install platform-helpers` 装得上并能用 |
 
