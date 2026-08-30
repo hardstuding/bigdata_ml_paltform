@@ -206,3 +206,18 @@ kubectl -n monitoring get cronjob goldenpath-audit        # 应该存在
   审计链路没跑起来,是真阳性不是探针的问题
 门户首页「黄金链路」那栏应该变成 7 条,并出现「查询留痕」
 ```
+
+**16. 从查询历史自动推的血缘**(2026-08-30 加,**没上过集群**):
+
+```bash
+./scripts/47-configure-openmetadata-trino-lineage.sh   # 配采集
+./scripts/48-verify-trino-lineage.sh                   # 验证
+```
+
+48 会用一条真实的 `CREATE TABLE ... AS SELECT` 制造一条**确定存在**的血缘,
+跑完采集之后查血缘接口确认那条边在,最后清理临时表。
+
+**失败长什么样**:如果报"没有从 demo.orders 指过来的边",最可能的原因是
+Trino 的 `system.runtime.queries` 里已经没有那条 CTAS 了 —— 它是内存里的,
+受 `query.max-history` 限制,coordinator 一重启就清空。**这是已知局限,
+不是配置错了**,脚本的输出里会直接这么说。

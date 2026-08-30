@@ -354,6 +354,13 @@ else
   log "--> table-registration-app 还没起来,跳过"
 fi
 
+step "配 Trino 查询血缘的自动采集(从查询历史推,不需要人工声明)"
+# **必须排在元数据采集(29)之后**:血缘是往已经存在的表实体上挂边的,
+# 表不在目录里就无处可挂 —— 这个顺序依赖 2026-08-29 在 dbt 那条上实测
+# 撞到过(采集报 Success 100%,而血缘一条都没建)。
+run_optional "scripts/47-configure-openmetadata-trino-lineage.sh" \
+  ./scripts/47-configure-openmetadata-trino-lineage.sh
+
 step "同步 platform/iam/ 里的组织架构/角色数据进 Keycloak"
 run_optional "scripts/12-sync-iam.py --no-create-users" python3 ./scripts/12-sync-iam.py --no-create-users
 

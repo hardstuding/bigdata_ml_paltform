@@ -60,6 +60,7 @@ TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
 | 20 | `29-configure-openmetadata-trino-ingestion.sh` | 尽力 | Trino 元数据自动采集(不配的话数据目录里只有人工录入的表) |
 | 21 | `34-configure-openmetadata-data-quality.sh` | 尽力 | 数据质量断言([ADR-065](../docs/decisions/065-data-quality-on-openmetadata.md)) |
 | 22 | `43-configure-openmetadata-dbt-ingestion.sh` | 尽力 | dbt 血缘接进目录([ADR-082](../docs/decisions/082-dbt-lineage-ingestion.md)) |
+| 22.5 | `47-configure-openmetadata-trino-lineage.sh` | 尽力 | **从 Trino 查询历史自动推血缘**(不需要人工声明 inputs/outputs)。**必须排在 `29` 之后** —— 血缘是往已存在的表实体上挂边的 |
 | 23 | `12-sync-iam.py` | 尽力 | `platform/iam/` 的组织架构/角色数据 → Keycloak |
 | 24 | `14-configure-airflow-seatunnel-variable.sh` | 尽力 | 给 SeaTunnel DAG 写 MinIO 凭据 |
 | 25 | `08-create-demo-data.sh` | 尽力 | 建 demo 数据。**不是装饰** —— 黄金链路探针依赖这几张表 |
@@ -84,6 +85,7 @@ TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
 | `09-train-demo-model.sh` | AI/ML:训练 sklearn 模型 → MLflow 注册 |
 | `11-deploy-demo-inference-service.sh` | AI/ML:MLflow 模型 → KServe 上线推理 |
 | `10-install-kserve-serving-runtimes.sh` | 上面那条的前置(装 ClusterServingRuntime) |
+| `48-verify-trino-lineage.sh` | 血缘:用一条真实 CTAS 制造一条确定存在的血缘,跑采集,再**查血缘接口确认那条边在**(不是只看 Job 状态) |
 | `46-verify-p15.sh` | **产品层那一批的回归验收**:groups claim / 门户按角色显示 / 建表新表单 / 作业多文件+补数 / 审批体验。一条一条报 ✅❌,**全跳过退出码 2**(不把"什么都没验"当成通过) |
 
 **下面三个是 pod 里跑的载荷,不是给人直接执行的**(通过 ConfigMap 挂进
