@@ -190,6 +190,49 @@ platform-team 账号打开建表工具 → 负责人那个框可编辑
 
 ---
 
+## 脚本验不了的那三条 —— 2026-08-30 全部补验通过
+
+`scripts/46-verify-p15.sh` 结尾列的三条"必须人点一次",这次用 API 补验完了,
+方法记在这里,下次不用重新摸索:
+
+**1. 用两个账号验越权(A 打不开 B 的作业详情)** —— 通过。
+本人打开 `/job/<name>` 是 200 且能看到步骤/参数/资源;换一个用户是 404,
+措辞是「找不到这个作业,或者它不是你提交的」(刻意不区分"不存在"和
+"不是你的",免得拿这个接口探测别人的作业名)。日志接口
+`/job/<name>/logs/<pod>` 同样:本人 200、别人 404。
+
+**2. 组权限申请的批准按钮** —— 通过。**这条必须要真 access token**,
+`X-Forwarded-Groups` 不算数(页面自己会提示"这次请求里没有访问令牌,
+按组判断的功能不会生效")。做法:
+
+```bash
+# 临时给 permission-request-app 这个 client 打开 direct access grants,
+# 给 platform 域的 admin 设一个临时密码,用密码模式换 token,验完关回去
+kubectl -n keycloak exec <keycloak-pod> -- /opt/keycloak/bin/kcadm.sh ...
+kubectl -n keycloak port-forward svc/keycloak-keycloakx-http 18084:80
+curl -s -X POST http://localhost:18084/auth/realms/platform/protocol/openid-connect/token   -d grant_type=password -d client_id=permission-request-app -d client_secret=...   -d username=admin -d password=... -d scope=openid
+# 拿到的 token 里应该有 groups: ["platform-team"]
+curl http://localhost:18081/ -H "X-Forwarded-User: admin" -H "X-Forwarded-Access-Token: $TOK"
+```
+
+结果:platform-team 看得到「待审批:组权限申请(1 条)」和「批准/拒绝」
+按钮,POST `/requests/1/approve` 返回 302 且待审批清零;非 platform-team
+POST 同一个接口返回 **403**。
+
+**3. 门户「我的作业」详情页外观** —— 通过,顺带抓到一个真 bug:
+**日志显示成 bytes 的 repr**(`b'\xe5\xa4\x84...'`),中文全是转义序列。
+kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str、
+内容却是 bytes 的 repr。已改成 `_preload_content=False` + 自己 decode,
+并加了一条测试盯死这个参数。
+
+**还顺带抓到**:门户首页「流作业」那栏一直显示
+「读不到流作业(ForbiddenException)」—— ServiceAccount 缺
+`flinkdeployments` 的读权限。页面不报错、不空白,只显示一句看起来像
+"暂时没有"的话,所以一直没人发现。补了 Role/RoleBinding 之后三条流作业
+(device-events-stream / inference-log / trino-audit-sink)都正常显示。
+
+---
+
 ## 跑完之后
 
 把验过的项在 [`capability-matrix.md`](capability-matrix.md) 里从「未验证」
