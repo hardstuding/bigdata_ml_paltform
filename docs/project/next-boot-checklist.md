@@ -292,7 +292,29 @@ ENABLE_PAYLOAD_LOG=1 ./scripts/11-deploy-demo-inference-service.sh
 **失败长什么样**:接收端返回 503 说明写 Kafka 失败 —— **那是有意设计的**,
 返回 200 会把"留痕断了"这个唯一的信号也吞掉。
 
-**18. 从数据目录跳去申请 + 给 OA 的治理接口**(ADR-086,**没上过集群**):
+**18. 从数据目录跳去申请 + 给 OA 的治理接口**(**2026-08-30 实机验证通过**:
+`/api/table-governance` 两种表名写法都返回 security_level / table_owner /
+required_approval;OpenMetadata 表详情页上的 `accessRequest` 是可点的
+markdown 链接;没走建表工具的表返回 404 + 说人话的原因):
+
+**这一条上集群跑出三个真问题**:
+
+1. **三个自建应用的镜像 tag 全都落后于源码**,`/api/table-governance`
+   直接 404 —— 集群上跑的是旧代码。已加
+   `scripts/check-image-tag-freshness.py` 进 CI。
+2. **接口的参数格式和它自己说的不一样**:底层要 OM 的完整 FQN
+   (`trino.iceberg.demo.orders`),而参数说明和 400 报错给的例子是
+   `iceberg.demo.orders`。外部系统按接口自己说的调,永远只拿到 404,
+   而那个 404 说的是"数据目录里查不到这张表" —— **它不报错,它撒谎**。
+   改成两种都认。测不出来是因为所有相关测试都把
+   `lookup_table_governance` 整个 mock 掉了,而错就藏在被 mock 的那层。
+3. **「从数据目录点一下去申请」部署了但从来没工作过**:
+   `PERMISSION_APP_PUBLIC_URL` 读一个 `optional: true` 的 secret key,
+   而那个 key 从来没人建过 → `accessRequest` 一直是空串(比没有更糟:
+   OM 上会显示一个空白字段,看起来像"这张表没法申请")。改成按环境
+   渲染,`apps/table-registration-app/manifests/` 进 templates/。
+
+原验证步骤:
 
 ```
 建一张表(走建表注册工具)
