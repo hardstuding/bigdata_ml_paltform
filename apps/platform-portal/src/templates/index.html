@@ -172,6 +172,22 @@
     </div>
   </section>
 
+  {# 「我的凭据」入口(ADR-089)。放在这里而不是做成一张工具卡片:工具卡片
+     那一栏是"跳去别的系统",而这是门户自己的页面;而且它对**每个人**都有
+     意义(谁都可能要连自己的库),不该被分类的可见性规则挡住。 #}
+  <section>
+    <div class="head"><h2>我的凭据</h2>
+      <span class="note">自己的数据库账号、外部 token</span>
+    </div>
+    <div class="panel" style="padding: 13px 16px">
+      <a href="/my-secrets">管理我的凭据 →</a>
+      <div class="note" style="margin-top: 6px">
+        存进来之后在 notebook 和作业里用
+        <code>platform_sdk.secret("名字")</code> 取,不用写死在代码里。
+      </div>
+    </div>
+  </section>
+
   {# 角色工作台:普通用户看"我的权限",审批人额外看到"待我审批"。
      permission-request-app 不可用时整块不显示 —— 首页少一块,好过整页 500。 #}
   {% if permissions.warning %}

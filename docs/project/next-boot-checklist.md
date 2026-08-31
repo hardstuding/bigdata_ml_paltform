@@ -255,7 +255,27 @@ kubectl -n openbao exec -i openbao-0 --env=BAO_TOKEN=$TOKEN -- \
 # 然后用 alice 的身份登录(见下面 ③),读 bob 的那条 → **期望 403**
 ```
 
-### ③ notebook 里读得到(这是整件事的验收标准)
+### ③ 门户的「我的凭据」页面
+
+```
+浏览器打开门户 → 首页应该有「我的凭据」一栏 → 点进去
+→ 添加一个:名字 demo,值随便,存到「只有我自己」
+→ 列表里出现 demo,并显示 platform_sdk.secret("demo") 这行提示
+→ **页面上不应该出现值本身**(设计如此,见 ADR-089)
+```
+
+**这一页最要紧的验证点不是能不能存,是「以谁的身份存」** —— 它拿的是
+oauth2-proxy 传下来的用户 access token 去换 OpenBao token。验法:
+用 A 账号存一条,再用 B 账号登录,B 的列表里**不该**有 A 那条。
+(如果有,说明门户在用自己的高权限身份读写,越权保护整个失效。)
+
+**可能撞到的坑**:门户的 access token 是 `platform-portal` 那个 client 签的,
+`auth/jwt/role/platform-user` 的 `bound_audiences` 里得能匹配上。现在写的是
+`jupyterhub,openbao,account` —— Keycloak 的 access token 默认 `aud` 是
+`account`,应该能对上;对不上的话页面会直接显示那句 audience 的提示,
+按提示改 scripts/50 重跑。
+
+### ④ notebook 里读得到(这是整件事的验收标准)
 
 ```python
 # 在 JupyterHub 里新起一个 notebook(必须是新起的 —— 旧的没有注入 token)
@@ -389,7 +409,7 @@ argo submit -n argo-workflows --from cronwf/feature-drift
 "只验镜像在不在"。
 
 `environments/<env>/config.yaml` 新增 `platform_job_image`,cloud-full 指向
-`.../platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298`。
+`.../platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf`。
 在这之前 notebook 和定时作业用的是 `local/platform-runtime:0.1.0` ——
 一个**只存在于那台云主机上、靠手工 docker build 出来的**镜像。
 
@@ -408,7 +428,7 @@ ACR 那份;用和 singleuser 相同的镜像/环境/SA 起的 pod 里,
 ```bash
 # 1. 先确认这个 tag 真的存在(别的都不用做,几十秒)
 kubectl -n argo-workflows run pulltest --restart=Never --command \
-  --image=crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:9aeb810ab9063c7e19960b23a9e46d1e5e63d298 \
+  --image=crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf \
   -- sleep 5
 kubectl -n argo-workflows get pod pulltest -w
 # ImagePullBackOff -> CI 没在那个 commit 上构建过 platform-runtime。

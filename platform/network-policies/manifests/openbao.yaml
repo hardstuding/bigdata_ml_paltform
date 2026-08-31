@@ -1,0 +1,83 @@
+# OpenBao 的 NetworkPolicy(ADR-089)。
+#
+# **加这条的直接原因**:2026-08-31 部署 OpenBao 之后核对了一遍,发现
+# keycloak / minio / opa / postgres 这几个敏感组件都有 default-deny +
+# 白名单,而**凭据库一个策略都没有** —— 集群里任何一个 Pod 都能直接连它。
+# 一个存放所有人数据库密码的服务,防护级别比对象存储还低,说不过去。
+#
+# 它挡不住什么,先说清楚:OpenBao 自己有认证和策略,没有有效 token 的连接
+# 读不到任何东西。NetworkPolicy 是**第二道**——挡住"某个被攻破的业务 Pod
+# 能不能持续探测/爆破凭据库"这类事,不是唯一防线。
+#
+# 白名单是按"谁真的会连它"列的,不是按"谁可能需要":
+#
+#   ingress-nginx    UI(openbao.<域名>)
+#   platform-portal  「我的凭据」页面(以用户身份读写,见 ADR-089)
+#   jupyterhub       notebook 里的 platform_sdk.secret()
+#   argo-workflows   作业里的 platform_sdk.secret()
+#   openbao          自己(raft 节点间通信 8201;现在单副本用不上,但扩到
+#                    多副本时漏了这条会表现为"集群起不来",而且很难查)
+#   monitoring       指标抓取
+#
+# **这个仓库里 NetworkPolicy 白名单遗漏是反复发作的一类 bug**(见
+# ADR-035 和 minio.yaml 顶部那段)。症状统一是"连接超时"或者"connection
+# refused",而人第一反应会去查服务本身。往这个平台加新的凭据消费方时,
+# 记得回来加一行。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: openbao
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-consumers-to-openbao
+  namespace: openbao
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-portal
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: jupyterhub
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argo-workflows
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - protocol: TCP
+          port: 8200
+        # raft 节点间通信。单副本时用不上,但**扩到多副本时漏了这条,
+        # 症状是"集群起不来"** —— 而人会去查 raft 配置,不会想到网络策略。
+        - protocol: TCP
+          port: 8201
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scrape
+  namespace: openbao
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring

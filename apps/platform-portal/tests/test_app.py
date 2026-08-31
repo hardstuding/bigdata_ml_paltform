@@ -1042,3 +1042,87 @@ class TestMinIO控制台卡片:
     def test_非_platform_team_看不到这张卡片(self):
         vis = portal.visible_categories({"data-analysts"})
         assert "运维" not in vis
+
+
+class Test我的凭据页面:
+    """ADR-089。
+
+    最要紧的一条:**门户以用户本人的身份连 OpenBao,不用自己的身份。**
+    如果门户用一个自己的高权限 token 去读写,"一个人只能碰自己的凭据"就
+    退化成"门户代码里写了个 if" —— 而写在调用方的检查,绕过调用方就没了。
+    """
+
+    def test_拿不到用户令牌时给出能看懂的话而不是_500(self, client):
+        r = client.get("/my-secrets", headers={"X-Forwarded-User": "alice"})
+        assert r.status_code == 200
+        assert "pass_access_token" in r.get_data(as_text=True)
+
+    def test_登录用的是请求里那个用户的令牌(self, client, monkeypatch):
+        """**这条是这一页的安全核心。** 换 OpenBao token 用的必须是请求头里
+        用户自己的 access token,不能是门户自己的任何凭据。
+        """
+        seen = {}
+
+        class R:
+            status_code = 200
+            text = ""
+            @staticmethod
+            def json():
+                return {"auth": {"client_token": "user-token"}}
+
+        def fake_post(url, json=None, timeout=None):
+            seen["url"] = url
+            seen["jwt"] = json["jwt"]
+            return R()
+
+        monkeypatch.setattr(portal.requests, "post", fake_post)
+        monkeypatch.setattr(portal, "_list_my_secrets",
+                            lambda tok, u, g: {"mine": [], "shared": {}, "errors": []})
+        client.get("/my-secrets", headers={
+            "X-Forwarded-User": "alice",
+            "X-Forwarded-Access-Token": "alice的令牌",
+        })
+        assert seen["jwt"] == "alice的令牌"
+        assert seen["url"].endswith("/v1/auth/jwt/login")
+
+    def test_名字里不许有斜杠(self, client, monkeypatch):
+        """不挡的话有人写 `../../shared/platform-team/x` 就跑到别人路径上去了。
+        OpenBao 的策略其实也会拒(路径匹配不上),这里挡是为了给人看得懂的错。
+        """
+        r = client.post("/my-secrets", data={"name": "../evil", "value": "v"},
+                        headers={"X-Forwarded-User": "alice"})
+        assert r.status_code == 400
+        assert "只能用字母" in r.get_data(as_text=True)
+
+    def test_不在那个组里就不让存进组共享(self, client, monkeypatch):
+        monkeypatch.setattr(portal, "_bao_token", lambda req: ("t", None))
+        r = client.post("/my-secrets",
+                        data={"name": "x", "value": "v", "scope": "platform-team"},
+                        headers={"X-Forwarded-User": "alice",
+                                 "X-Forwarded-Groups": "data-analysts"})
+        assert r.status_code == 400
+        assert "不在 platform-team 这个组里" in r.get_data(as_text=True)
+
+    def test_删除只接受合法路径形状(self, client, monkeypatch):
+        monkeypatch.setattr(portal, "_bao_token", lambda req: ("t", None))
+        r = client.post("/my-secrets/delete", data={"path": "sys/policy"},
+                        headers={"X-Forwarded-User": "alice"})
+        assert r.status_code == 400
+
+    def test_页面上不出现凭据的值(self, client, monkeypatch):
+        """**永远不显示值。** 在网页上显示密码会被截图、投屏、留在浏览器
+        历史里 —— 这些都不是 OpenBao 的审计日志能覆盖的。
+        """
+        monkeypatch.setattr(portal, "_bao_token", lambda req: ("t", None))
+        monkeypatch.setattr(portal, "_list_my_secrets",
+                            lambda tok, u, g: {"mine": ["mysql_crm"], "shared": {}, "errors": []})
+        r = client.get("/my-secrets", headers={"X-Forwarded-User": "alice"})
+        body = r.get_data(as_text=True)
+        assert "mysql_crm" in body                       # 名字要显示
+        assert 'platform_sdk.secret("mysql_crm")' in body  # 告诉他怎么用
+        # 值的输入框必须是 password 类型,不能是明文
+        assert 'name="value" type="password"' in body
+
+    def test_首页有入口(self, client):
+        r = client.get("/", headers={"X-Forwarded-User": "alice"})
+        assert "/my-secrets" in r.get_data(as_text=True)

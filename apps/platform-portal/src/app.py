@@ -926,6 +926,180 @@ def job_rerun(name):
     return redirect(url_for("job_detail", name=created["metadata"]["name"]))
 
 
+# ---------------------------------------------------------------- 我的凭据
+#
+# ADR-089。**门户以「用户本人」的身份连 OpenBao,不用自己的身份。**
+#
+# 这一点是整个设计成立的关键:如果门户用一个自己的高权限 token 去读写,
+# 那"一个人只能碰自己的凭据"就退化成"门户的代码里写了个 if" —— 而写在
+# 调用方的检查,绕过调用方就没了(和 ADR-051 把表级授权交给 OPA、
+# ADR-074 用 impersonation 而不是在 Superset 里过滤,是同一条)。
+#
+# oauth2-proxy 已经开了 `pass_access_token = true`,所以每个请求上带着
+# 用户自己的 access token(X-Forwarded-Access-Token)。拿它去
+# `auth/jwt/login` 换一个 OpenBao token,后续读写都用那个 —— 越权在
+# OpenBao 那一层就被拒了,门户根本没有能力越权。
+
+OPENBAO_ADDR = os.environ.get(
+    "OPENBAO_ADDR", "http://openbao.openbao.svc.cluster.local:8200").rstrip("/")
+
+
+def _bao_token(req):
+    """拿请求里用户的 access token 换一个 OpenBao token。
+
+    返回 (token, 出错原因)。**出错时返回原因而不是抛** —— 这个页面在
+    OpenBao 没部署/没配好时应该显示一句能看懂的话,不是 500。
+    """
+    jwt = req.headers.get("X-Forwarded-Access-Token", "").strip()
+    if not jwt:
+        return None, ("拿不到你的登录令牌(X-Forwarded-Access-Token)。"
+                      "oauth2-proxy 需要开 pass_access_token —— "
+                      "见 apps/components/platform-portal-oauth2-proxy.yaml")
+    try:
+        r = requests.post(f"{OPENBAO_ADDR}/v1/auth/jwt/login",
+                          json={"role": "platform-user", "jwt": jwt}, timeout=5)
+    except requests.RequestException as exc:
+        return None, f"连不上 OpenBao({OPENBAO_ADDR}):{exc}"
+    if r.status_code >= 400:
+        body = r.text[:200]
+        if "audience" in body:
+            # 这个坑值得单独说:症状是 audience,不是权限 —— 往策略上查会绕很远。
+            return None, ("OpenBao 不认这个令牌的 audience。门户的 access token "
+                          "是 platform-portal 那个 client 签的,需要在 "
+                          "scripts/50-configure-openbao-auth.sh 的 "
+                          f"auth/jwt/role/platform-user 的 bound_audiences 里列上。原文:{body}")
+        return None, f"OpenBao 拒绝了登录(HTTP {r.status_code}):{body}"
+    return r.json()["auth"]["client_token"], None
+
+
+def _bao(method, path, token, **kw):
+    return requests.request(method, f"{OPENBAO_ADDR}{path}",
+                            headers={"X-Vault-Token": token}, timeout=5, **kw)
+
+
+def _list_my_secrets(token, username, groups):
+    """列出这个人能看到的凭据名字。**不返回值。**
+
+    页面上永远不显示凭据的值 —— 要用值就在 notebook 里
+    `platform_sdk.secret("名字")`。在网页上显示密码,会被截图、会被投屏、
+    会留在浏览器历史里,而这些都不是 OpenBao 的审计日志能覆盖的。
+    """
+    out = {"mine": [], "shared": {}, "errors": []}
+
+    def names(path):
+        # **网络错误不能让这一页炸。** 这个函数也在错误页上被调用(要把
+        # 已有的凭据重新列出来),OpenBao 连不上时如果这里抛,用户看到的
+        # 就是 500 而不是那句"连不上 OpenBao" —— 也就是说**故障时最需要
+        # 的那条提示反而看不到了**。
+        try:
+            r = _bao("LIST", f"/v1/secret/metadata/{path}", token)
+        except requests.RequestException as exc:
+            out["errors"].append(f"{path}:连不上 OpenBao({exc})")
+            return []
+        if r.status_code == 404:
+            return []            # 一条都还没存过,不是错误
+        if r.status_code >= 400:
+            out["errors"].append(f"{path}: HTTP {r.status_code}")
+            return []
+        try:
+            return (r.json().get("data") or {}).get("keys") or []
+        except ValueError:
+            out["errors"].append(f"{path}:OpenBao 返回的不是 JSON")
+            return []
+
+    if username:
+        out["mine"] = names(f"users/{username}")
+    for g in sorted(groups or []):
+        got = names(f"shared/{g}")
+        if got:
+            out["shared"][g] = got
+    return out
+
+
+@app.route("/my-secrets")
+def my_secrets():
+    username, groups, groups_source = identity.parse_identity(request.headers)
+    token, err = _bao_token(request)
+    data = {"mine": [], "shared": {}, "errors": []}
+    if token:
+        data = _list_my_secrets(token, username, groups)
+    return render_template(
+        "my_secrets.html",
+        username=username,
+        groups=sorted(groups or []),
+        groups_diag=identity.diagnose(groups_source, "platform-portal"),
+        error=err,
+        data=data,
+    )
+
+
+@app.route("/my-secrets", methods=["POST"])
+def my_secrets_save():
+    username, groups, _ = identity.parse_identity(request.headers)
+    name = (request.form.get("name") or "").strip()
+    value = request.form.get("value") or ""
+    scope = (request.form.get("scope") or "").strip()
+
+    # 名字要能当路径的一段。**不放行斜杠** —— 否则有人写
+    # `../../shared/platform-team/x` 就跑到别人的路径上去了。OpenBao 的
+    # 策略其实也会拒(路径匹配不上),但在这里挡住能给出人看得懂的错。
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name):
+        return _my_secrets_error("名字只能用字母、数字、下划线、点、横线,最多 64 个字符")
+    if not value:
+        return _my_secrets_error("值不能为空")
+
+    token, err = _bao_token(request)
+    if err:
+        return _my_secrets_error(err)
+
+    if scope and scope != "__me__":
+        if scope not in (groups or []):
+            # 这一层也是"给人看得懂的错",真正的拦截在 OpenBao 的策略里。
+            return _my_secrets_error(f"你不在 {scope} 这个组里")
+        path = f"shared/{scope}/{name}"
+    else:
+        if not username:
+            return _my_secrets_error("认不出你是谁,存不了个人凭据")
+        path = f"users/{username}/{name}"
+
+    r = _bao("POST", f"/v1/secret/data/{path}", token,
+             json={"data": {"value": value}})
+    if r.status_code >= 400:
+        if r.status_code == 403:
+            return _my_secrets_error(
+                f"OpenBao 拒绝写 secret/{path}(403)。"
+                f"组共享凭据只有 platform-team 能写 —— 组内成员只读。")
+        return _my_secrets_error(f"写入失败(HTTP {r.status_code}):{r.text[:200]}")
+    return redirect(url_for("my_secrets"))
+
+
+@app.route("/my-secrets/delete", methods=["POST"])
+def my_secrets_delete():
+    username, groups, _ = identity.parse_identity(request.headers)
+    path = (request.form.get("path") or "").strip()
+    # 只允许删自己列表里出现过的路径形状,不接受任意路径。
+    if not re.fullmatch(r"(users/[^/]+|shared/[^/]+)/[A-Za-z0-9_.-]{1,64}", path):
+        return _my_secrets_error("路径不合法")
+    token, err = _bao_token(request)
+    if err:
+        return _my_secrets_error(err)
+    r = _bao("DELETE", f"/v1/secret/metadata/{path}", token)
+    if r.status_code >= 400:
+        return _my_secrets_error(f"删除失败(HTTP {r.status_code}):{r.text[:200]}")
+    return redirect(url_for("my_secrets"))
+
+
+def _my_secrets_error(msg):
+    username, groups, groups_source = identity.parse_identity(request.headers)
+    token, _ = _bao_token(request)
+    data = _list_my_secrets(token, username, groups) if token else {
+        "mine": [], "shared": {}, "errors": []}
+    return render_template(
+        "my_secrets.html", username=username, groups=sorted(groups or []),
+        groups_diag=identity.diagnose(groups_source, "platform-portal"),
+        error=msg, data=data), 400
+
+
 @app.route("/healthz")
 def healthz():
     return {"status": "ok"}
