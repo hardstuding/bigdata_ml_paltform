@@ -201,6 +201,12 @@ echo "==> airflow client"
 # 顶部那句警告不是摆设,改完之后跑一次 `--check` 会立刻告诉你改错地方了。
 create_client_if_absent airflow '["http://airflow.local-lite.test/auth/oauth-authorized/keycloak","http://airflow.local-lite.test:32460/auth/oauth-authorized/keycloak"]' airflow airflow-oidc-secret clientSecret
 
+# MinIO 控制台(ADR-088)。**这个 client 不挂 groups scope,挂的是下面单独
+# 建的 minio-policy scope** —— MinIO 读的 claim 名字必须是 `policy`
+# (MINIO_IDENTITY_OPENID_CLAIM_NAME),而 claim 的值要**正好是 MinIO 里
+# 存在的策略名**。复用 `groups` 那个 claim 做不到:名字对不上。
+create_client_if_absent minio '["http://minio.local-lite.test/oauth_callback","http://minio.local-lite.test:32460/oauth_callback"]' minio minio-oidc-secret clientSecret
+
 echo "==> openmetadata client"
 # 不能直接用 create_client_if_absent——OpenMetadata chart 的
 # oidcConfiguration.clientId 也是 secretRef(不像其他组件那样直接在 values
@@ -464,6 +470,66 @@ for gc in grafana jupyterhub mlflow spark-history-server argo-workflows superset
   kcadm update "clients/${gcid}/default-client-scopes/${groups_scope_id}" -r platform
   echo "已给 client ${gc} 挂上 groups 默认 scope"
 done
+
+# ---- MinIO 要的是名叫 `policy` 的 claim,单独一个 scope(ADR-088) ----
+#
+# MinIO 的 OIDC 集成是这么工作的:它从 id_token 里取一个 claim(名字由
+# MINIO_IDENTITY_OPENID_CLAIM_NAME 指定,这里用默认的 `policy`),把它的值
+# **当成 MinIO 里的策略名**去套。所以 claim 的值必须**正好等于**一个已经
+# 存在的 MinIO 策略名 —— 我们让它等于 Keycloak 的组名,MinIO 那边建同名
+# 策略(见 apps/components/minio.yaml 的 policies)。
+#
+# **为什么不复用上面那个 groups scope**:claim 名字对不上。groups 那个
+# mapper 输出的 claim 叫 `groups`,MinIO 找的是 `policy`。给同一个 mapper
+# 改名会波及所有依赖 groups claim 的组件(Superset/Trino/门户/权限门户……),
+# 那是 2026-08-29 一连修了三处的那类问题,不能为了 MinIO 再动它。
+echo "==> client scope: minio-policy(把组名映射成 MinIO 的策略名)"
+minio_scope_id=$(kcadm get client-scopes -r platform 2>/dev/null | python3 -c '
+import json, sys
+for s in json.load(sys.stdin):
+    if s["name"] == "minio-policy":
+        print(s["id"]); break
+' || true)
+if [ -z "$minio_scope_id" ]; then
+  kcadm create client-scopes -r platform \
+    -s name=minio-policy -s protocol=openid-connect \
+    -s 'attributes={"include.in.token.scope":"true","display.on.consent.screen":"false"}'
+  minio_scope_id=$(kcadm get client-scopes -r platform 2>/dev/null | python3 -c '
+import json, sys
+for s in json.load(sys.stdin):
+    if s["name"] == "minio-policy":
+        print(s["id"]); break
+')
+  echo "已创建 client scope: minio-policy"
+else
+  echo "client scope minio-policy 已存在(id=${minio_scope_id}),跳过创建"
+fi
+minio_mapper=$(kcadm get "client-scopes/${minio_scope_id}/protocol-mappers/models" -r platform 2>/dev/null | python3 -c '
+import json, sys
+for m in json.load(sys.stdin):
+    if m["name"] == "minio-policy":
+        print(m["id"]); break
+' || true)
+if [ -z "$minio_mapper" ]; then
+  # full.path=false:claim 里是 `platform-team` 而不是 `/platform-team`。
+  # MinIO 按字面匹配策略名,带斜杠的话永远匹配不上,而且**不会报错**,
+  # 只表现为"登录成功但什么桶都看不到"。
+  kcadm create "client-scopes/${minio_scope_id}/protocol-mappers/models" -r platform \
+    -s name=minio-policy -s protocol=openid-connect -s protocolMapper=oidc-group-membership-mapper \
+    -s 'config={"full.path":"false","id.token.claim":"true","access.token.claim":"true","userinfo.token.claim":"true","claim.name":"policy"}'
+  echo "已给 minio-policy scope 挂上 group-membership mapper(claim 名 = policy)"
+else
+  echo "minio-policy scope 的 mapper 已存在,跳过"
+fi
+# **只挂给 minio 这一个 client。** 别的 client 拿到一个叫 `policy` 的 claim
+# 没有用,而多一个 claim 就多一份泄露组信息的面。
+minio_client_id=$(kcadm get clients -r platform -q clientId=minio --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
+if [ -n "$minio_client_id" ]; then
+  kcadm update "clients/${minio_client_id}/default-client-scopes/${minio_scope_id}" -r platform
+  echo "已给 client minio 挂上 minio-policy 默认 scope"
+else
+  echo "client minio 还不存在,跳过挂 minio-policy scope"
+fi
 
 echo "==> 初始登录用户: ${INITIAL_USER}"
 if kcadm get users -r platform -q username="$INITIAL_USER" --fields id 2>/dev/null | grep -q '"id"'; then

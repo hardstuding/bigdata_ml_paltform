@@ -44,10 +44,14 @@
 #     post-install(只在最初第一次装的时候跑,那时候这条 NetworkPolicy
 #     还没加),这次是真的从空集群重装才第一次触发。
 #
-# 端口只放行 9000(API,S3A 客户端连的端口)。9001(console,管理界面)
-# 没有开——实测确认 `kubectl get ingress -n minio` 没有资源,这个管理界面
-# 现在压根没有任何入口能访问到(没有 Ingress,也没有任何组件的代码引用
-# 这个端口),不放行不影响任何现有功能,真要用再加。
+# 端口只放行 9000(API,S3A 客户端连的端口)。**9001(console)单独一条
+# 规则,只放行 ingress-nginx**,见文件末尾 —— 2026-08-31 给控制台开了
+# Ingress + Keycloak 单点登录(ADR-088)之前,这里写的是"这个管理界面压根
+# 没有任何入口能访问到,真要用再加"。现在就是那个时候。
+#
+# **为什么 9001 不并进下面那条消费者列表**:那条放行的是十几个业务命名
+# 空间(它们要连 S3 API 存取数据),而控制台是给人用的管理界面,唯一合法
+# 的来源是 ingress-nginx。混在一起等于让任何一个业务 Pod 都能打管理面。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -166,3 +170,27 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
+---
+# MinIO 控制台(9001):只放行 ingress-nginx(ADR-088)
+#
+# 和 keycloak.yaml 顶部说明的是同一个形态:浏览器过来的请求都经
+# ingress-nginx 转发,不是直连,所以只要放行这一个来源就够。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-nginx-to-console
+  namespace: minio
+spec:
+  podSelector:
+    matchLabels:
+      app: minio
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 9001

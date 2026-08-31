@@ -233,6 +233,38 @@ kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str
 
 ---
 
+## 开机后必验:MinIO 控制台 SSO(ADR-088,**没上过集群**)
+
+```bash
+# 0. Keycloak 侧要先跑一次(建 minio client + minio-policy scope)
+./scripts/03-configure-keycloak.sh
+
+# 1. 本机 /etc/hosts 加一条(和其它工具一样,test 档没有真实域名)
+#    <云主机IP>  minio.local-lite.test
+# 浏览器打开 http://minio.local-lite.test:32460
+# → 应该出现「用 Keycloak 登录」按钮
+
+# 2. 用 platform-team 的账号登录 → 应该能看到全部 4 个桶
+#    (lakehouse / mlflow / spark-logs / backups)
+# 3. 用一个非 platform-team 账号登录(比如 analyst001)
+# → **期望:登录得进去,但看不到任何桶。** 这是有意的,不是 bug ——
+#   MinIO 里是 Iceberg 的 parquet 原始文件,能读桶就绕过了整套 OPA 行列级
+#   权限(ADR-088)。
+# → 如果它反而能看到桶,说明 policy claim 没生效或者策略配错了,**这是
+#   一个真实的数据泄露**,要立刻查。
+
+# 4. 门户上「运维」分类里应该多一张「MinIO 控制台」卡片,状态点是绿的
+#   (探的是 9000 的 health,不是控制台页面本身)
+```
+
+**最容易踩的一个坑**:claim 里如果带了斜杠(`/platform-team`),MinIO 按
+字面匹配策略名会**永远匹配不上,而且不报错**,只表现为"登录成功但什么桶
+都看不到" —— 和上面第 3 步的正确行为长得一模一样。分辨方法:用
+platform-team 账号登录,如果**它也**看不到桶,那就是这个坑,去查
+`minio-policy` mapper 的 `full.path` 是不是 `false`。
+
+---
+
 ## 开机后必验:特征漂移作业(ADR-087,**没上过集群**)
 
 ```bash

@@ -1003,3 +1003,42 @@ class TestAuditGoldenPath:
     def test_六条以外的新链路也会被算进总数(self):
         # 这条不是测常量,是测"加链路不用改别处"这个性质。
         assert len(portal.GOLDEN_PATHS) >= 7
+
+
+class TestMinIO控制台卡片:
+    """2026-08-31 新增(ADR-088)。
+
+    在这之前 MinIO 控制台**没有任何对外入口**,门户上自然也没有链接 ——
+    zhenghe 发现的。补的时候有一条安全约束必须由测试守住,见下。
+    """
+
+    def _card(self):
+        return next((t for t in portal.TOOLS if t["name"] == "MinIO 控制台"), None)
+
+    def test_卡片存在且指向_minio_主机(self):
+        card = self._card()
+        assert card is not None
+        assert card["host"] == "minio"
+
+    def test_必须在运维分类里(self):
+        """**这条是安全约束,不是排版偏好。**
+
+        「运维」这一类在 CATEGORY_GROUPS 里只对 platform-team 可见,而
+        MinIO 的策略也只给了 platform-team(apps/components/minio.yaml)。
+        两边必须一致 —— 把这张卡片挪进别的分类,等于在门户上给所有人
+        显示一个他们点进去会被拒的链接,而更糟的情况是有人顺手把 MinIO
+        策略也放开,那就**绕过了整套 OPA 行列级权限**(MinIO 里是 Iceberg
+        的 parquet 原始文件)。
+        """
+        card = self._card()
+        assert card["category"] == "运维"
+        assert portal.CATEGORY_AUDIENCE["运维"] == {"platform-team"}
+
+    def test_探的是存储健康不是控制台页面(self):
+        """控制台是个前端,它"能打开"不代表对象存储是好的。"""
+        card = self._card()
+        assert "9000" in card["probe"] and "health" in card["probe"]
+
+    def test_非_platform_team_看不到这张卡片(self):
+        vis = portal.visible_categories({"data-analysts"})
+        assert "运维" not in vis

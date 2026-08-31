@@ -193,6 +193,16 @@ TOOLS = [
         "probe": "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local/api/health",
     },
     {
+        "category": "运维",
+        "name": "MinIO 控制台",
+        "description": "对象存储:桶、文件、用量。**只有 platform-team 能进**",
+        "host": "minio",
+        "logo": "minio",
+        # 探的是 API 端口的健康检查(9000),不是控制台自己 —— 控制台
+        # 是个前端,它"能打开"不代表存储是好的。
+        "probe": "http://minio.minio.svc.cluster.local:9000/minio/health/live",
+    },
+    {
         "category": "身份",
         "name": "Keycloak",
         "description": "统一身份 / SSO,这里的账号密码所有工具通用",

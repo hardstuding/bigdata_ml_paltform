@@ -46,6 +46,60 @@ spec:
             memory: 512Mi
         consoleService:
           type: ClusterIP
+        # ---- 控制台对外入口 + Keycloak 单点登录(ADR-088)----
+        #
+        # 在这之前 MinIO 控制台**根本没有对外入口**,要看对象存储只能
+        # kubectl port-forward。数据工程师排查"这张 Iceberg 表的文件长什么
+        # 样""备份真的传上去了吗",只能靠命令行。
+        consoleIngress:
+          enabled: true
+          ingressClassName: nginx
+          hosts:
+            - minio.local-lite.test
+        oidc:
+          enabled: true
+          # 走**集群内**地址取 .well-known,不绕一圈公网 —— 和别的组件
+          # 一致(见 apps/components/superset.yaml)。浏览器那一侧的跳转
+          # 地址由 Keycloak 自己按 KC_HOSTNAME 生成,不受这个影响。
+          configUrl: "http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/.well-known/openid-configuration"
+          clientId: minio
+          existingClientSecretName: minio-oidc-secret
+          existingClientSecretKey: clientSecret
+          # MinIO 把这个 claim 的值**当成策略名**去套。Keycloak 那边有一个
+          # 专门的 minio-policy scope 把组名写进这个 claim(见
+          # templates/scripts/03-configure-keycloak.sh)。
+          claimName: policy
+          scopes: "openid,profile,email"
+          redirectUri: "http://minio.local-lite.test:32460/oauth_callback"
+          displayName: "用 Keycloak 登录"
+        # ---- 策略:**只有 platform-team**,这是一条安全决定,不是偷懒 ----
+        #
+        # MinIO 里放的是 Iceberg 的 parquet 原始文件。**谁能读 lakehouse 桶,
+        # 谁就绕过了整套 OPA 权限** —— 表级授权(ADR-051)、行过滤、列脱敏
+        # (ADR-074)全部失效,因为那套的前提是"数据只通过 Trino 访问"。
+        # 分析师在 Superset 里被脱敏的手机号,从 MinIO 控制台点一下就能下载
+        # 明文。
+        #
+        # platform-team 拿 consoleAdmin 不增加暴露面:他们本来就能通过 Trino
+        # 读全部数据(is_platform_admin 不受表级授权约束)。
+        #
+        # **其余组没有策略 = 能通过 SSO 登录但看不到任何桶。** 这是有意的。
+        # 想给某个组开权限之前,先回答:它绕过的那些行列级策略,你打算怎么办?
+        policies:
+          - name: platform-team
+            statements:
+              - effect: Allow
+                resources:
+                  - "arn:aws:s3:::*"
+                actions:
+                  - "s3:*"
+              # 控制台本身要能列桶、看用量,这些是 admin 面的动作,
+              # 不在 s3:* 里。
+              - effect: Allow
+                resources:
+                  - "arn:aws:s3:::*"
+                actions:
+                  - "admin:*"
         service:
           type: ClusterIP
         buckets:

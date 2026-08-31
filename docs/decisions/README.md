@@ -137,6 +137,7 @@
 | [085](085-inference-payload-logging.md) | 推理请求留痕:KServe 自带 logger → Kafka → Iceberg | **已实现,未部署验证** |
 | [086](086-approval-belongs-to-oa.md) | 审批流程外包给 OA,平台只留策略和执行 | **协议已改对(`APPROVAL_BACKEND=oa`),没有真实 OA 可对接,未验证** |
 | [087](087-feature-drift-monitoring.md) | 特征漂移:训练时把基线存进 MLflow tag,一个 jobs/ 作业算 PSI | **已实现,未部署验证** |
+| [088](088-minio-console-sso.md) | MinIO 控制台接 Keycloak;策略只给 platform-team(读桶=绕过 OPA) | **已实现,未部署验证** |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 已实现;ACME 那一档**还没有在真实环境验证过**(缺真实域名和 ICP 备案) |
 
