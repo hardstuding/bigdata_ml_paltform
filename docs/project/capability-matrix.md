@@ -41,11 +41,19 @@
 
 ## 总览
 
+**这张总览是手写的摘要,不是从下面的详情表生成的** —— 所以它会过期,而且
+**已经过期过**:2026-08-31 核对时发现两行和详情表自相矛盾(说 SQL Lab 的
+impersonation 没验过、说作业发布没有多文件和晋级路径,而详情表里两条都写
+着 08-30 实机验证通过)。这正是 CLAUDE.md「状态别写两遍」那条讲的成因。
+
+**读的时候以下面的详情表为准。** 这里只回答"整体走到哪了",具体某条能力
+能不能用,看详情表那一行的验证级别和证据。
+
 | 角色 | 能独立开工? | 最大的一个卡点 |
 |---|---|---|
-| 运维 / 平台工程 | ✅ | 告警终点还是集群内 echo sink,没接真实渠道(按既定安排,等上测试/生产再接) |
-| 数据分析师 | ✅ | SQL 工作台刚换成 Superset SQL Lab(ADR-084),**impersonation 没在 SQL Lab 上单独验过** |
-| 大数据开发 | ✅ | 批和流两条链路都端到端通了;作业发布还是"一个脚本 + 一份 yaml",没有多文件项目和晋级路径 |
+| 运维 / 平台工程 | ✅ | 告警终点还是集群内 echo sink,没接真实渠道(按既定安排,等上测试/生产再接);**用户凭据托管(OpenBao)刚做完、没上过集群** |
+| 数据分析师 | ✅ | 没有卡点了 —— SQL Lab 的 impersonation 2026-08-30 已单独验过(见下面那一行) |
+| 大数据开发 | ✅ | 批和流两条链路都端到端通了;作业发布支持多文件/参数化补数/按环境晋级(2026-08-30 实机验证)。**还缺**:每作业独立镜像、多层目录结构 |
 | 算法工程师 | ✅ | 灰度做不了是架构决定的(RawDeployment 无 Knative),不是没做 |
 | 管理 / 数据治理 | 🟡 | 流程(审批/回收/交接)完整,视图空白——按月聚合的数据 2026-08-28 才开始攒 |
 
@@ -77,6 +85,9 @@
 | 统一服务目录 | ✅ | 集成验证 | 2026-08-29 | [service-catalog.md](../reference/service-catalog.md)。关键是 `scripts/check-service-catalog.py` —— 漏登记/owner 不存在/依赖悬空/生成物漂移,CI 都会红 |
 | 容量看板 | 🟡 | 未验证 | — | `platform/grafana-capacity-dashboard/` 6 个 panel 写好了,**没部署验证过** |
 | Argo Workflows 授权 | ✅ | 集成验证 | 2026-08-19 | curl+cookie-jar:登录 → 列 → 建 → 查到 → 删 |
+| 凭据托管(平台自己的) | 🟡 | 集成验证 | 2026-08-27 | `scripts/00-generate-secrets.sh` 生成 → 裸 K8s Secret。**能用,但没有轮换、没有审计**(谁读过查不出来)、etcd 里是 base64 不是加密。`scripts/show-credentials.sh` 直接读活集群 —— 加它是因为 `secrets/generated-credentials.txt` 那份快照实测 42 条里 26 条已失效。迁进 OpenBao 是第二阶段,见 [ADR-089](../decisions/089-secret-management-openbao.md) |
+| 凭据托管(用户自己的) | 🟡 | 未验证 | — | [ADR-089](../decisions/089-secret-management-openbao.md)。**这条在 2026-08-31 之前是「计划中」都算不上 —— 压根不存在**:用户要连自己的库,只能把密码写死在代码里或每次手动 export。OpenBao + 按人隔离的策略 + `platform_sdk.secret()` 已实现,**没上过集群**;验证步骤在 next-boot-checklist |
+| 对象存储管理界面 | 🟡 | 未验证 | — | [ADR-088](../decisions/088-minio-console-sso.md)。之前**根本没有对外入口**,只能 kubectl port-forward。已开 Ingress + Keycloak SSO,策略只给 platform-team(读 lakehouse 桶 = 绕过整套 OPA 行列级权限)。**没上过集群** |
 
 ## 数据分析师
 
