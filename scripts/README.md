@@ -52,21 +52,22 @@ TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
 | 12 | `45-configure-acr-pull.sh` | 尽力 | 私有镜像仓库的拉取凭据。**用了 ACR 的环境这是硬前置** —— 没有它自建镜像全部 ImagePullBackOff,下一步会一直等到超时。当前渲染结果里没引用私有仓库就跳过 |
 | 13 | *(等待)* | 必需 | 等所有 Application 收敛。**顺序很重要**:下面那些"建账号""配数据源"的前提是对应组件已经跑起来了 —— 2026-08-22 之前这些步骤紧跟在配 Keycloak 后面,全新集群上组件一个都没起来,于是全部打印"跳过"然后过去,**脚本报全部完成、实际一件都没做** |
 | 14 | `49-init-unseal-openbao.sh` | 必需 | OpenBao 初始化 + 解封([ADR-089](../docs/decisions/089-secret-management-openbao.md))。**和别的组件初始化不一样:这一步每次开机都要跑**,不是只跑第一次 —— OpenBao 每次重启都是封印状态,不解封的话它在、但什么凭据都读不了,而症状是「取不到凭据」不是「OpenBao 没起来」。脚本自己幂等:已初始化跳过 init,已解封什么都不做。openbao 命名空间不存在就跳过 |
-| 15 | `07-fix-trino-liveness-probe.sh` | 尽力 | 修 chart 硬编码的坏探针([ADR-017](../docs/decisions/017-trino-oauth2-sso.md))。`apps/trino-liveness-fix/` 那个 CronJob 每 5 分钟也会自动修,这里跑一次是为了不等那 5 分钟 |
-| 16 | `05-configure-airflow.sh` | 尽力 | 建 Airflow 初始管理员 |
-| 17 | `06-configure-superset-datasources.sh` | 尽力 | 给 Superset 注册 Trino 数据源 |
-| 18 | `10-install-kserve-serving-runtimes.sh` | 尽力 | 装 ClusterServingRuntime(官方 chart 不带,不装的话模型上线时没有 runtime 可用) |
-| 19 | `20-configure-openmetadata-search-truststore.sh` | 尽力 | OpenMetadata 连 OpenSearch 的自签证书信任 |
-| 20 | `27-configure-openmetadata-bot.sh` | 尽力 | 取 ingestion-bot token,给建表工具 / 权限门户 / 血缘推送用 |
-| 21 | `29-configure-openmetadata-trino-ingestion.sh` | 尽力 | Trino 元数据自动采集(不配的话数据目录里只有人工录入的表) |
-| 22 | `34-configure-openmetadata-data-quality.sh` | 尽力 | 数据质量断言([ADR-065](../docs/decisions/065-data-quality-on-openmetadata.md)) |
-| 23 | `43-configure-openmetadata-dbt-ingestion.sh` | 尽力 | dbt 血缘接进目录([ADR-082](../docs/decisions/082-dbt-lineage-ingestion.md)) |
+| 15 | `50-configure-openbao-auth.sh` | 必需 | OpenBao 的 KV 引擎、Kubernetes auth(给 Pod 用,不分发密钥)、OIDC auth(给人用,身份源是 Keycloak)和**按人隔离的路径策略**([ADR-089](../docs/decisions/089-secret-management-openbao.md))。隔离由 OpenBao 的策略模板强制,不是调用方自觉 —— 和 ADR-051 把表级授权交给 OPA 同一条理由。前一步如果发现 `openbao-oidc-secret` 还没建(第一次拉起时 openbao 命名空间比 scripts/03 晚出现),会先补跑一次 `03` |
+| 16 | `07-fix-trino-liveness-probe.sh` | 尽力 | 修 chart 硬编码的坏探针([ADR-017](../docs/decisions/017-trino-oauth2-sso.md))。`apps/trino-liveness-fix/` 那个 CronJob 每 5 分钟也会自动修,这里跑一次是为了不等那 5 分钟 |
+| 17 | `05-configure-airflow.sh` | 尽力 | 建 Airflow 初始管理员 |
+| 18 | `06-configure-superset-datasources.sh` | 尽力 | 给 Superset 注册 Trino 数据源 |
+| 19 | `10-install-kserve-serving-runtimes.sh` | 尽力 | 装 ClusterServingRuntime(官方 chart 不带,不装的话模型上线时没有 runtime 可用) |
+| 20 | `20-configure-openmetadata-search-truststore.sh` | 尽力 | OpenMetadata 连 OpenSearch 的自签证书信任 |
+| 21 | `27-configure-openmetadata-bot.sh` | 尽力 | 取 ingestion-bot token,给建表工具 / 权限门户 / 血缘推送用 |
+| 22 | `29-configure-openmetadata-trino-ingestion.sh` | 尽力 | Trino 元数据自动采集(不配的话数据目录里只有人工录入的表) |
+| 23 | `34-configure-openmetadata-data-quality.sh` | 尽力 | 数据质量断言([ADR-065](../docs/decisions/065-data-quality-on-openmetadata.md)) |
+| 24 | `43-configure-openmetadata-dbt-ingestion.sh` | 尽力 | dbt 血缘接进目录([ADR-082](../docs/decisions/082-dbt-lineage-ingestion.md)) |
 | 22.5 | `47-configure-openmetadata-trino-lineage.sh` | 尽力 | **从 Trino 查询历史自动推血缘**(不需要人工声明 inputs/outputs)。**必须排在 `29` 之后** —— 血缘是往已存在的表实体上挂边的 |
-| 24 | `12-sync-iam.py` | 尽力 | `platform/iam/` 的组织架构/角色数据 → Keycloak |
-| 25 | `14-configure-airflow-seatunnel-variable.sh` | 尽力 | 给 SeaTunnel DAG 写 MinIO 凭据 |
-| 26 | `08-create-demo-data.sh` | 尽力 | 建 demo 数据。**不是装饰** —— 黄金链路探针依赖这几张表 |
-| 27 | `09-train-demo-model.sh` | 尽力 | 训一个 demo 模型。同样不是装饰 —— `model` 那条探针要求 MLflow 里有 READY 版本 |
-| 28 | *(报告)* | 必需 | 检查必需能力、出部署报告(`logs/bootstrap-report.json`)。**必需项没达标会非零退出** |
+| 25 | `12-sync-iam.py` | 尽力 | `platform/iam/` 的组织架构/角色数据 → Keycloak |
+| 26 | `14-configure-airflow-seatunnel-variable.sh` | 尽力 | 给 SeaTunnel DAG 写 MinIO 凭据 |
+| 27 | `08-create-demo-data.sh` | 尽力 | 建 demo 数据。**不是装饰** —— 黄金链路探针依赖这几张表 |
+| 28 | `09-train-demo-model.sh` | 尽力 | 训一个 demo 模型。同样不是装饰 —— `model` 那条探针要求 MLflow 里有 READY 版本 |
+| 29 | *(报告)* | 必需 | 检查必需能力、出部署报告(`logs/bootstrap-report.json`)。**必需项没达标会非零退出** |
 
 **完整日志**在 `logs/bootstrap-all.log`(不进 git)。
 

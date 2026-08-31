@@ -188,6 +188,13 @@ jobs:
           pip install --quiet ./platform-sdk
           python3 scripts/check-doc-examples.py
 
+      # 2026-08-31 补:platform-sdk/tests/ 下有 53 条测试,而在这之前
+      # **CI 里一步都没跑过** —— 工作流里只有上面那个 pip install(给
+      # check-doc-examples 用)。写了没人跑的测试等于没有:它不会拦住任何
+      # 东西,还会让人以为这块有覆盖。
+      - name: platform-sdk 单元测试
+        run: python3 -m pytest platform-sdk/tests/ -q
+
       # jobs/ 下的作业定义 → Argo CronWorkflow 的生成物不能漂移,而且作业
       # 定义本身要合法(name 能当 K8s 资源名、cron 是五段式、owner_group 是
       # platform/iam/ 里真实存在的组)。owner_group 写错的后果特别隐蔽:

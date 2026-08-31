@@ -19,14 +19,22 @@
     # 触发平台已经部署好的 WorkflowTemplate(比如训练流程),不是自己写
     # 临时脚本——两者的区别见 submit.py 里 run_workflow_template() 的说明
     wf = run_workflow_template("train-demo-model")
+
+    # 读自己托管的凭据(ADR-089)。在这之前,一个人要连自己的 MySQL 只能
+    # 把密码写死在代码里(会进 git)或者每次手动 export(重启就没,定时
+    # 作业更拿不到)。
+    password = secret("mysql_crm")
 """
 
 from .config import MissingCredential
 from .connect import mlflow_setup, query, s3_client, trino_connection
+from .secrets import list_secrets, secret
 
 __all__ = [
     "MissingCredential",
+    "list_secrets",
     "mlflow_setup",
+    "secret",
     "query",
     "s3_client",
     "trino_connection",

@@ -119,11 +119,58 @@ spec:
             # 要取 .name;而且 manage_groups 关掉时这个列表会是空的——那种
             # 情况下注入一个空字符串,SDK 那边会推断不出队列、作业不打标签,
             # 退化成引入 Kueue 之前的行为,不会报错。
-            "03-inject-groups": |
-              def _inject_groups(spawner):
+            # **一个 hook 干两件事,不是两个 hook。**
+            #
+            # KubeSpawner 只有一个 `pre_spawn_hook` 属性 —— 写两遍的话后一个
+            # 静默覆盖前一个,而且不会报错。2026-08-31 加注入 OIDC token 时
+            # 就是先分成两块写的,结果 PLATFORM_GROUPS 那半直接失效
+            # (后果:按组配额的队列推断拿不到组,所有作业退化成不打标签)。
+            # extraConfig 的块按键名排序执行,`04-` 覆盖 `03-`,症状是
+            # "配额莫名其妙不生效",查起来会绕很远。
+            "03-inject-identity": |
+              # notebook 里的代码没有任何别的途径知道"当前登录的人是谁、
+              # 属于哪个组" —— hub 知道(manage_groups 已开,allowed_groups
+              # 就是靠它生效的),但这个信息默认不会传给 singleuser pod。
+              #
+              # 组:**这是 ADR-064 那套按组配额能不能真正生效的关键一环**。
+              # platform_sdk 提交作业时按提交者的组决定进哪个 Kueue 队列
+              # (config.queue_name())。不注入的话队列只能靠用户手填,而
+              # "让用户手填自己该用哪个组的配额"等于没有配额。
+              # manage_groups 关掉时这个列表是空的 —— 那种情况下注入空字符串,
+              # SDK 推断不出队列、作业不打标签,退化成引入 Kueue 之前的行为,
+              # 不报错。
+              #
+              # OIDC token:notebook 里读**用户自己的**凭据要用他本人的身份
+              # (ADR-089)。不能用 ServiceAccount —— singleuser pod 的 SA 是
+              # 所有人共用的,OpenBao 只看得到"某个 SA"、分不清是谁,那样
+              # `secret/users/<用户名>/` 这条按人隔离就没法由 OpenBao 强制,
+              # 只能退化成"SDK 里写个 if",而写在调用方的检查绕过调用方就没了
+              # (和 ADR-051 把表级授权交给 OPA 同一条理由)。
+              #
+              # **代价,如实记**:token 以环境变量形式存在于 notebook 进程里,
+              # 能在 notebook 里执行代码的人就能拿到 —— 但那个人本来就是
+              # token 的主人,不比"他自己登录一次"泄露更多。真正的限制是
+              # **token 会过期**(Keycloak 默认 5 分钟),长时间开着的 notebook
+              # 里 secret() 会失败并提示重启内核。自动续期要把 refresh token
+              # 也塞进去,那才是真正扩大暴露面,不做。
+              c.GenericOAuthenticator.enable_auth_state = True
+
+              async def _inject_identity(spawner):
                   groups = [g.name for g in getattr(spawner.user, "groups", [])]
                   spawner.environment["PLATFORM_GROUPS"] = ",".join(groups)
-              c.KubeSpawner.pre_spawn_hook = _inject_groups
+                  try:
+                      auth_state = await spawner.user.get_auth_state()
+                  except Exception:
+                      # auth_state 加密密钥没配时会抛。**不能让 notebook 起
+                      # 不来** —— 退化成"secret() 用不了",SDK 那边有能看懂
+                      # 的提示。
+                      auth_state = None
+                  if auth_state:
+                      token = auth_state.get("id_token") or auth_state.get("access_token")
+                      if token:
+                          spawner.environment["PLATFORM_OIDC_TOKEN"] = token
+
+              c.KubeSpawner.pre_spawn_hook = _inject_identity
           resources:
             requests:
               cpu: {{RES:jupyterhub_hub_cpu}}

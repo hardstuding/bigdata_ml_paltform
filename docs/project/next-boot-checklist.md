@@ -235,6 +235,53 @@ kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str
 
 ## 开机后必验:OpenBao 起来并能自动解封(ADR-089,**没上过集群**)
 
+**这一批一共三步,按顺序验**:①49 起来并解封(下面)、②50 配认证和策略、
+③notebook 里 `platform_sdk.secret()` 真的读得到。
+
+### ② 认证和策略(scripts/50)
+
+```bash
+./scripts/50-configure-openbao-auth.sh
+# 期望:1/7 到 7/7 全部打印成功,最后一段是 4 个身份组
+
+# 验按人隔离**真的由 OpenBao 强制**(这是 ADR-089 的核心):
+BAO() { kubectl -n openbao exec -i openbao-0 -- bao "$@"; }
+TOKEN=$(kubectl -n openbao get secret openbao-unseal-keys -o jsonpath='{.data.root_token}' | base64 -d)
+# 用 root 写两个人的凭据
+kubectl -n openbao exec -i openbao-0 --env=BAO_TOKEN=$TOKEN -- \
+  bao kv put secret/users/alice/demo value=alice的
+kubectl -n openbao exec -i openbao-0 --env=BAO_TOKEN=$TOKEN -- \
+  bao kv put secret/users/bob/demo value=bob的
+# 然后用 alice 的身份登录(见下面 ③),读 bob 的那条 → **期望 403**
+```
+
+### ③ notebook 里读得到(这是整件事的验收标准)
+
+```python
+# 在 JupyterHub 里新起一个 notebook(必须是新起的 —— 旧的没有注入 token)
+import os
+print(os.environ.get("PLATFORM_OIDC_TOKEN", "")[:20], os.environ.get("PLATFORM_GROUPS"))
+# → 两个都应该有值。PLATFORM_OIDC_TOKEN 空 = auth_state 没生效,查 hub 日志
+
+import platform_sdk
+platform_sdk.list_secrets()      # 应该列出自己的
+platform_sdk.secret("demo")      # 应该拿到值
+```
+
+**最容易撞的两个坑,症状和原因差很远**:
+
+1. `invalid audience` —— notebook 里的 id_token 是 **jupyterhub** 那个
+   client 签的,不是 openbao 的。`auth/jwt/role/platform-user` 的
+   `bound_audiences` 里必须有 `jupyterhub`。**不要往策略上查。**
+2. 读不到但也不报权限错,列出来就是空的 —— 多半是**策略模板里的 accessor
+   不对**:同一个人从 UI 登录(oidc)和从 SDK 登录(jwt)是两条不同的
+   alias,两个 accessor 的路径都得写。scripts/50 里写了,但如果 jwt 是后
+   启用的、策略没重写,就会是这个症状。重跑一次 scripts/50。
+
+---
+
+
+
 **这是三件新东西里风险最高的一件** —— 它进了部署主线(`bootstrap-all.sh`
 第 14 步),跑不通会让一键拉起在那儿停住。
 

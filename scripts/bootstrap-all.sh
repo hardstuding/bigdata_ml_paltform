@@ -291,6 +291,20 @@ step "OpenBao 初始化 + 解封(ADR-089;**每次开机都要,不只是第一次
 # 脚本自己是幂等的:已初始化就跳过 init,已解封就什么都不做。
 if kubectl get ns openbao >/dev/null 2>&1; then
   run_required "scripts/49-init-unseal-openbao.sh" ./scripts/49-init-unseal-openbao.sh
+
+  # scripts/03 跑在前面(第 8 步),那时候 openbao 命名空间**可能还不存在**
+  # ——ArgoCD 刚 apply 完 Application,命名空间要等第一次同步才建出来。
+  # 那种情况下 03 会跳过写这个 Secret(它对命名空间缺失是容错的),于是
+  # 下一步配 OIDC 就没有 client secret 可用。
+  #
+  # **不指望人记得重跑** —— 缺了就在这里补跑一次 03(它是幂等的)。
+  # 这正是 2026-08-19 jupyterhub/spark-history-server 撞过的坑:client 在
+  # Keycloak 里建好了、k8s Secret 永远没补上,而且不会自愈。
+  if ! kubectl -n openbao get secret openbao-oidc-secret >/dev/null 2>&1; then
+    log "  openbao 的 Keycloak client secret 还没建,补跑一次 scripts/03"
+    run_required "scripts/03-configure-keycloak.sh(补 openbao client)" ./scripts/03-configure-keycloak.sh
+  fi
+  run_required "scripts/50-configure-openbao-auth.sh" ./scripts/50-configure-openbao-auth.sh
 else
   log "  跳过:openbao 命名空间不存在(这一档没启用这个组件)"
 fi

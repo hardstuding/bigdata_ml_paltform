@@ -207,6 +207,10 @@ create_client_if_absent airflow '["{{EXTERNAL_SCHEME}}://airflow.{{DOMAIN_SUFFIX
 # 存在的策略名**。复用 `groups` 那个 claim 做不到:名字对不上。
 create_client_if_absent minio '["{{EXTERNAL_SCHEME}}://minio.{{DOMAIN_SUFFIX}}/oauth_callback","{{EXTERNAL_SCHEME}}://minio.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth_callback"]' minio minio-oidc-secret clientSecret
 
+# OpenBao(ADR-089)。redirect 里那个 localhost:8250 是 `bao login -method=oidc`
+# 的标准回调(CLI 会在本机起一个临时监听);UI 登录走 openbao.<域名>/ui/vault/auth/oidc/oidc/callback。
+create_client_if_absent openbao '["{{EXTERNAL_SCHEME}}://openbao.{{DOMAIN_SUFFIX}}/ui/vault/auth/oidc/oidc/callback","{{EXTERNAL_SCHEME}}://openbao.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/ui/vault/auth/oidc/oidc/callback","http://localhost:8250/oidc/callback"]' openbao openbao-oidc-secret clientSecret
+
 echo "==> openmetadata client"
 # 不能直接用 create_client_if_absent——OpenMetadata chart 的
 # oidcConfiguration.clientId 也是 secretRef(不像其他组件那样直接在 values
@@ -459,8 +463,13 @@ fi
 # client scope,不是 optional**,所以 oauth2-proxy 那边不需要在请求里加
 # `groups` —— 这一点很重要:请求一个 client 没配的 scope,Keycloak 会直接
 # `invalid_scope` 拒绝,登录页都进不去(MLflow 2026-08-19 就是这么炸的)。
+# 2026-08-31 补 openbao(ADR-089):组共享凭据 secret/shared/<组名>/ 的授权
+# 靠把 groups claim 映射成 OpenBao 的身份组,拿不到 groups 的话每个人就只有
+# 自己那一段路径,组共享完全不生效 —— 而且**不会报错**,只表现为"看不到"。
+# 这正是 2026-08-29 连修三处(Superset 全员管理员、权限门户全员 403、
+# Trino 的 is_platform_admin 是摆设)的同一个形态。
 for gc in grafana jupyterhub mlflow spark-history-server argo-workflows superset \
-          permission-request-app platform-portal table-registration-app; do
+          permission-request-app platform-portal table-registration-app openbao; do
   gcid=$(kcadm get clients -r platform -q clientId="$gc" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -z "$gcid" ]; then
     echo "client ${gc} 还不存在,跳过挂 groups scope"
