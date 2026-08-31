@@ -282,6 +282,19 @@ log "以后在 environments/<env>/config.yaml 的 enabled_components 里启用�
 log "重新渲染 apps/definitions/ 之后,单独重跑对应的那一条命令就行,"
 log "不需要重跑整份脚本。"
 
+step "OpenBao 初始化 + 解封(ADR-089;**每次开机都要,不只是第一次**)"
+# 这一步和别的"组件专属初始化"不一样:那些是一次性的(建账号、配数据源),
+# 而 OpenBao **每次重启都是封印状态** —— 不解封的话它在,但什么都读不了,
+# 而且症状是"凭据取不到",不是"OpenBao 没起来"。所以它必须留在部署主线里,
+# 开机重跑这份脚本时也会跑到。
+#
+# 脚本自己是幂等的:已初始化就跳过 init,已解封就什么都不做。
+if kubectl get ns openbao >/dev/null 2>&1; then
+  run_required "scripts/49-init-unseal-openbao.sh" ./scripts/49-init-unseal-openbao.sh
+else
+  log "  跳过:openbao 命名空间不存在(这一档没启用这个组件)"
+fi
+
 step "修 Trino livenessProbe(chart 硬编码错误,见 ADR-017;每次 Deployment 重建都要重跑,含第一次拉起)"
 if kubectl get deploy trino-coordinator -n trino >/dev/null 2>&1; then
   run_optional "scripts/07-fix-trino-liveness-probe.sh" ./scripts/07-fix-trino-liveness-probe.sh

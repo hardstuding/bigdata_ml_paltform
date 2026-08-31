@@ -1,0 +1,95 @@
+# 这个文件是自动生成的(python3 scripts/render-environment-config.py
+# <env>),源头是 apps/components/openbao.yaml +
+# environments/<env>/config.yaml 里的 enabled_components 列表——改动
+# 请改 apps/components/openbao.yaml,不要直接改这份生成结果(下次渲染会被
+# 覆盖)。这个组件要不要在这个环境启用,改 config.yaml 的
+# enabled_components 列表,不要手动删/加这个文件。见
+# docs/decisions/057-architecture-review-2026-08-19.md 第三批。
+# 凭据托管(ADR-089)。**不是 Vault** —— HashiCorp Vault 2023 年改成 BUSL
+# 许可证,不再是开源软件;OpenBao 是 Linux Foundation 旗下的开源分支,
+# API 兼容。这个取舍和 Feast 的 Redis 从浮动 7-alpine 固定到 8.4.5 是
+# 同一条理由:在许可证上踩坑的代价,是以后想升级却发现不能升。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openbao
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://openbao.github.io/openbao-helm
+    chart: openbao
+    targetRevision: 0.29.3
+    helm:
+      valuesObject:
+        global:
+          enabled: true
+        injector:
+          # **不装 sidecar 注入器。** 它的用法是"给 Deployment 加注解,
+          # 自动把凭据写进一个共享卷" —— 对这个平台不合适:我们的调用方是
+          # notebook 和 Argo 作业,它们要的是**运行时按名字取一个凭据**
+          # (`platform_sdk.secret("mysql_crm")`),不是启动时把文件铺好。
+          # 少装一个组件,少一份 webhook(注入器是 MutatingWebhook,它挂了
+          # 会让整个集群的 Pod 创建变慢甚至失败)。
+          enabled: false
+        server:
+          image:
+            # chart 默认 quay.io。这台机器到 quay.io 老是连不上
+            # (TLS handshake timeout/EOF,docker hub 反而通),和
+            # apps/components/minio.yaml 里同一个坑、同一个解法。
+            registry: "docker.io"
+            repository: "openbao/openbao"
+            tag: "2.6.2"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          dataStorage:
+            enabled: true
+            size: 5Gi
+          # 单副本 + 集成存储(raft)。
+          #
+          # **为什么是 raft 而不是 file**:file 存储以后想加副本得整个迁移,
+          # raft 从一副本扩到三副本是加节点。这个平台的 prod 那档迟早要多
+          # 副本(凭据服务挂了 = 所有作业读不到凭据),现在选 file 等于给
+          # 那时候埋一次迁移。
+          #
+          # **单副本本身是已知缺口**,和 MinIO 一样,记在
+          # production-readiness-gaps 里,不在这里假装解决了。
+          standalone:
+            enabled: false
+          ha:
+            enabled: true
+            replicas: 1
+            raft:
+              enabled: true
+              setNodeId: true
+              config: |
+                ui = true
+                listener "tcp" {
+                  address = "[::]:8200"
+                  cluster_address = "[::]:8201"
+                  # **集群内明文 HTTP。** 和 Trino/Keycloak 同一个既定姿态:
+                  # TLS 终结在 ingress-nginx,集群内部靠 NetworkPolicy 收拢
+                  # 来源。给每个组件配一套内部证书是另一件事(服务网格),
+                  # ADR-064 已经明确这个规模上不做。
+                  tls_disable = 1
+                }
+                storage "raft" {
+                  path = "/openbao/data"
+                }
+                service_registration "kubernetes" {}
+          # UI 走 ingress,和其余工具一致(ADR-088 给 MinIO 开的那条同款)。
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            hosts:
+              - host: openbao.local-lite.test
+        ui:
+          enabled: true
+          # ClusterIP:外部访问走上面那条 ingress,不额外开 NodePort。
+          serviceType: ClusterIP

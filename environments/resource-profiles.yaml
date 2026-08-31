@@ -219,6 +219,11 @@ local-lite:
   openmetadata_ingestion_cpu_limit: "1"
   openmetadata_ingestion_memory_request: "512Mi"
   openmetadata_ingestion_memory_limit: "1536Mi"
+  # OpenBao(ADR-089)。本地这档给最小值:它只是个 KV,不吃资源。
+  openbao_cpu: "100m"
+  openbao_memory_request: "128Mi"
+  openbao_memory_limit: "256Mi"
+  openbao_storage_size: "1Gi"
 
 cloud-full:
   # 阿里云 ECS 16 vCPU / 64 GiB,当前实际在跑的就是这一档
@@ -414,6 +419,11 @@ cloud-full:
   openmetadata_ingestion_cpu_limit: "1"
   openmetadata_ingestion_memory_request: "512Mi"
   openmetadata_ingestion_memory_limit: "1536Mi"
+  # OpenBao(ADR-089)
+  openbao_cpu: "200m"
+  openbao_memory_request: "256Mi"
+  openbao_memory_limit: "512Mi"
+  openbao_storage_size: "5Gi"
 
 prod:
   # 6 台物理机(见 environments/prod/README.md 的目标硬件)。下面的数字是
@@ -640,4 +650,10 @@ prod:
   openmetadata_ingestion_cpu_limit: "2"
   openmetadata_ingestion_memory_request: "2Gi"
   openmetadata_ingestion_memory_limit: "6Gi"
+  # OpenBao(ADR-089)。prod 这档要留出余量:凭据读取是所有作业的
+  # 前置,它慢一秒,每个作业都慢一秒。
+  openbao_cpu: "500m"
+  openbao_memory_request: "512Mi"
+  openbao_memory_limit: "1Gi"
+  openbao_storage_size: "20Gi"
 

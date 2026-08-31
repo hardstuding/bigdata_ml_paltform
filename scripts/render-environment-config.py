@@ -407,6 +407,43 @@ def main():
     if missing:
         print(f"!! environments/{env}/config.yaml 缺这些必填项: {missing}", file=sys.stderr)
         sys.exit(1)
+    # seal_mode 的校验:**prod 用 kms 而没配 KMS 参数,直接拒绝渲染。**
+    #
+    # 不给"没配就退回开发档"留任何余地 —— 那意味着一个本该由云 KMS 保护的
+    # 生产凭据库,会因为漏配一个参数而变成"解封密钥就放在隔壁 k8s Secret 里",
+    # 而且没有任何地方会报错。这类"配置没配对就悄悄降级"是这个仓库反复
+    # 踩过的形态(见 CLAUDE.md「状态别写两遍」那节)。
+    if "seal_mode" not in config:
+        print(f"!! environments/{env}/config.yaml 缺 seal_mode "
+              f"(dev-autounseal | kms),见 ADR-089", file=sys.stderr)
+        sys.exit(1)
+    if config["seal_mode"] not in ("dev-autounseal", "kms"):
+        print(f"!! environments/{env}/config.yaml 的 seal_mode 只能是 "
+              f"dev-autounseal 或 kms,现在是 {config['seal_mode']!r}", file=sys.stderr)
+        sys.exit(1)
+    if config["seal_mode"] == "kms":
+        # 这里只查**键在不在**,不查值是不是还是占位符。
+        #
+        # 为什么分两层:prod 这一档必须**始终能渲染** —— CI 有一步"三档都
+        # 要能渲染出来",目的就是让 prod 缺一个键在 CI 就报出来,而不是等到
+        # 真去部署那一档、人已经在等着上生产的时候。把"占位符没换"也做成
+        # 渲染失败,等于让 prod 永远渲染不了,那一步检查就废了。
+        #
+        # "占位符还没换就别上生产"由 scripts/check-prod-secrets-ready.py 拦,
+        # 它是**部署门禁**,不在渲染路径上。
+        kms_missing = [k for k in ("openbao_kms_key_id", "openbao_kms_region",
+                                   "openbao_kms_credentials_secret")
+                       if not config.get(k)]
+        if kms_missing:
+            print(f"!! environments/{env}/config.yaml 的 seal_mode 是 kms,"
+                  f"但缺这些键: {kms_missing}\n"
+                  f"   **不会退回开发档** —— 开发档的解封密钥就放在集群里的 "
+                  f"k8s Secret,\n"
+                  f"   那是给测试环境的取舍,不能因为漏配就悄悄用到生产上。\n"
+                  f"   见 docs/decisions/089-secret-management-openbao.md",
+                  file=sys.stderr)
+            sys.exit(1)
+
     if config["tls_issuer_mode"] not in ("selfsigned", "acme"):
         print(
             f"!! environments/{env}/config.yaml 的 tls_issuer_mode 只能是 selfsigned 或 acme,"

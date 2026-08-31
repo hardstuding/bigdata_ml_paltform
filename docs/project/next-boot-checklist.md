@@ -233,6 +233,43 @@ kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str
 
 ---
 
+## 开机后必验:OpenBao 起来并能自动解封(ADR-089,**没上过集群**)
+
+**这是三件新东西里风险最高的一件** —— 它进了部署主线(`bootstrap-all.sh`
+第 14 步),跑不通会让一键拉起在那儿停住。
+
+```bash
+# 1. 组件本身
+kubectl -n openbao get pods
+# → openbao-0 应该 Running,但 **READY 是 0/1** —— 封印状态下 readiness
+#   探针本来就是 false。这不是故障,别急着查。
+
+# 2. 初始化 + 解封(幂等,重复跑安全)
+./scripts/49-init-unseal-openbao.sh
+# → 第一次:打印「已初始化」+「已解封」,并建出 openbao/openbao-unseal-keys
+# → 之后每次:打印「已经初始化过,跳过 init」+ 解封
+kubectl -n openbao get pods       # 现在应该 1/1
+
+# 3. **关键验证:关机重开之后,不人工干预,它自己能解封**
+#    这条才是这套东西成不成立的判据 —— 云主机是竞价实例,经常关机重开。
+#    做法:停机 → 开机 → 直接跑 ./scripts/bootstrap-all.sh(它会跑到第 14 步)
+#    → 或者只跑 ./scripts/49-init-unseal-openbao.sh
+#    期望:不需要任何人工输入,最后 openbao-0 是 1/1
+
+# 4. UI(可选)
+#    /etc/hosts 加 <云主机IP> openbao.local-lite.test
+#    浏览器 http://openbao.local-lite.test:32460
+#    root token:kubectl -n openbao get secret openbao-unseal-keys \
+#                 -o jsonpath='{.data.root_token}' | base64 -d
+```
+
+**最危险的一种状态,脚本会停下来不自动处理**:`openbao-unseal-keys` 这个
+Secret 在、但 OpenBao 说自己没初始化 —— 通常意味着数据卷被换掉/清空了,
+而 Secret 里还是老密钥。这时候闷头再 init 一次会**覆盖老密钥,让原数据
+(如果还找得回来)永远打不开**。脚本会明确报出来并让人决定。
+
+---
+
 ## 开机后必验:MinIO 控制台 SSO(ADR-088,**没上过集群**)
 
 ```bash

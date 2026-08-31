@@ -62,6 +62,20 @@ backup_s3_secret: minio-root
 # kubelet 会去联网拉一个不存在的镜像,直接 ErrImagePull。
 platform_job_image: local/platform-runtime:0.1.0
 
+# ---------------------------------------------------------------- 凭据托管
+#
+# OpenBao 的封印/解封(ADR-089)。**这是这套东西最难的一环。**
+#
+# OpenBao 每次重启都是**封印**状态,要用解封密钥解开才能服务。而这台云主机
+# 是竞价实例、经常关机重开 —— 每次开机都要人来解封的话,"一键拉起"这条
+# 底线就不成立了。
+#
+#   dev-autounseal  解封密钥存进 k8s Secret,启动时由一个 Job 自动解封
+#   kms             云 KMS 自动解封(阿里云 KMS / AWS KMS)
+#
+# **本机开发,毫无疑问用自动解封。**
+seal_mode: dev-autounseal
+
 enabled_components:
   - hive-metastore.yaml
   - iam-sync.yaml
