@@ -245,13 +245,14 @@ kubernetes 客户端的 `read_namespaced_pod_log()` 默认返回的是一个 str
 # 期望:1/7 到 7/7 全部打印成功,最后一段是 4 个身份组
 
 # 验按人隔离**真的由 OpenBao 强制**(这是 ADR-089 的核心):
-BAO() { kubectl -n openbao exec -i openbao-0 -- bao "$@"; }
+# **注意 `kubectl exec` 没有 --env 参数**(那是 kubectl run 的)。
+# 先把 token 放进 Pod 的 token 文件,后面的 bao 命令就不用带凭据了 ——
+# scripts/50 里也是这么做的,原因见那个文件的注释。
 TOKEN=$(kubectl -n openbao get secret openbao-unseal-keys -o jsonpath='{.data.root_token}' | base64 -d)
-# 用 root 写两个人的凭据
-kubectl -n openbao exec -i openbao-0 --env=BAO_TOKEN=$TOKEN -- \
-  bao kv put secret/users/alice/demo value=alice的
-kubectl -n openbao exec -i openbao-0 --env=BAO_TOKEN=$TOKEN -- \
-  bao kv put secret/users/bob/demo value=bob的
+kubectl -n openbao exec -i openbao-0 -- sh -c 'cat > /home/openbao/.bao-token' <<< "$TOKEN"
+kubectl -n openbao exec openbao-0 -- bao kv put secret/users/alice/demo value=alice的
+kubectl -n openbao exec openbao-0 -- bao kv put secret/users/bob/demo value=bob的
+# 验完记得清掉:kubectl -n openbao exec openbao-0 -- rm -f /home/openbao/.bao-token
 # 然后用 alice 的身份登录(见下面 ③),读 bob 的那条 → **期望 403**
 ```
 

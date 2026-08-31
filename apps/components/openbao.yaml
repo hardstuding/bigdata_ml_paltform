@@ -86,3 +86,17 @@ spec:
           enabled: true
           # ClusterIP:外部访问走上面那条 ingress,不额外开 NodePort。
           serviceType: ClusterIP
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openbao
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # chart 自带的 ClusterRoleBinding 绑的是 system:auth-delegator ——
+      # **Kubernetes auth 靠它做 TokenReview**,没有它 Pod 拿 SA token 换
+      # OpenBao token 会 403,而报错指向的是"权限不足",不是"少了一个绑定"。
+      # 这里不需要额外配置(chart 默认就建),写在这里是提醒:以后如果为了
+      # 收紧权限把它关掉,kubernetes auth 会跟着失效。

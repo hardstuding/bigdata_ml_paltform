@@ -30,14 +30,51 @@ echo "=== 配 OpenBao 认证/策略 $(date -u +%FT%TZ) ==="
 ROOT_TOKEN="$(kubectl -n "$NS" get secret "$KEYS_SECRET" -o jsonpath='{.data.root_token}' | base64 -d)"
 [ -n "$ROOT_TOKEN" ] || { echo "!! 读不到 root token,先跑 scripts/49-init-unseal-openbao.sh"; exit 1; }
 
-# 所有 bao 命令都带 root token。**token 只经环境变量传进容器,不出现在
-# 命令行参数里** —— 命令行参数会出现在 `ps` 和审计日志里。
-bao() { kubectl -n "$NS" exec -i "$POD" --env="BAO_TOKEN=$ROOT_TOKEN" -- bao "$@"; }
-
-sealed=$(bao status -format=json 2>/dev/null | python3 -c 'import json,sys
+# 所有 bao 命令都要带 root token,而这里有两个坑,都是自查时抓到的
+# (这个脚本没上过集群):
+#
+# 1. **`kubectl exec` 没有 `--env` 这个参数**(那是 `kubectl run` 的)。
+#    第一版那么写,整个脚本会在第一条命令上报 unknown flag 直接死。
+# 2. 改成"从 stdin 读 token"之后又撞到第二个:下面好几条命令是
+#    `bao policy write xxx - <<EOF` —— **策略内容本身就是走 stdin 的**。
+#    token 占了 stdin,策略就成了空的,而 `bao` 不会报错,只会写进一条
+#    什么都不允许的空策略。那种失败最难查:命令成功、策略存在、就是不生效。
+#
+# 所以改成:**先把 token 写进 pod 里的 token 文件**,之后每条 bao 命令都不
+# 用带凭据,stdin 完全留给策略内容。token 也不出现在命令行参数里(那会进
+# `ps` 和 kubectl 审计日志)。
+#
+# 两个文件名都写:OpenBao 是 Vault 的分支,token helper 的默认文件名在两边
+# 不一样(.bao-token / .vault-token),而**写错的症状是"权限不足"**,不是
+# "文件不存在"。与其赌一个,不如都写,再用一条 lookup 验证真的生效。
+# **封印检查要排在最前面。** 它必须早于下面那条 `bao token lookup` 的
+# 验证 —— 封印状态下 lookup 也会失败,而那时候报出来的是"不认 token
+# 文件",把人往完全错误的方向引。
+sealed=$(kubectl -n "$NS" exec "$POD" -- bao status -format=json 2>/dev/null | python3 -c 'import json,sys
 try: print(str(json.load(sys.stdin)["sealed"]).lower())
 except Exception: print("unknown")')
 [ "$sealed" = "false" ] || { echo "!! OpenBao 还是封印状态(sealed=$sealed),先跑 scripts/49"; exit 1; }
+
+echo "==> 把 root token 放进 Pod 的 token 文件(stdin 要留给策略内容)"
+kubectl -n "$NS" exec -i "$POD" -- sh -c \
+  'cat > /home/openbao/.bao-token && cp /home/openbao/.bao-token /home/openbao/.vault-token && chmod 600 /home/openbao/.bao-token /home/openbao/.vault-token' <<< "$ROOT_TOKEN"
+
+bao() { kubectl -n "$NS" exec -i "$POD" -- bao "$@"; }
+
+# **立刻验证 token 文件真的被 bao 认了。** 不验的话,后面每一条命令都会因为
+# "没有凭据"失败,而报错长得像权限问题,会往策略上查。
+if ! bao token lookup >/dev/null 2>&1; then
+  echo "!! Pod 里的 bao 不认 token 文件 —— 后面的命令都会以权限错误失败。"
+  echo "   查:kubectl -n $NS exec $POD -- sh -c 'ls -la /home/openbao/.*token; echo \$HOME'"
+  exit 1
+fi
+
+# 脚本结束时清掉 token 文件,不把 root token 留在 Pod 的磁盘上。
+cleanup_token() {
+  kubectl -n "$NS" exec "$POD" -- rm -f /home/openbao/.bao-token /home/openbao/.vault-token >/dev/null 2>&1 || true
+}
+trap cleanup_token EXIT
+
 
 echo "==> 1/7 KV v2 引擎"
 if bao secrets list -format=json 2>/dev/null | grep -q '"secret/"'; then

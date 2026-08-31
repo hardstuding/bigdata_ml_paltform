@@ -37,8 +37,6 @@ LOG_FILE="logs/49-openbao-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "=== OpenBao 初始化/解封 $(date -u +%FT%TZ) ==="
 
-bao() { kubectl -n "$NS" exec "$POD" -- bao "$@"; }
-
 echo "==> 等 Pod 起来(封印状态下 readiness 是 false,所以等的是 Running 不是 Ready)"
 for i in $(seq 1 60); do
   phase=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null || true)
@@ -115,7 +113,15 @@ else
   echo "==> 解封(需要 ${THRESHOLD} 份)"
   for i in $(seq 0 $((THRESHOLD - 1))); do
     key=$(kubectl -n "$NS" get secret "$KEYS_SECRET" -o jsonpath="{.data.unseal_key_$i}" | base64 -d)
-    kubectl -n "$NS" exec "$POD" -- bao operator unseal "$key" >/dev/null
+    if [ -z "$key" ]; then
+      # 明确报出来。空值传给 unseal 只会报一句含糊的解析错,而真正的原因是
+      # Secret 里少了这一份 —— 比如有人手工改过它。
+      echo "!! ${NS}/${KEYS_SECRET} 里没有 unseal_key_$i,解不了封"
+      exit 1
+    fi
+    # **`-` 表示从 stdin 读密钥,不放命令行参数。** 命令行参数会出现在
+    # Pod 里的 `ps` 和 kubectl 的审计日志里,而这是能解开整个凭据库的东西。
+    kubectl -n "$NS" exec -i "$POD" -- bao operator unseal - >/dev/null <<< "$key"
     echo "  已用第 $((i + 1))/${THRESHOLD} 份"
   done
   sealed=$(status_json | python3 -c 'import json,sys
