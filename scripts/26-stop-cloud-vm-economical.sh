@@ -28,7 +28,16 @@ set -euo pipefail
 # 见那个文件顶部的说明)。环境变量优先,方便临时指向别的实例。
 _VM_ENV="$(dirname "$0")/../environments/cloud-full/vm.env"
 [ -f "$_VM_ENV" ] && . "$_VM_ENV"
-CLOUD_VM_INSTANCE_ID="${CLOUD_VM_INSTANCE_ID:-i-0jlbped4h1959tp591pe}"
+CLOUD_VM_INSTANCE_ID="${CLOUD_VM_INSTANCE_ID:-}"
+# **读不到就停,不退回写死的值。** 兜底一个硬编码的实例 ID,意味着 vm.env
+# 缺失时脚本会静默地对另一台(可能已经删掉的)实例动手 —— 停机脚本对着不
+# 存在的实例"成功"返回,而真正在跑的机器一直烧钱。宁可报错。
+if [ -z "${CLOUD_VM_INSTANCE_ID:-}" ]; then
+  echo "!! 读不到实例 ID。应该来自 environments/cloud-full/vm.env," >&2
+  echo "   或者用 CLOUD_VM_INSTANCE_ID=<id> 显式指定。" >&2
+  exit 1
+fi
+
 CLOUD_VM_REGION="${CLOUD_VM_REGION:-cn-wulanchabu}"
 ALIYUN_PROFILE="${ALIYUN_PROFILE:-cloud-full}"
 

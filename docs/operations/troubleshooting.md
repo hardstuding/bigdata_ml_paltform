@@ -51,8 +51,44 @@ aliyun ecs DescribeAvailableResource --RegionId cn-wulanchabu \
    ```
    ⚠️ 注意 `c9i.4xlarge` 只有 32G 内存(g9i/r9i 是 64G/128G),这个平台
    跑不下,别为了能开机换到它。
-3. **换可用区** —— 要走「快照 → 在新可用区建盘 → 建新实例 → 挂载」那条
-   完整路径,不是改个参数。这是真正的迁移,**需要先问用户**。
+3. **换可用区** —— 2026-09-01 起有脚本了,不用手敲:
+   ```bash
+   # 先看要做什么,不建任何东西
+   DRY_RUN=1 ./scripts/51-migrate-vm-to-zone.sh cn-wulanchabu-b
+   ./scripts/51-migrate-vm-to-zone.sh cn-wulanchabu-b
+   ```
+   **这是真正的迁移(建整机镜像 → 新可用区建实例),需要先问用户。**
+   脚本**不删任何东西** —— 跑完旧实例和旧磁盘都还在,删除是单独一步,
+   由人确认后手动做(脚本最后打印现查出来的命令)。迁移失败时唯一能回去
+   的路就是旧的还在。
+
+   先查哪个区有货,别盲目迁:
+   ```bash
+   for z in cn-wulanchabu-a cn-wulanchabu-b cn-wulanchabu-c; do
+     echo -n "$z: "
+     aliyun ecs DescribeAvailableResource --RegionId cn-wulanchabu \
+       --DestinationResource InstanceType --ZoneId $z \
+       --InstanceChargeType PostPaid --SpotStrategy SpotAsPriceGo \
+       | grep -o '"Value":"ecs.g9i.4xlarge","Status":"[A-Za-z]*"' | tail -1
+   done
+   ```
+   顺带看一眼价格,不同可用区差别可以很大 —— 2026-09-01 实测 a 区
+   ¥1.396/时,b/c 区 ¥0.716/时,**便宜一半**:
+   ```bash
+   aliyun ecs DescribeSpotPriceHistory --RegionId cn-wulanchabu --NetworkType vpc \
+     --InstanceType ecs.g9i.4xlarge --ZoneId cn-wulanchabu-b --OSType linux
+   ```
+
+**迁移会牵动的两个地方**(脚本自动改,这里记下来是为了排障时知道去哪看):
+
+- `environments/cloud-full/vm.env` 的实例 ID —— 开机/停机/迁移三个脚本共用
+  这一份。**漏改的后果是停机脚本去停一台不存在的机器、静默成功,而新机器
+  一直开着烧钱。**
+- `environments/cloud-full/config.yaml` 的 `node_private_ip` —— JupyterHub
+  的 singleuser NetworkPolicy 要放行"节点私网IP:6443"(k3s 上
+  `kubernetes.default.svc` 会 DNAT 成这个地址)。**漏改的症状特别隐蔽:
+  notebook 起得来、`query()` 也正常(那走 Trino),只有 `submit_job()`
+  超时** —— 人会去查 RBAC,查不到原因。
 
 **这条对上生产的意义**:生产不该用抢占式实例。现在这台是为了省钱,代价
 就是"随时可能开不起来、也随时可能被回收"。

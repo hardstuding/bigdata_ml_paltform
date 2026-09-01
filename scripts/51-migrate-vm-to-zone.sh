@@ -25,7 +25,16 @@ REGION="${CLOUD_VM_REGION:-cn-wulanchabu}"
 # 实例身份来自 environments/cloud-full/vm.env(和开机/停机脚本共用一份)
 _VM_ENV="$(dirname "$0")/../environments/cloud-full/vm.env"
 [ -f "$_VM_ENV" ] && . "$_VM_ENV"
-INSTANCE_ID="${CLOUD_VM_INSTANCE_ID:-i-0jlbped4h1959tp591pe}"
+INSTANCE_ID="${CLOUD_VM_INSTANCE_ID:-}"
+# **读不到就停,不退回写死的值。** 兜底一个硬编码的实例 ID,意味着 vm.env
+# 缺失时脚本会静默地对另一台(可能已经删掉的)实例动手 —— 停机脚本对着不
+# 存在的实例"成功"返回,而真正在跑的机器一直烧钱。宁可报错。
+if [ -z "${INSTANCE_ID:-}" ]; then
+  echo "!! 读不到实例 ID。应该来自 environments/cloud-full/vm.env," >&2
+  echo "   或者用 CLOUD_VM_INSTANCE_ID=<id> 显式指定。" >&2
+  exit 1
+fi
+
 DRY_RUN="${DRY_RUN:-}"
 
 mkdir -p logs
@@ -218,6 +227,16 @@ PYEOF2
 fi
 
 # ---------------------------------------------------------------- 7. 收尾
+# 旧实例挂的磁盘(运行时查,不写死 —— 见下面收尾提示里的说明)
+OLD_DISK_CMDS=$(aliyun ecs DescribeDisks --RegionId "$REGION" --InstanceId "$INSTANCE_ID" 2>/dev/null \
+  | python3 -c "
+import json,sys
+try: disks=json.load(sys.stdin)['Disks']['Disk']
+except Exception: disks=[]
+for x in disks:
+    print('       aliyun ecs DeleteDisk --DiskId ' + x['DiskId'] + '   # ' + x['Type'] + ' ' + str(x['Size']) + 'G')
+" || echo "       (查不到旧磁盘,手动 aliyun ecs DescribeDisks --InstanceId $INSTANCE_ID)")
+
 echo
 echo "==> 7/7 完成。**旧实例和旧磁盘都还在,一个都没删。**"
 cat <<EOF
@@ -231,9 +250,9 @@ cat <<EOF
        kubectl get pods -A | grep -v Running
   3. **验证通过之后**再删旧的(这一步不可逆,脚本不做):
        aliyun ecs DeleteInstance --InstanceId $INSTANCE_ID --Force true --RegionId $REGION
-       # 磁盘设了「不随实例释放」,要单独删:
-       aliyun ecs DeleteDisk --DiskId d-0jl10n6tpnvg6p1pk9dz
-       aliyun ecs DeleteDisk --DiskId d-0jlbped4h1959tp2szqu
+       # 磁盘设了「不随实例释放」,要单独删(下面这些 ID 是运行时查出来的,
+       # 不是写死的 —— 这行是给人直接复制去执行删除的,写死等于给出别人的盘):
+$OLD_DISK_CMDS
        # 迁移镜像验证完也可以删(它占快照存储费):
        aliyun ecs DeleteImage --RegionId $REGION --ImageId $IMAGE_ID --Force true
 
