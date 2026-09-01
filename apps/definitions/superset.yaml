@@ -165,7 +165,27 @@ spec:
                 默认只认 userinfo 端点返回的字段,而 Keycloak 的
                 oidc-group-membership-mapper 把 groups 放进 token。
                 不取的话 AUTH_ROLES_MAPPING 拿不到东西可匹配。"""
-                me = sm.oauth_remotes[provider].get("userinfo")
+                # **相对路径必须是 `openid-connect/userinfo`,不是 `userinfo`。**
+                #
+                # authlib 把它拼在 remote_app 的 api_base_url 后面,而那个值
+                # 以 `protocol/` 结尾(FAB 内置的 keycloak 分支就是按
+                # `get("openid-connect/userinfo")` 设计的,见本文件上方注释)。
+                # 写成 `userinfo` 拼出来是 `.../protocol/userinfo` —— **404**。
+                #
+                # **这个错的表现极具欺骗性**:FAB 把异常吞掉,只是让登录回到
+                # 登录页,日志里一个 ERROR 都没有。用户看到的是"点了 Keycloak
+                # 登录没反应",而实际上认证已经成功、也跳回来了,只在最后一步
+                # 静默失败。
+                #
+                # 2026-09-01 实测:`.../protocol/userinfo` 返回 404,
+                # `.../protocol/openid-connect/userinfo` 返回 401(要 token,
+                # 说明路径是对的)。
+                #
+                # **这个 bug 从 2026-08-29 加这个自定义 SecurityManager 起就
+                # 存在**,一直没被发现,因为此前所有验证都是程序化的
+                # (impersonation 用 override_user、门户用伪造的请求头),
+                # **没有一次真的用浏览器走完 SSO 登录**。
+                me = sm.oauth_remotes[provider].get("openid-connect/userinfo")
                 data = me.json() if hasattr(me, "json") else me
                 return {
                     "username": data.get("preferred_username") or data.get("sub"),
