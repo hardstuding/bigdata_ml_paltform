@@ -301,7 +301,13 @@ def render_cronworkflow(j: dict, default_image: str) -> dict:
     name, script = j["name"], j["script"]
     env = {
         # 和 platform_sdk.submit 用的是同一套集群内地址,作业不用自己填连接串。
-        "MLFLOW_TRACKING_URI": "http://mlflow.mlflow.svc.cluster.local:5000",
+        # **服务名是 `mlflow-mlflow`,不是 `mlflow`**(chart 的 fullname 是
+        # `<release>-<chart>`)。写错的话作业里任何 MLflow 调用都会
+        # NameResolutionError,而**在 2026-09-01 之前没有任何作业用 MLflow,
+        # 所以这个错误从没暴露过** —— 特征漂移作业(ADR-087)第一次真跑就
+        # 撞上了。platform-sdk 和训练模板里写的一直是对的,只有这里和门户的
+        # 探针是错的。
+        "MLFLOW_TRACKING_URI": "http://mlflow-mlflow.mlflow.svc.cluster.local:5000",
         "MLFLOW_S3_ENDPOINT_URL": "http://minio.minio.svc.cluster.local:9000",
         "PLATFORM_TRINO_HOST": "trino.trino.svc.cluster.local",
         "PLATFORM_TRINO_PORT": "8443",

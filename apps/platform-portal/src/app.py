@@ -135,7 +135,10 @@ TOOLS = [
         "description": "实验跟踪 / 模型注册",
         "host": "mlflow",
         "logo": "mlflow",
-        "probe": "http://mlflow.mlflow.svc.cluster.local:5000/health",
+        # 服务名是 `mlflow-mlflow`(chart fullname = <release>-<chart>)。
+        # **写错的后果是门户上 MLflow 一直显示离线,而服务是好的** ——
+        # 2026-09-01 才发现,一个"状态点长期说谎"的看板比没有看板更糟。
+        "probe": "http://mlflow-mlflow.mlflow.svc.cluster.local:5000/health",
     },
     {
         "category": "AI/ML",

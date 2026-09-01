@@ -69,7 +69,22 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
 ---
-# OpenBao 要连 Keycloak 做 OIDC discovery(ADR-089)。
+# **集群内直连 Keycloak 的组件**(不经 ingress-nginx)。
+#
+# 文件顶部那句"所有走 OIDC discovery 的组件都是经 ingress-nginx 连过来的,
+# 只放行 ingress-nginx 一个来源就够" —— **这个判断今天不再成立了**。有几个
+# 组件是在**服务端**发 discovery/JWKS 请求的,走的是集群内 Service 地址:
+#
+#   openbao     OIDC discovery / JWKS(ADR-089)
+#   minio       MINIO_IDENTITY_OPENID_CONFIG_URL(ADR-088)
+#   jupyterhub  hub 侧的 OIDC 配置
+#
+# **2026-09-01 一天之内因为这个撞了两次**:scripts/50 报
+# `error checking oidc discovery URL`;MinIO 一直 `Waiting for OpenID to be
+# initialized` 然后被探针杀掉重启。两次的表象完全不同,根因是同一个 ——
+# 都是 default-deny 挡住了服务端到 Keycloak 的直连。
+#
+# 往这个平台加新的"服务端连 Keycloak"的组件时,记得回来加一行。
 #
 # **它不像别的组件那样经 ingress-nginx 过来** —— 那条路是给"浏览器发起的
 # OIDC 跳转"的,而 discovery 是 OpenBao 自己在服务端发的请求,走的是集群内
@@ -84,7 +99,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-openbao-oidc-discovery
+  name: allow-server-side-oidc
   namespace: keycloak
 spec:
   podSelector:
@@ -97,6 +112,12 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: openbao
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: minio
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: jupyterhub
       ports:
         - protocol: TCP
           port: 8080

@@ -1,7 +1,7 @@
 # ADR-088:MinIO 控制台接 Keycloak,策略只给 platform-team
 
 日期:2026-08-31
-状态:**已实现,未部署验证**
+状态:**已部署验证 —— 但 SSO 登录这一半没成立,见文末「实机验证的结果」**
 
 ## 问题
 
@@ -83,3 +83,50 @@ API 存数据),而控制台是给人用的管理界面,唯一合法的来源是 
   是组件之间连接用的,不能去掉)。SSO 是**多了一条**登录路径,不是关掉了
   原来那条。想真正关掉 root 登录要设 `MINIO_BROWSER_LOGIN_ANIMATION` 之外
   的东西,而且会让排障时"SSO 挂了就进不去"——现阶段不做这个取舍。
+
+---
+
+## 实机验证的结果(2026-09-01):**SSO 登录那一半没成立**
+
+如实记,因为这份 ADR 的标题就是「接 Keycloak」。
+
+**成立的部分**:
+
+- 控制台**现在有对外入口了**(`minio.<域名>`,之前完全访问不到,只能
+  port-forward)—— 这是这次最实际的收益
+- `platform-team` 策略建出来了(`mc idp openid ls` / `mc admin policy ls` 都确认)
+- 服务端 OIDC **确实生效**:`mc idp openid info` 显示 `enable: on`,
+  9 个 `MINIO_IDENTITY_OPENID_*` 环境变量齐全,配置从 Keycloak 拉得到
+- Keycloak 侧的 `minio` client 和 `minio-policy` claim mapper 都建好了
+
+**没成立的部分**:控制台的登录页**不提供 Keycloak 登录按钮**。
+`/api/v1/login` 一直返回 `{"loginStrategy":"form","redirectRules":null}`。
+
+排查过的(都不是原因):
+
+- 服务端 OIDC 没生效 —— 不是,`enable: on`
+- 连不上 Keycloak —— 一开始确实是(NetworkPolicy 漏了 minio,已修),
+  修完之后 MinIO 干净启动、0 重启,discovery 拿得到
+- 反向代理后面缺 `MINIO_BROWSER_REDIRECT_URL` —— 试过,加了没变化(已还原)
+- 请求的 Host 带不带端口 —— 两种都试过,一样
+
+**结论**:`RELEASE.2025-09-07` 这个版本的内嵌控制台不再暴露 OIDC 登录入口。
+MinIO 近年把完整的 Console/SSO 挪进了商业版(AIStor),开源服务端保留的是
+精简版对象浏览器。**这是上游的产品决定,不是配置问题** —— 所以没有继续
+往下试(改配置试不出来一个上游没有的功能)。
+
+**现在的实际状态**:控制台可访问,用 root 账号登录
+(`./scripts/show-credentials.sh --show` 看密码)。
+
+**为什么 OIDC 的配置保留着,不删**:
+
+1. 它对 **STS 是有用的** —— `AssumeRoleWithWebIdentity` 用同一份配置,
+   程序拿 Keycloak 的 token 换 MinIO 的临时凭据这条路是通的,和控制台无关。
+2. 哪天上游把控制台的 SSO 加回来,或者换成别的控制台(比如单独部署一个
+   开源 Console),配置现成的。
+3. 删掉它反而会让"为什么 MinIO 不接 SSO"这个问题以后被重新问一遍。
+
+**没有降级成"给所有人开 root 密码"**:策略只给 platform-team 这条设计
+不变(理由见上面「策略只给 platform-team」那节 —— 读 lakehouse 桶等于绕过
+整套 OPA 行列级权限),而 root 密码本来就只有 platform-team 拿得到。
+
