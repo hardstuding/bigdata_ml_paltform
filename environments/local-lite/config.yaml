@@ -76,6 +76,22 @@ platform_job_image: local/platform-runtime:0.1.0
 # **本机开发,毫无疑问用自动解封。**
 seal_mode: dev-autounseal
 
+# ---------------------------------------------------------------- 节点私网 IP
+#
+# JupyterHub 的 singleuser pod 要连 K8s API server,而在 k3s 上
+# `kubernetes.default.svc`(10.43.0.1:443)会被 iptables DNAT 成
+# **节点私网 IP:6443** —— NetworkPolicy 匹配的是 DNAT 之后的目的地址,
+# 所以这条 egress 规则必须写具体的节点 IP,写 Service 的 ClusterIP 不管用。
+#
+# **在 2026-09-01 之前这个 IP 是硬编码在 apps/components/jupyterhub.yaml
+# 里的**,旁边一句注释写着"如果以后真的换了新实例,这里要跟着改"。靠注释
+# 提醒正是这个仓库反复翻车的模式(CLAUDE.md「状态别写两遍」那节),所以
+# 改成配置项。写错的症状很隐蔽:notebook 起得来、查数也正常(那走 Trino),
+# 只有 `submit_job()` 会超时 —— 而人会去查 RBAC。
+# local-lite 没启用 JupyterHub,这个值用不上,填一个明显不是真实 IP 的
+# 占位 —— 真启用时会因为连不上 API server 立刻暴露,而不是静默半通。
+node_private_ip: 10.255.255.255
+
 enabled_components:
   - hive-metastore.yaml
   - iam-sync.yaml

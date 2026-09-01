@@ -120,6 +120,21 @@ openbao_kms_region: "REPLACE-ME-kms-region"
 # 和 backup_s3_secret 同一个约定)。
 openbao_kms_credentials_secret: "REPLACE-ME-openbao-kms-credentials"
 
+# ---------------------------------------------------------------- 节点私网 IP
+#
+# JupyterHub 的 singleuser pod 要连 K8s API server,而在 k3s 上
+# `kubernetes.default.svc`(10.43.0.1:443)会被 iptables DNAT 成
+# **节点私网 IP:6443** —— NetworkPolicy 匹配的是 DNAT 之后的目的地址,
+# 所以这条 egress 规则必须写具体的节点 IP,写 Service 的 ClusterIP 不管用。
+#
+# **在 2026-09-01 之前这个 IP 是硬编码在 apps/components/jupyterhub.yaml
+# 里的**,旁边一句注释写着"如果以后真的换了新实例,这里要跟着改"。靠注释
+# 提醒正是这个仓库反复翻车的模式(CLAUDE.md「状态别写两遍」那节),所以
+# 改成配置项。写错的症状很隐蔽:notebook 起得来、查数也正常(那走 Trino),
+# 只有 `submit_job()` 会超时 —— 而人会去查 RBAC。
+# prod 从没部署过,这里是占位。真部署时必须填成那台机器的私网 IP。
+node_private_ip: 10.255.255.255
+
 enabled_components:
   - airflow-db-init.yaml
   - airflow.yaml

@@ -168,6 +168,9 @@ def render_text(text: str, config: dict) -> str:
         # local-lite 是本地构建的 local/platform-runtime:0.1.0,
         # cloud-full/prod 是 ACR 上带 commit SHA 的那份。
         .replace("{{PLATFORM_JOB_IMAGE}}", config["platform_job_image"])
+        # 节点私网 IP。k3s 上 kubernetes.default.svc 会 DNAT 成节点IP:6443,
+        # NetworkPolicy 匹配的是 DNAT 之后的地址(见各环境 config.yaml 的说明)。
+        .replace("{{NODE_PRIVATE_IP}}", config["node_private_ip"])
         # JupyterHub 的 chart 要 name / tag 分开两个字段,所以额外给两个
         # 拆好的占位符。**按最后一个冒号拆** —— ACR 的地址里含端口的话
         # (`host:5000/ns/img:tag`)按第一个冒号拆会拆错。
@@ -403,7 +406,7 @@ def main():
     # 校验前置之后,配置不完整就在写任何文件之前直接退出。
     missing = [k for k in ("domain_suffix", "http_port_suffix", "https_port_suffix",
                            "external_scheme", "tls_issuer_mode",
-                           "platform_job_image") if k not in config]
+                           "platform_job_image", "node_private_ip") if k not in config]
     if missing:
         print(f"!! environments/{env}/config.yaml 缺这些必填项: {missing}", file=sys.stderr)
         sys.exit(1)
