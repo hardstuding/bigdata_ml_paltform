@@ -70,6 +70,10 @@ trino|trino-service-account|password-dbt_demo_service|Trino:dbt 用
 trino|trino-service-account|password-platform_sdk_demo_service|Trino:platform_sdk 用
 trino|trino-service-account|password-openmetadata_service|Trino:OpenMetadata 采集用
 trino|trino-service-account|password-goldenpath_probe|Trino:黄金链路探针用
+trino|trino-service-account|password-notebook_service|Trino:notebook/作业共用(按人 impersonation)
+trino|trino-service-account|password-iceberg_maintenance_service|Trino:表维护作业专用(ADR-033)
+trino|trino-service-account|password-feature_drift_service|Trino:特征漂移作业专用(ADR-087)
+openbao|openbao-unseal-keys|root_token|OpenBao 的 root token(ADR-089,排障用)
 trino|trino-internal-secret|secret|Trino 节点间通信密钥
 openmetadata|openmetadata-postgresql-secrets|openmetadata-postgresql-password|OpenMetadata 的库
 openmetadata|opensearch-admin|password|OpenSearch 管理员
@@ -131,6 +135,17 @@ def live(ns, sec, key):
 
 # 文件里的行形如 `trino/superset_service: xxx` 或 `ns/secret key=v password=v`。
 # 只处理能明确对应到集群 Secret 的那几类,其余原样报"没法自动判断"。
+# **这些凭据不存在 k8s Secret 里**,所以没法拿集群比对 —— 它们是直接写进
+# 应用自己的库/配置的。
+#
+# 单独列一类,不能当"失效"处理:2026-09-01 差点因此出事 —— 把
+# superset/admin 映射到一个根本不存在的 Secret,审计结果显示"已失效",
+# 而 `--write-pruned` 会照着这个结果**删掉一条仍然有效的凭据**。
+# 一个把有效凭据判成失效的审计,比没有审计危险。
+NOT_IN_K8S = {
+    "superset/admin": "直接 reset 进 Superset 自己的库(chart 默认是弱密码 admin/admin)",
+}
+
 KNOWN = {
     "trino/superset_service": ("trino", "trino-service-account", "password-superset_service"),
     "trino/table_registration_service": ("trino", "trino-service-account", "password-table_registration_service"),
@@ -143,6 +158,10 @@ KNOWN = {
     "monitoring/grafana-admin": ("monitoring", "grafana-admin", "admin-password"),
     "keycloak/keycloak-admin": ("keycloak", "keycloak-admin", "password"),
     "trino/goldenpath_probe": ("trino", "trino-service-account", "password-goldenpath_probe"),
+    "trino/notebook_service": ("trino", "trino-service-account", "password-notebook_service"),
+    "trino/iceberg_maintenance_service": ("trino", "trino-service-account", "password-iceberg_maintenance_service"),
+    "trino/feature_drift_service": ("trino", "trino-service-account", "password-feature_drift_service"),
+    "table-registration-app/table-registration-app-internal": ("table-registration-app", "table-registration-app-internal", "token"),
     "keycloak/keycloak-db": ("keycloak", "keycloak-db", "password"),
     "data/hive-metastore-db": ("data", "hive-metastore-db", "password"),
     "data/airflow-db": ("data", "airflow-db", "password"),
@@ -152,7 +171,7 @@ KNOWN = {
         ("permission-request-app", "permission-request-app-internal", "password"),
 }
 cache = {}
-stale = fresh = unknown = 0
+stale = fresh = unknown = outside = 0
 stale_lines = set()
 for i, line in enumerate(f.read_text().splitlines(), 1):
     line = line.strip()
@@ -162,6 +181,11 @@ for i, line in enumerate(f.read_text().splitlines(), 1):
     if not m:
         continue
     label, rest = m.group(1), m.group(2)
+    if label in NOT_IN_K8S:
+        # 不在集群 Secret 里,没法比对,但**不是失效** —— 归一类单独显示。
+        print(f"  第 {i:>3} 行  {label:<44s} 不在集群 Secret 里({NOT_IN_K8S[label]})")
+        outside += 1
+        continue
     if label not in KNOWN:
         unknown += 1
         print(f"  第{i:3d} 行  {label:44s} 没法自动判断(不在已知清单里)")
@@ -179,7 +203,7 @@ for i, line in enumerate(f.read_text().splitlines(), 1):
         print(f"  第{i:3d} 行  {label:44s} **已失效**")
 
 print()
-print(f"  有效 {fresh} 条 / 已失效 {stale} 条 / 没法自动判断 {unknown} 条")
+print(f"  有效 {fresh} 条 / 已失效 {stale} 条 / 不在集群 Secret 里 {outside} 条 / 没法自动判断 {unknown} 条")
 
 import os
 if os.environ.get("PRUNE") == "1":
