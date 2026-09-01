@@ -136,7 +136,7 @@
 | [084](084-analyst-sql-workbench.md) | 分析师的浏览器 SQL 入口:复用 Superset SQL Lab | **已实机验证**(2026-08-30):SQL Lab 上 `current_user` 是登录者本人、没 grant 的表被 `PERMISSION_DENIED` 拒、列级脱敏生效 |
 | [085](085-inference-payload-logging.md) | 推理请求留痕:KServe 自带 logger → Kafka → Iceberg | **已实现,未部署验证** |
 | [086](086-approval-belongs-to-oa.md) | 审批流程外包给 OA,平台只留策略和执行 | **协议已改对(`APPROVAL_BACKEND=oa`),没有真实 OA 可对接,未验证** |
-| [087](087-feature-drift-monitoring.md) | 特征漂移:训练时把基线存进 MLflow tag,一个 jobs/ 作业算 PSI | **已实现,未部署验证** |
+| [087](087-feature-drift-monitoring.md) | 特征漂移:训练时把基线存进 MLflow tag,一个 jobs/ 作业算 PSI | **已实现,2026-09-01 实机验证通过** |
 | [088](088-minio-console-sso.md) | MinIO 控制台接 Keycloak;策略只给 platform-team(读桶=绕过 OPA) | **已部署验证 —— 但 SSO 登录这一半没成立,见文末「实机验证的结果」** |
 | [089](089-secret-management-openbao.md) | 用户凭据托管用 OpenBao(不是 Vault:许可证);开发档自动解封的代价写清楚 | **设计已定,实现进行中** |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |

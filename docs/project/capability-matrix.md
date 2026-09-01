@@ -86,8 +86,8 @@ impersonation 没验过、说作业发布没有多文件和晋级路径,而详�
 | 容量看板 | 🟡 | 未验证 | — | `platform/grafana-capacity-dashboard/` 6 个 panel 写好了,**没部署验证过** |
 | Argo Workflows 授权 | ✅ | 集成验证 | 2026-08-19 | curl+cookie-jar:登录 → 列 → 建 → 查到 → 删 |
 | 凭据托管(平台自己的) | 🟡 | 集成验证 | 2026-08-27 | `scripts/00-generate-secrets.sh` 生成 → 裸 K8s Secret。**能用,但没有轮换、没有审计**(谁读过查不出来)、etcd 里是 base64 不是加密。`scripts/show-credentials.sh` 直接读活集群 —— 加它是因为 `secrets/generated-credentials.txt` 那份快照实测 42 条里 26 条已失效。迁进 OpenBao 是第二阶段,见 [ADR-089](../decisions/089-secret-management-openbao.md) |
-| 凭据托管(用户自己的) | 🟡 | 未验证 | — | [ADR-089](../decisions/089-secret-management-openbao.md)。**这条在 2026-08-31 之前是「计划中」都算不上 —— 压根不存在**:用户要连自己的库,只能把密码写死在代码里或每次手动 export。OpenBao + 按人隔离的策略 + `platform_sdk.secret()` 已实现,**没上过集群**;验证步骤在 next-boot-checklist |
-| 对象存储管理界面 | 🟡 | 未验证 | — | [ADR-088](../decisions/088-minio-console-sso.md)。之前**根本没有对外入口**,只能 kubectl port-forward。已开 Ingress + Keycloak SSO,策略只给 platform-team(读 lakehouse 桶 = 绕过整套 OPA 行列级权限)。**没上过集群** |
+| 凭据托管(用户自己的) | ✅ | 集成验证 | 2026-09-01 | [ADR-089](../decisions/089-secret-management-openbao.md)。**这条在 2026-08-31 之前是「计划中」都算不上 —— 压根不存在**:用户要连自己的库,只能把密码写死在代码里或每次手动 export。OpenBao + 按人隔离的策略 + `platform_sdk.secret()`。**2026-09-01 实机验证**:analyst001 登录后自动拿到组策略;自己的凭据能写能读能列;**连 platform-team 都读不到别人的个人凭据(403)** —— 隔离由 OpenBao 强制,不是代码里的 if;组共享 platform-team 能写、组员只读、别的组读不到 |
+| 对象存储管理界面 | 🟡 | 集成验证 | 2026-09-01 | [ADR-088](../decisions/088-minio-console-sso.md)。之前**根本没有对外入口**,只能 kubectl port-forward。已开 Ingress(**这是最实际的收益**),策略只给 platform-team(读 lakehouse 桶 = 绕过整套 OPA 行列级权限)。**但 SSO 登录那一半没成立** —— 服务端 OIDC 确实 enable:on,而这个 MinIO 版本的内嵌控制台不再暴露 OIDC 登录入口(上游把完整 Console/SSO 挪进商业版)。现在用 root 账号登录,OIDC 配置保留(STS 用得上)。详见 ADR-088 文末 |
 
 ## 数据分析师
 
@@ -136,7 +136,7 @@ impersonation 没验过、说作业发布没有多文件和晋级路径,而详�
 | 训练执行 | ✅ | 集成验证 | 2026-08-21 | `ml-pipeline` WorkflowTemplate,三步按依赖顺序执行 |
 | 实验跟踪 / 模型注册 | ✅ | 集成验证 | 2026-08-27 | MLflow。**这一格被探针证伪过一次**,见下面那节 |
 | 模型部署 | ✅ | demo | 2026-08-20 | KServe V2 协议推理([ADR-027](../decisions/027-kserve-model-serving.md)) |
-| 推理可观测 | ✅ | 集成验证 | 2026-08-30 | `platform-inference` 看板 6 panel,真集群出数(P95 9.7ms)。**推理留痕 2026-08-30 端到端验过**([ADR-085](../decisions/085-inference-payload-logging.md)):发一次真实推理 → 接收端 202 → `iceberg.ml.inference_log` 里 request/response 成对落库、`inference_service = demo-rf-classifier`、非 platform-team 账号 `PERMISSION_DENIED`。**特征漂移 2026-08-30 已实现**([ADR-087](../decisions/087-feature-drift-monitoring.md)):训练时把特征基线(分位数边界+均值方差)写进 MLflow tag,`jobs/feature-drift` 按 PSI 比线上分布和训练分布,结果落 `ml.feature_drift`。**没上过集群**,验证步骤在 next-boot-checklist |
+| 推理可观测 | ✅ | 集成验证 | 2026-08-30 | `platform-inference` 看板 6 panel,真集群出数(P95 9.7ms)。**推理留痕 2026-08-30 端到端验过**([ADR-085](../decisions/085-inference-payload-logging.md)):发一次真实推理 → 接收端 202 → `iceberg.ml.inference_log` 里 request/response 成对落库、`inference_service = demo-rf-classifier`、非 platform-team 账号 `PERMISSION_DENIED`。**特征漂移 2026-09-01 实机验证通过**([ADR-087](../decisions/087-feature-drift-monitoring.md)):训练时把基线写进 MLflow 的 run tag,`jobs/feature-drift` 按 PSI 比线上和训练分布,结果落 `ml.feature_drift`。实测 42 条真实推理输入、20 个特征、**PSI 算出 12.434 而单测预测 12.4** —— 数值原样复现,同时证明空桶处理正确(跳过空桶会得 2.07);OPA 收窄也验了:漂移账号读得了 `ml`、**读不了 `audit`** |
 | 模型审批 / 回滚 | ✅ | 集成验证 | 2026-08-28 | [ADR-080](../decisions/080-model-approval-and-rollback.md)。关键守卫验过:存在更新的未批准 v2 时,部署仍只用已批准的 v1 |
 | 模型灰度 / A-B | ❌ | 计划中 | — | **实测确认这套架构不支持**:RawDeployment 模式下 `canaryTrafficPercent` 会被收下但完全不生效,`scripts/11` 现在显式拒绝它 —— 留一个不生效的参数比没有更糟 |
 
