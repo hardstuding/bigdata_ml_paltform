@@ -126,6 +126,12 @@ jobs:
       - name: 统一运行时镜像引用一致
         run: python3 scripts/check-platform-image-refs.py
 
+      # 新加一个集群内调用方却忘了加 NetworkPolicy 白名单,是这个仓库反复
+      # 发作的一类 bug。症状是"卡住直到超时"(不是 DNS 失败、不是明确拒绝),
+      # 所以人总是先去查对端服务、查凭据、查 RBAC。
+      - name: NetworkPolicy 白名单覆盖了 SDK 连的服务
+        run: python3 scripts/check-netpol-covers-callers.py
+
       # 同一份源码被复制进多个应用的那几份副本(现在是 shared/flask_identity.py
       # → 三个 Flask 应用的 src/identity.py)。和 check-embedded-scripts 是
       # 不同场景:那个管 ConfigMap 里的副本,这个管应用 src/ 里的副本。

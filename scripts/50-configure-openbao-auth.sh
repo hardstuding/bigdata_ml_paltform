@@ -151,13 +151,24 @@ bao write auth/jwt/config oidc_discovery_url="$KEYCLOAK_ISSUER" >/dev/null
 JWT_ACCESSOR=$(bao auth list -format=json | python3 -c '
 import json, sys
 print(json.load(sys.stdin).get("jwt/", {}).get("accessor", ""))')
-# bound_audiences 要能对上 id_token 的 aud。Keycloak 签给某个 client 的
-# id_token,aud 是那个 client_id —— notebook 里拿到的是 jupyterhub 那个
-# client 签的,不是 openbao 的。**这一条写错的症状是 "invalid audience",
-# 而不是权限不足**,不要往策略上查。
+# bound_audiences 要能对上 token 的 aud。**每一个会把 token 递过来的 client
+# 都要列上**,少一个就是那条路整个用不了:
+#
+#   jupyterhub       notebook 里 platform_sdk.secret() 用的 id_token
+#   platform-portal  门户「我的凭据」页面(oauth2-proxy 传下来的 access token)
+#   openbao          从 OpenBao 自己的 UI 登录
+#   account          Keycloak 给带 account 角色的 token 默认加的 aud
+#
+# 2026-09-01 自查时补的 platform-portal —— 漏了它的话门户那一页会一直报
+# "invalid audience"。**这一条写错的症状是 audience 报错,不是权限不足**,
+# 往策略上查会绕很远,所以 SDK 和门户的报错里都专门认了这个词。
+#
+# 说明一下 `account` 这条为什么可以接受:realm 里任何 client 的 token 都会
+# 带它,所以它本身不构成"哪个 client"的约束。真正的约束在 user_claim ——
+# 进来的是谁就是谁,策略按人隔离。这里的 audience 不是授权边界。
 bao write auth/jwt/role/platform-user \
   role_type="jwt" \
-  bound_audiences="jupyterhub,openbao,account" \
+  bound_audiences="jupyterhub,platform-portal,openbao,account" \
   user_claim="preferred_username" \
   groups_claim="groups" \
   policies="platform-user" \

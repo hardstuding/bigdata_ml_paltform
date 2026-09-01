@@ -240,6 +240,21 @@ spec:
                 ports:
                   - port: 9000
                     protocol: TCP
+              # notebook 里 `platform_sdk.secret()` 要连凭据库(ADR-089)。
+              #
+              # **2026-09-01 自查补上的。** 漏了它的症状和上面那几条一样:
+              # 不是 DNS 失败、不是拒绝,是**卡住直到超时** —— 而人第一反应
+              # 会去查 OpenBao 是不是封印着、token 对不对,查很久才会想到
+              # 出向策略。这个命名空间的 egress 是"默认全挡、逐个放行"的
+              # (z2jh 的 egressAllowRules.privateIPs 是 false),每加一个新的
+              # 集群内调用方都要回来加一条。
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: openbao
+                ports:
+                  - port: 8200
+                    protocol: TCP
               # submit_job() 用 kubernetes 客户端建 ConfigMap/Workflow 对象,
               # 走的是 K8s API server 本身。2026-08-19 当晚查到这条规则该
               # 长什么样(过程:①先想当然写成 argo-workflows 命名空间的
