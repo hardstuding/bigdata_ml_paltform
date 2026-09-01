@@ -68,3 +68,36 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
+---
+# OpenBao 要连 Keycloak 做 OIDC discovery(ADR-089)。
+#
+# **它不像别的组件那样经 ingress-nginx 过来** —— 那条路是给"浏览器发起的
+# OIDC 跳转"的,而 discovery 是 OpenBao 自己在服务端发的请求,走的是集群内
+# 的 Service 地址(见 apps/components/openbao.yaml 里 configUrl 的说明:
+# 刻意不绕公网)。所以顶部那句"只放行 ingress-nginx 就够"对它不成立。
+#
+# **2026-09-01 实测撞到**:scripts/50 配 oidc 时报
+# `error checking oidc discovery URL`,而从 openbao pod 里 wget 那个地址是
+# `Connection refused` —— 被 default-deny 挡了。这是这个仓库反复发作的
+# "新调用方忘了加白名单",这次发生在**组件之间**,而
+# scripts/check-netpol-covers-callers.py 只扫 platform-sdk 的源码,覆盖不到。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-openbao-oidc-discovery
+  namespace: keycloak
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - protocol: TCP
+          port: 8080
+

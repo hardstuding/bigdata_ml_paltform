@@ -119,9 +119,26 @@ else
       echo "!! ${NS}/${KEYS_SECRET} 里没有 unseal_key_$i,解不了封"
       exit 1
     fi
-    # **`-` 表示从 stdin 读密钥,不放命令行参数。** 命令行参数会出现在
-    # Pod 里的 `ps` 和 kubectl 的审计日志里,而这是能解开整个凭据库的东西。
-    kubectl -n "$NS" exec -i "$POD" -- bao operator unseal - >/dev/null <<< "$key"
+    # **密钥不放命令行参数** —— 那会出现在 Pod 里的 `ps` 和 kubectl 的审计
+    # 日志里,而它是能解开整个凭据库的东西。
+    #
+    # 走 HTTP 接口而不是 `bao operator unseal`,原因是实测出来的
+    # (2026-09-01,第一次真上集群):
+    #
+    #   - `bao operator unseal -`(Vault 支持的"从 stdin 读")在 OpenBao
+    #     2.6.2 上**不生效**,报 `'key' must be a valid hex or base64 string`
+    #     —— 它把 `-` 当成了密钥本身。
+    #   - 镜像里**只有 BusyBox 的 wget,没有 curl**,而 BusyBox wget 不支持
+    #     `--method=PUT`,只有 `--post-file`。好在 sys/unseal 接受 POST。
+    #
+    # 所以:JSON body 从 stdin 进容器、落到一个临时文件、用 --post-file 发出去,
+    # 全程不经过命令行参数。临时文件用完立刻删。
+    printf '{"key":"%s"}' "$key" \
+      | kubectl -n "$NS" exec -i "$POD" -- sh -c \
+          'cat > /tmp/.unseal && wget -q -O- --post-file=/tmp/.unseal \
+             --header="Content-Type: application/json" \
+             http://127.0.0.1:8200/v1/sys/unseal >/dev/null; rc=$?; \
+           rm -f /tmp/.unseal; exit $rc' 
     echo "  已用第 $((i + 1))/${THRESHOLD} 份"
   done
   sealed=$(status_json | python3 -c 'import json,sys

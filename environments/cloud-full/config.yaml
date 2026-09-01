@@ -101,7 +101,7 @@ seal_mode: dev-autounseal
 # 只有 `submit_job()` 会超时 —— 而人会去查 RBAC。
 # 2026-09-01 迁可用区时从 172.22.9.16 改过来的。**换实例/换可用区必须改
 # 这里** —— 迁移脚本 scripts/51 会自动更新它。
-node_private_ip: 172.22.9.16
+node_private_ip: 172.23.15.60
 
 enabled_components:
   - airflow-db-init.yaml

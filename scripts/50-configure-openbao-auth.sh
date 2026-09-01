@@ -20,7 +20,22 @@ NS="${OPENBAO_NAMESPACE:-openbao}"
 POD="${OPENBAO_POD:-openbao-0}"
 KEYS_SECRET="${OPENBAO_KEYS_SECRET:-openbao-unseal-keys}"
 OPENBAO_EXTERNAL_URL="${OPENBAO_EXTERNAL_URL:-http://openbao.local-lite.test:32460}"
-KEYCLOAK_ISSUER="${KEYCLOAK_ISSUER:-http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform}"
+# **issuer 和 jwks 是两个不同的地址,不能用同一个 —— 这是实测出来的。**
+#
+# token 里的 `iss` 是**外部**地址(带 NodePort):
+#   http://keycloak.local-lite.test:32460/auth/realms/platform
+# 而集群内根本连不上那个地址:CoreDNS 把 *.local-lite.test 解析到
+# ingress-nginx 的 ClusterIP,但 ingress 在集群内监听的是 80,不是 32460。
+#
+# 所以走 discovery 必然失败(OpenBao 会校验"发现文档里的 issuer == 我给的
+# URL"),2026-09-01 实测报 `error checking oidc discovery URL`。
+#
+# **这个仓库早就解决过同一个问题**:oauth2-proxy 的配置里
+# `skip_oidc_discovery = true`,issuer 用带端口的外部地址(要和 token 对上),
+# 而 redeem/jwks 用不带端口的内部地址。这里是等价做法。
+KEYCLOAK_ISSUER="${KEYCLOAK_ISSUER:-}"
+KEYCLOAK_JWKS="${KEYCLOAK_JWKS:-http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/protocol/openid-connect/certs}"
+KEYCLOAK_DISCOVERY_INTERNAL="${KEYCLOAK_DISCOVERY_INTERNAL:-http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth/realms/platform/.well-known/openid-configuration}"
 
 mkdir -p logs
 LOG_FILE="logs/50-openbao-auth-$(date +%Y%m%d-%H%M%S).log"
@@ -124,12 +139,21 @@ if [ -z "$OIDC_CLIENT_SECRET" ]; then
   echo "     (它会建 openbao 这个 Keycloak client 并把密钥写进那个 Secret)"
   echo "     OIDC 这一段跳过,kubernetes auth 和策略已经配好了。"
 else
-  bao write auth/oidc/config \
-    oidc_discovery_url="$KEYCLOAK_ISSUER" \
-    oidc_client_id="openbao" \
-    oidc_client_secret="$OIDC_CLIENT_SECRET" \
-    default_role="platform-user" >/dev/null
-  echo "  已配 oidc auth"
+  # **配不上不中断整个脚本。** OIDC(浏览器登录 OpenBao 自己的 UI)在这套
+  # 部署形态下大概率配不上:它必须走 discovery,而 discovery 会因为上面说的
+  # issuer/端口不一致而失败。**这不影响任何实际功能** —— 人管理凭据走的是
+  # 门户的「我的凭据」页面,那条路用的是下面的 jwt 认证。
+  if bao write auth/oidc/config \
+      oidc_discovery_url="$KEYCLOAK_ISSUER" \
+      oidc_client_id="openbao" \
+      oidc_client_secret="$OIDC_CLIENT_SECRET" \
+      default_role="platform-user" >/dev/null 2>&1; then
+    echo "  已配 oidc auth"
+  else
+    echo "  !! oidc 配不上(多半是 issuer 带 NodePort、集群内连不上那个地址)。"
+    echo "     **不影响功能**:notebook 和门户走的是下面的 jwt 认证。"
+    echo "     受影响的只有「直接登录 OpenBao 自己的 UI」这一条路。"
+  fi
   OIDC_ACCESSOR=$(bao auth list -format=json | python3 -c '
 import json, sys
 print(json.load(sys.stdin).get("oidc/", {}).get("accessor", ""))')
@@ -147,7 +171,20 @@ if bao auth list -format=json 2>/dev/null | grep -q '"jwt/"'; then
 else
   bao auth enable jwt
 fi
-bao write auth/jwt/config oidc_discovery_url="$KEYCLOAK_ISSUER" >/dev/null
+# **不用 discovery,直接给 jwks_url + bound_issuer。** 理由见文件顶部
+# KEYCLOAK_ISSUER 那段:discovery 会因为 issuer 带 NodePort 而失败,而
+# jwks 走内部地址取得到,issuer 只是拿来比对 token 里的 `iss` 字符串,
+# 不需要能连上。
+#
+# issuer 没显式给的话,从内部 discovery 文档里读 —— 那份文档取得到,
+# 只是不能拿它当 discovery URL 用。
+if [ -z "$KEYCLOAK_ISSUER" ]; then
+  KEYCLOAK_ISSUER=$(kubectl -n "$NS" exec "$POD" -- wget -q -O- -T 8 "$KEYCLOAK_DISCOVERY_INTERNAL" 2>/dev/null \
+    | python3 -c "import json,sys; print(json.load(sys.stdin)['issuer'])" || true)
+  [ -n "$KEYCLOAK_ISSUER" ] || { echo "!! 读不到 Keycloak 的 issuer,用 KEYCLOAK_ISSUER=... 显式指定"; exit 1; }
+  echo "  从 Keycloak 读到 issuer:$KEYCLOAK_ISSUER"
+fi
+bao write auth/jwt/config jwks_url="$KEYCLOAK_JWKS" bound_issuer="$KEYCLOAK_ISSUER" >/dev/null
 JWT_ACCESSOR=$(bao auth list -format=json | python3 -c '
 import json, sys
 print(json.load(sys.stdin).get("jwt/", {}).get("accessor", ""))')
@@ -176,8 +213,9 @@ bao write auth/jwt/role/platform-user \
 echo "  已建 jwt role: platform-user(accessor=${JWT_ACCESSOR})"
 
 
-if [ -n "$OIDC_ACCESSOR" ]; then
-  # 策略模板要用到 accessor,所以这一段必须在 oidc 启用之后。
+if [ -n "$OIDC_ACCESSOR" ] || [ -n "$JWT_ACCESSOR" ]; then
+  # 策略模板要用到 accessor。**两个都写**(见下面那段注释);
+  # oidc 没配上时它是空的,那几条路径模板展开成匹配不上的字符串,无害。
   # **两个 accessor 的路径都写。** 同一个人从 UI 登录(oidc)和从 SDK 登录
   # (jwt)是两条不同的 alias,策略模板按 accessor 展开 —— 只写一个的话,
   # 另一条路进来的人会**看不到自己的凭据**,而且不报权限错,只是列出来是空的。
@@ -257,7 +295,7 @@ echo "==> 7/7 把 Keycloak 的组映射成 OpenBao 的身份组"
 # 连修三处(Superset 全员管理员、权限门户全员 403、Trino 的
 # is_platform_admin 是摆设)是同一个形态:代码里有一个按组判断的分支,
 # 而组信息压根没传过来。
-if [ -n "$OIDC_ACCESSOR" ]; then
+if [ -n "$JWT_ACCESSOR" ] || [ -n "$OIDC_ACCESSOR" ]; then
   for grp in platform-team data-analysts algorithm-team viewers; do
     policies="group-${grp}"
     # platform-team 额外拿写权限(见上面那条策略的说明:组内成员能读,
@@ -297,7 +335,7 @@ except Exception: pass' || true)
     done
     if [ -z "$found" ]; then
       bao write identity/group-alias name="${grp}" \
-        mount_accessor="${OIDC_ACCESSOR}" canonical_id="${gid}" >/dev/null
+        mount_accessor="${JWT_ACCESSOR:-$OIDC_ACCESSOR}" canonical_id="${gid}" >/dev/null
       echo "    已建组别名 ${grp}"
     fi
   done

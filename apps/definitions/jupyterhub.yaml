@@ -286,7 +286,7 @@ spec:
               # 差点就被漏掉了。现在 scripts/51 迁移时会自动更新配置。
               - to:
                   - ipBlock:
-                      cidr: 172.22.9.16/32
+                      cidr: 172.23.15.60/32
                 ports:
                   - port: 6443
                     protocol: TCP
