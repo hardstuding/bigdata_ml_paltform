@@ -1,7 +1,7 @@
 # ADR-089:用户凭据托管 —— OpenBao
 
 日期:2026-08-31
-状态:**设计已定,实现进行中**
+状态:**第一阶段完成,2026-09-01 实机验证通过**
 
 ## 问题
 
@@ -127,3 +127,50 @@ production-readiness-gaps 第 7 条)。
 - 平台 Secret 什么时候迁、用不用 External Secrets Operator
 - 动态凭据(OpenBao 直接管数据库账号、发短期账号)—— 这是 Vault/OpenBao
   最有价值的能力,但需要目标数据库的管理员权限,等有真实源库再说
+
+---
+
+## 实机验证(2026-09-01,第一次真上集群)
+
+### 验过的
+
+**按人隔离 —— 这是整个设计的核心**:
+
+- analyst001 用自己的 token 登录 OpenBao,**自动拿到 `group-data-analysts`
+  策略**(Keycloak 组 → OpenBao 身份组的映射生效)
+- 自己的凭据能写、能读、能列
+- **连 platform-team 的 zhenghe 都读不到 analyst001 的个人凭据(403)** ——
+  隔离是 OpenBao 自己判断的,不是任何一处代码里的 if
+- 组共享:platform-team 能写、组内成员只读(403)、别的组读不到(403)
+
+**门户「我的凭据」页面**:存 → 列出 → 删除全通;页面上**不出现凭据的值**;
+换成 platform-team 的账号打开,列表里**没有**别人的凭据 —— 门户确实是以
+用户本人的身份连 OpenBao,不是用自己的高权限身份再过滤。
+
+**自动解封**:机器被竞价回收重启之后 OpenBao 是封印的(`/v1/sys/health`
+返回 503),`scripts/49` 重跑一次 —— 跳过初始化、直接用存好的密钥解封,
+**全程无人工输入**。这条是整套东西能进"一键拉起"的前提。
+
+### 只有实机才暴露的四个问题(都已修)
+
+1. **`bao operator unseal -` 在 OpenBao 2.6.2 上不读 stdin**(Vault 支持,
+   它把 `-` 当成密钥本身)。而镜像里只有 BusyBox 的 wget、没有 curl,
+   BusyBox wget 又不支持 `--method=PUT`。最终走 `sys/unseal` 的 POST +
+   `--post-file`,密钥全程不进命令行参数。
+2. **Keycloak 的 NetworkPolicy 没放行 openbao**(后来发现 minio 也一样)。
+   那份文件顶部原本写着"所有组件都经 ingress-nginx 连过来,只放行它一个就够"
+   —— **这个判断今天不再成立**:有几个组件是在服务端直连的。
+3. **OIDC discovery 在这套部署形态下必然失败**:token 的 `iss` 是带 NodePort
+   的外部地址,而集群内连不上那个地址(CoreDNS 解析到 ingress ClusterIP,
+   但 ingress 内部监听 80)。**这个仓库给 oauth2-proxy 早就解决过同一个问题**
+   (`skip_oidc_discovery` + issuer 和 jwks 分开给),这里用等价做法:
+   jwt 认证走 `jwks_url` + `bound_issuer`,不做 discovery。
+4. **MLflow 服务名写错**(见 [ADR-087](087-feature-drift-monitoring.md) 文末)
+   —— 不是 OpenBao 的问题,但同一轮验证里抓到的。
+
+### 还是没做的(不变)
+
+作业以 owner 身份读 `secret/users/<owner>/` 这条路**仍然没开**,理由见上面
+第 6 条:owner 对账要先真的生效。第一阶段开的是 notebook(身份来自
+JupyterHub,是真的)和 `secret/shared/<组名>/`(组是 Keycloak 里的真实组)。
+
