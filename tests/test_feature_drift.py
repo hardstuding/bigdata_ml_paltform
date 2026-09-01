@@ -42,13 +42,17 @@ def load_job(monkeypatch, rows=None, baselines=None, params=None):
     monkeypatch.setitem(sys.modules, "jobkit", kit)
 
     class FakeMV:
-        def __init__(self, version, tags):
+        def __init__(self, version, tags, run_id=None):
             self.version = version
             self.tags = tags
+            self.run_id = run_id
 
     class FakeRM:
         def __init__(self, name):
             self.name = name
+
+    _run_ids = {k: f"run{i}" for i, k in enumerate(sorted(baselines or {}))}
+    _by_run = {_run_ids[k]: v for k, v in (baselines or {}).items()}
 
     class FakeClient:
         def search_registered_models(self):
@@ -56,8 +60,19 @@ def load_job(monkeypatch, rows=None, baselines=None, params=None):
 
         def search_model_versions(self, filt):
             name = filt.split("'")[1]
-            return [FakeMV(v, {"feature_baseline": json.dumps(b)})
+            # **基线放在 run tag 上,模型版本的 tags 是空的** —— 这就是
+            # 真实情况:训练脚本用的 mlflow.set_tag() 写的是 run tag。
+            #
+            # run_id 用序号而不是拼模型名:模型名里有横线
+            # (demo-rf-classifier),按横线拆会拆错 —— 第一版这么写,
+            # 测试自己先挂了。
+            return [FakeMV(v, {}, run_id=_run_ids[(m, v)])
                     for (m, v), b in (baselines or {}).items() if m == name]
+
+        def get_run(self, run_id):
+            b = _by_run.get(run_id)
+            data = type("D", (), {"tags": {"feature_baseline": json.dumps(b)} if b else {}})
+            return type("R", (), {"data": data})()
 
     mlflow = types.ModuleType("mlflow")
     mlflow.MlflowClient = FakeClient
@@ -219,3 +234,30 @@ class Test窗口参数:
                          baselines={("demo-rf-classifier", "1"): base})
         sel = [s for s in ex if "inference_log" in s]
         assert sel and all("event_type = 'request'" in s for s in sel)
+
+
+class Test基线来源:
+    """**基线在 run 的 tag 上,不在模型版本的 tag 上。**
+
+    这两个是不同的东西,而训练脚本用的 `mlflow.set_tag()` 写的是 run tag。
+    2026-09-01 自查抓到第一版读的是 `mv.tags` —— 那永远是空的,作业会一路
+    正常跑完然后报"一个带 feature_baseline 的模型版本都没有",而训练脚本
+    明明写了。**整个功能静默失效,报错还指向训练那一侧。**
+
+    上面 load_job 里的假客户端就是按真实情况建的(模型版本 tags 为空,
+    基线只在 run 上),所以其它测试能通过本身就说明读对了地方。这里再单独
+    钉一条:模型版本上什么都没有时,仍然要能从 run 拿到基线。
+    """
+
+    def test_模型版本_tags_为空时仍能从_run_拿到基线(self, monkeypatch):
+        base = {"bin_edges": [UNIFORM_EDGES], "mean": [0.5], "std": [0.3]}
+        payload = json.dumps({"inputs": [{"shape": [1, 1], "data": [0.5]}]})
+        ex, exc = load_job(monkeypatch, rows=[payload] * 20,
+                           baselines={("demo-rf-classifier", "1"): base})
+        assert exc is None, f"应该算得出来,实际:{exc}"
+        assert any(s.startswith("INSERT INTO iceberg.ml.feature_drift") for s in ex)
+
+    def test_run_也没有基线时才算_没有基线(self, monkeypatch):
+        ex, exc = load_job(monkeypatch, baselines={})
+        assert isinstance(exc, SystemExit)
+        assert "算不了" in str(exc)

@@ -93,11 +93,17 @@ spec:
                   - "arn:aws:s3:::*"
                 actions:
                   - "s3:*"
-              # 控制台本身要能列桶、看用量,这些是 admin 面的动作,
-              # 不在 s3:* 里。
+              # 控制台本身要能列桶、看用量,这些是 admin 面的动作,不在 s3:* 里。
+              #
+              # **`resources` 必须是空列表,不能写 arn。** MinIO 内置的
+              # consoleAdmin 策略里 `admin:*` 这条就是不带 Resource 的,
+              # 而 chart 的模板只在 resources 非空时才渲染 Resource 字段。
+              # 第一版按 s3 那条的写法给它也加了 `arn:aws:s3:::*` —— 自查时
+              # 对照 MinIO 官方策略发现不对。带 Resource 的 admin 语句可能被
+              # 策略解析拒绝,而失败发生在 chart 的 post-install Job 里,表现
+              # 成"MinIO 同步失败",不会指向策略本身。
               - effect: Allow
-                resources:
-                  - "arn:aws:s3:::*"
+                resources: []
                 actions:
                   - "admin:*"
         service:

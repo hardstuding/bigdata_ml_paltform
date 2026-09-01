@@ -78,7 +78,26 @@ def baselines_from_mlflow():
         if ONLY_MODEL and rm.name != ONLY_MODEL:
             continue
         for mv in client.search_model_versions(f"name='{rm.name}'"):
+            # **基线在「产生这个版本的那次 run」的 tag 上,不在模型版本的
+            # tag 上。** 这两个是不同的东西,而 `mlflow.set_tag()`(训练脚本
+            # 用的那个)写的是 run tag。
+            #
+            # 2026-09-01 自查时抓到:第一版这里读的是 `mv.tags`,那永远是空的
+            # —— 作业会一路正常跑完,然后报"一个带 feature_baseline 的模型版本
+            # 都没有",而训练脚本明明写了。**整个功能静默失效,而且报错信息
+            # 指向的是训练那一侧。**
+            #
+            # 读 run tag 也更符合语义:基线是那次训练的产物,和那次 run 绑在
+            # 一起;同一个 run 注册出多个版本时,它们共享同一份基线,本来就该
+            # 是同一个值。
             raw = (mv.tags or {}).get("feature_baseline")
+            if not raw and getattr(mv, "run_id", None):
+                try:
+                    raw = client.get_run(mv.run_id).data.tags.get("feature_baseline")
+                except Exception as exc:   # noqa: BLE001
+                    print(f"  读不到 {rm.name} v{mv.version} 对应的 run "
+                          f"({mv.run_id}):{str(exc).splitlines()[0][:80]}")
+                    raw = None
             if not raw:
                 # 没有基线的版本(2026-08-30 之前训练的)不是错误,跳过并说明。
                 continue
