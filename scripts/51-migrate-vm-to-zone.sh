@@ -22,6 +22,9 @@ TARGET_ZONE="${1:-}"
 [ -n "$TARGET_ZONE" ] || { echo "用法: $0 <目标可用区>  例如 cn-wulanchabu-b"; exit 1; }
 
 REGION="${CLOUD_VM_REGION:-cn-wulanchabu}"
+# 实例身份来自 environments/cloud-full/vm.env(和开机/停机脚本共用一份)
+_VM_ENV="$(dirname "$0")/../environments/cloud-full/vm.env"
+[ -f "$_VM_ENV" ] && . "$_VM_ENV"
 INSTANCE_ID="${CLOUD_VM_INSTANCE_ID:-i-0jlbped4h1959tp591pe}"
 DRY_RUN="${DRY_RUN:-}"
 
@@ -101,7 +104,14 @@ echo "==> 2/7 用当前实例做整机镜像(含系统盘 + 数据盘)"
 # 数据盘各自出一个快照)。比"分别快照再分别建盘"少一半步骤,而且新实例
 # RunInstances 时数据盘会自动按镜像里的规格建出来。
 IMG_NAME="cloud-full-migrate-$(date +%Y%m%d-%H%M%S)"
-if [ -n "$DRY_RUN" ]; then
+# **可以复用已经在建/已建好的镜像。** 整机镜像是这一步里唯一耗时几十分钟
+# 的部分,而且它是阿里云侧的异步操作 —— 本地脚本中断了它照样继续。
+# 中断之后重跑不给这个口子的话,只能再等一次,还会多留一个占存储费的镜像。
+#   MIGRATE_IMAGE_ID=m-xxx ./scripts/51-migrate-vm-to-zone.sh cn-wulanchabu-b
+if [ -n "${MIGRATE_IMAGE_ID:-}" ]; then
+  IMAGE_ID="$MIGRATE_IMAGE_ID"
+  echo "  复用已有镜像 $IMAGE_ID(跳过创建)"
+elif [ -n "$DRY_RUN" ]; then
   IMAGE_ID="m-DRYRUN"
   echo "  [dry-run] 会建整机镜像 $IMG_NAME"
 else
@@ -113,10 +123,13 @@ echo "  镜像 $IMAGE_ID($IMG_NAME),等它就绪(240G 的盘通常十几到几�
 
 if [ -z "$DRY_RUN" ]; then
   for i in $(seq 1 180); do
-    IST=$(aliyun ecs DescribeImages --RegionId "$REGION" --ImageId "$IMAGE_ID" \
-      | jq_py "im=d['Images']['Image']; print(im[0]['Status'] if im else 'Missing')")
-    PROG=$(aliyun ecs DescribeImages --RegionId "$REGION" --ImageId "$IMAGE_ID" \
-      | jq_py "im=d['Images']['Image']; print(im[0].get('Progress','') if im else '')")
+    # **必须带 --Status。** DescribeImages 默认只返回 Available 的镜像 ——
+    # 正在构建的查出来是空,状态会被读成 Missing,进度永远显示不出来,而且
+    # 分不清"还在建"和"建失败了"。第一版就是那样,实测确认。
+    IMJ=$(aliyun ecs DescribeImages --RegionId "$REGION" --ImageId "$IMAGE_ID" \
+      --Status "Creating,Available,CreateFailed" 2>/dev/null || echo '{}')
+    IST=$(echo "$IMJ" | jq_py "im=d.get('Images',{}).get('Image',[]); print(im[0]['Status'] if im else 'Missing')")
+    PROG=$(echo "$IMJ" | jq_py "im=d.get('Images',{}).get('Image',[]); print(im[0].get('Progress','') if im else '')")
     [ "$IST" = "Available" ] && { echo "  镜像就绪"; break; }
     [ "$IST" = "CreateFailed" ] && { echo "!! 镜像创建失败"; exit 1; }
     [ "$i" = 180 ] && { echo "!! 等了 90 分钟镜像还没好(状态 $IST),人工查"; exit 1; }
@@ -186,10 +199,23 @@ PY
 fi
 
 # ---------------------------------------------------------------- 6. 更新本地
-echo "==> 6/7 本地记录"
-echo "  新实例 ID:$NEW_ID"
-echo "  **scripts/32-start-cloud-vm.sh 里的实例 ID 要改成它**,否则下次开机"
-echo "  开的还是旧那台(而旧那台正是开不了的原因)。"
+echo "==> 6/7 更新 environments/cloud-full/vm.env 指向新实例"
+# **必须自动做,不能靠人记得。** 开机(scripts/32)和停机(scripts/26)都读
+# 这一份;只改一个的后果是"停机脚本去停一台不存在的机器、静默成功,而新机器
+# 一直开着烧钱" —— 这正是把它收敛成一个文件要防的事。
+if [ -n "$DRY_RUN" ]; then
+  echo "  [dry-run] 会把 CLOUD_VM_INSTANCE_ID 改成 $NEW_ID"
+else
+  python3 - "$NEW_ID" <<'PYEOF2'
+import pathlib, re, sys
+p = pathlib.Path("environments/cloud-full/vm.env")
+s = p.read_text(encoding="utf-8")
+s2 = re.sub(r"^CLOUD_VM_INSTANCE_ID=.*$", "CLOUD_VM_INSTANCE_ID=" + sys.argv[1], s, flags=re.M)
+assert s2 != s, "没找到 CLOUD_VM_INSTANCE_ID 这一行"
+p.write_text(s2, encoding="utf-8")
+print("  vm.env: CLOUD_VM_INSTANCE_ID -> " + sys.argv[1])
+PYEOF2
+fi
 
 # ---------------------------------------------------------------- 7. 收尾
 echo

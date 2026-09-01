@@ -24,6 +24,10 @@
 #   不传参数则用下面这两个默认值(这台机器现在唯一在用的 cloud-full 验证机)。
 set -euo pipefail
 
+# 实例身份来自 environments/cloud-full/vm.env(开机/停机/迁移共用一份,
+# 见那个文件顶部的说明)。环境变量优先,方便临时指向别的实例。
+_VM_ENV="$(dirname "$0")/../environments/cloud-full/vm.env"
+[ -f "$_VM_ENV" ] && . "$_VM_ENV"
 CLOUD_VM_INSTANCE_ID="${CLOUD_VM_INSTANCE_ID:-i-0jlbped4h1959tp591pe}"
 CLOUD_VM_REGION="${CLOUD_VM_REGION:-cn-wulanchabu}"
 ALIYUN_PROFILE="${ALIYUN_PROFILE:-cloud-full}"
