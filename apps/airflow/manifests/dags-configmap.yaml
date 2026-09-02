@@ -822,7 +822,7 @@ data:
     # 环境变量优先:Airflow worker 上如果注入了 PLATFORM_JOB_IMAGE 就用它。
     PLATFORM_IMAGE = os.environ.get(
         "PLATFORM_JOB_IMAGE",
-        "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf")
+        "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:996dab804e354719e62da280970434997c7cbdf4")
 
     SCRIPT_VOLUME = k8s.V1Volume(
         name="job-script",

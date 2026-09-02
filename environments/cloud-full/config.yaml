@@ -66,7 +66,7 @@ backup_s3_secret: minio-root
 # 和这个仓库其它四个自建镜像同一套做法。
 # 升级方式:改了 apps/platform-image/ 或 platform-sdk/ 之后,等 CI 构建完
 # 那个 commit,把这里的 SHA 换掉。
-platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf
+platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:996dab804e354719e62da280970434997c7cbdf4
 
 # ---------------------------------------------------------------- 凭据托管
 #

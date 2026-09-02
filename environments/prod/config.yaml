@@ -91,7 +91,7 @@ backup_s3_secret: postgres-backup-target
 # 和这里一致(CI 里跑)。
 # 和 cloud-full 用同一个 tag:同一份构建产物一路走到生产,不重新构建 ——
 # "测试环境验过的和生产跑的是同一个东西"这条要成立就不能各建各的。
-platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf
+platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:996dab804e354719e62da280970434997c7cbdf4
 
 # ---------------------------------------------------------------- 凭据托管
 #
