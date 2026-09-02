@@ -177,8 +177,28 @@ for i, line in enumerate(f.read_text().splitlines(), 1):
     line = line.strip()
     if not line or line.startswith("#"):
         continue
+    # Keycloak 域里的用户是另一种形态:`keycloak-platform-realm <用户> / <密码>`
+    # ——**标签里没有斜杠**。
+    #
+    # 2026-09-02 发现:下面那个正则要求标签形如 `<ns>/<secret>`,于是这些行
+    # 被**直接跳过**,连"没法自动判断"都不算,静默消失。后果是审计报告写着
+    # "已失效 0 条",而其中三个用户的密码早就被改掉了 —— **一份说"全都有效"
+    # 的报告,比没有报告更容易让人放心地用错密码。**
+    #
+    # 这类没法从 k8s Secret 核对(密码存在 Keycloak 自己的库里,而且是哈希),
+    # 但至少要**明确报出来"这条我查不了"**,不能假装它不存在。
+    mk = re.match(r"^(keycloak-[a-z-]+-realm)\s+(\S+)\s+/\s+(\S+)$", line)
+    if mk:
+        unknown += 1
+        print(f"  第{i:3d} 行  {mk.group(1)+' '+mk.group(2):44s} "
+              f"查不了(Keycloak 内部用户,密码是哈希,只能人工登录验证)")
+        continue
+
     m = re.match(r"^([a-z][a-z0-9-]*/[A-Za-z0-9_-]+)[: ]+(\S.*)$", line)
     if not m:
+        # **没匹配上也要报出来**,不能静默跳过 —— 上面那个 bug 就是这么藏住的。
+        print(f"  第{i:3d} 行  {line[:44]:44s} 格式不认识,没法判断")
+        unknown += 1
         continue
     label, rest = m.group(1), m.group(2)
     if label in NOT_IN_K8S:
