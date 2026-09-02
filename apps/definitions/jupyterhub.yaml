@@ -318,24 +318,35 @@ spec:
           # 现在注入的是 notebook_service —— 它**只有代理权限,自己什么都
           # 查不了**。SDK 会自动带上 JupyterHub 注入的 JUPYTERHUB_USER 作为
           # 代理目标,所以权限按登录用户算,和 Superset 走同一条路(ADR-074)。
+          # **这里必须是 dict,不能写成 Kubernetes 那种 `- name:/value:` 的
+          # 列表。** singleuser.extraEnv 最终塞进 KubeSpawner 的
+          # `environment` traitlet,而它声明的类型就是 dict:
+          #     TraitError: The 'environment' trait of a KubeSpawner
+          #     instance expected a dict, not the list [...]
+          #
+          # **后果是每个人都起不了 notebook** —— 点"启动"直接 500,而且
+          # 这个错只在 **spawn 的那一刻**才抛:hub 自己起得来、登录也正常、
+          # ArgoCD 全绿。2026-09-03 实测撞到,而这段配置是 08-29 加的
+          # (当时补的是 notebook 里查数用的 Trino 凭据),也就是说
+          # **notebook 从那天起就一直起不来,能力表上却是绿的**。
+          #
+          # 注意上面 hub.extraEnv(第 114 行附近)用的就是 dict 形式 ——
+          # 同一份文件里两种写法,对的那个反而更早。
           extraEnv:
-            - name: PLATFORM_TRINO_USER
+            PLATFORM_TRINO_USER:
               valueFrom:
                 secretKeyRef: {name: platform-job-credentials, key: PLATFORM_TRINO_USER}
-            - name: PLATFORM_TRINO_PASSWORD
+            PLATFORM_TRINO_PASSWORD:
               valueFrom:
                 secretKeyRef: {name: platform-job-credentials, key: PLATFORM_TRINO_PASSWORD}
-            - name: PLATFORM_TRINO_HOST
-              value: trino.trino.svc.cluster.local
-            - name: PLATFORM_TRINO_PORT
-              value: "8443"
+            PLATFORM_TRINO_HOST: trino.trino.svc.cluster.local
+            PLATFORM_TRINO_PORT: "8443"
             # notebook 里 `platform_sdk.submit_job()` 不指定镜像时用哪个。
             # **必须和 notebook 自己跑的镜像是同一个** —— "交互开发和调度
             # 执行环境一致"(ADR-058)靠的就是这一条。以前它靠
             # platform_sdk/config.py 里的默认值兜着,而那个默认值和这里的
             # singleuser 镜像是两个独立写死的字符串,谁也不保证一致。
-            - name: PLATFORM_JOB_IMAGE
-              value: "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf"
+            PLATFORM_JOB_IMAGE: "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf"
           memory:
             # 这两个字段最终传进 KubeSpawner 自己的 mem_guarantee/mem_limit
             # traitlet(ByteSpecification),只认 K/M/G/T(十进制)后缀,不认
