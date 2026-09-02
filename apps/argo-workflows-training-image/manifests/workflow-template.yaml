@@ -4,7 +4,7 @@
 # 第一次真正接入 Argo Workflows,不是"重新验证"已有能力。
 #
 # 设计取舍(为什么不是 notebook+papermill,参考了
-# /Users/zhenghe/my_work/ysb/algo 那个真实生产项目的既有模式之后决定
+# 使用方现有生产数据平台的既有模式之后决定
 # 不照抄):那边的团队日常在 Jupyter notebook 里交互式开发,notebook 是
 # 他们的原生工作产物,notebook+papermill 对他们是零额外成本。但这个
 # 平台自己的 notebook 交互式开发体验目前还是明确记录在案的差距(见
@@ -15,7 +15,7 @@
 # 脚本(ConfigMap 挂载,见同目录 script-configmap.yaml)+ 专门构建的
 # 依赖镜像(见同目录 Dockerfile),更简单、更好 code review、和这个
 # 项目自己的工程习惯一致。notebook 交互式开发的体验一旦真正成熟了,
-# 到时候重新评估要不要把这条链路也换成 notebook+papermill(向 ysb/algo
+# 到时候重新评估要不要把这条链路也换成 notebook+papermill(向使用方现有平台
 # 的模式靠拢),现在不是时候。
 #
 # WorkflowTemplate 本身不是 ArgoCD Application 管的 chart/repo 资源,是
@@ -39,7 +39,7 @@ spec:
   # 是这个项目更早一次"Argo Workflows RBAC 修复"里加的),用它就行,不用
   # 自己再建一套 RBAC。
   serviceAccountName: argo-workflow
-  # 2026-08-19:目前只有一步。真要复现 ysb/algo 那种多步骤 DAG(特征
+  # 2026-08-19:目前只有一步。真要复现 生产上那种多步骤 DAG(特征
   # 工程 -> 训练 -> 结果落库),在这个 templates 列表下加更多步骤、用
   # dependencies 字段串起来就行,这个模板的结构本身已经是为多步骤准备
   # 的,不是加了限制以后要推倒重来。

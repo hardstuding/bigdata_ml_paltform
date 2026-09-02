@@ -76,7 +76,7 @@ superset/translations/ 下:22 个 .po,0 个 .mo,0 个 .json
 
 ## 2026-08-27 晚补记:半个纠正 + 源码确认
 
-zhenghe 反馈"superset 现在已经基本汉化了,少数汉化不全的先不管了"。而当时
+使用方反馈"superset 现在已经基本汉化了,少数汉化不全的先不管了"。而当时
 跑的镜像是 `21c233e`——**只编译了 `.mo`,没有 `messages.json`**。
 
 第一反应是"那我关于 React 需要 messages.json 的判断错了"。去 Superset 源码

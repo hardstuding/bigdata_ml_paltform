@@ -139,7 +139,7 @@ production-readiness-gaps 第 7 条)。
 - analyst001 用自己的 token 登录 OpenBao,**自动拿到 `group-data-analysts`
   策略**(Keycloak 组 → OpenBao 身份组的映射生效)
 - 自己的凭据能写、能读、能列
-- **连 platform-team 的 zhenghe 都读不到 analyst001 的个人凭据(403)** ——
+- **连 platform-team 的 使用方都读不到 analyst001 的个人凭据(403)** ——
   隔离是 OpenBao 自己判断的,不是任何一处代码里的 if
 - 组共享:platform-team 能写、组内成员只读(403)、别的组读不到(403)
 

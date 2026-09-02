@@ -11,7 +11,7 @@ provider**,所以它传给 OPA 的 `input.context.identity.groups` **永远是�
 一直是个摆设。而 [ADR-074](../docs/decisions/074-superset-impersonation.md)
 打开 Superset impersonation 之后,这条更成了硬伤:Trino 看到的是真实的人,
 如果它不知道这个人属于哪个组,**platform-team 的人也会被当成普通用户拦下**
-——正好和 zhenghe 要的"admin 应该有全权限"相反。
+——正好和使用方 要的"admin 应该有全权限"相反。
 
 数据源复用 `platform/iam/memberships.csv`,不新建一套组织结构——这个仓库在
 权限、审批、Keycloak 同步、Kueue 队列上用的都是这一份(ADR-064 里解释过

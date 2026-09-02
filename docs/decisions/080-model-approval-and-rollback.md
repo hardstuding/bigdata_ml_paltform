@@ -63,7 +63,7 @@ tag,可追溯。
 | 步骤 | 结果 |
 |---|---|
 | `41-approve-model.sh demo-rf-classifier 1` | 打上 approval/approved_by/approved_at,alias `production` → v1 |
-| `11-deploy-...sh` | 打印「将部署 demo-rf-classifier v1(批准人 zhenghe,时间 …)」 |
+| `11-deploy-...sh` | 打印「将部署 demo-rf-classifier v1(批准人 使用方,时间 …)」 |
 | InferenceService | Ready=True |
 | **真实推理请求** | 2 条样本(20 特征)→ 返回 `[0, 1]` |
 | `42-rollback` 无更老版本时 | 拒绝:「当前已经是最老的已批准版本(v1),没有可回退的了」 |

@@ -62,7 +62,7 @@ urlopen 默认跟随重定向。外加我自己用 `flask_login.login_user` 写 
 
 ## 真正的弱点(2026-08-30 主动盘点)
 
-zhenghe 问"是不是还有很多没做好的" —— 是。逐条查证后列在
+使用方问"是不是还有很多没做好的" —— 是。逐条查证后列在
 [`production-readiness-gaps.md`](production-readiness-gaps.md) 末尾那节,
 最要紧的三条:
 
@@ -104,7 +104,7 @@ zhenghe 问"是不是还有很多没做好的" —— 是。逐条查证后列�
 "失败长什么样"。最要紧的两条:**SQL Lab 的 impersonation**(ADR-084 唯一
 没验的一环)和**提权路径确认已堵**(建表 owner → 自己批自己)。
 
-## 需要 zhenghe 配合的
+## 需要 使用方配合的
 
 - **真实告警渠道、域名+ICP 备案、多节点演练**:按他的安排,等上测试/生产
   环境再说,现在只留好配置。
@@ -199,11 +199,11 @@ CronWorkflow)全部清理。
   一个旧的操作快照上不断 retry,用它缓存的旧 source 把已经修好的资源
   改回去。处置方式(本次会话实测有效)见
   `docs/journal/2026-08.md`,搜"卡住的旧操作"。
-- **cloud-full 的 Keycloak admin 密码在公开仓库的 git 历史里** —— zhenghe
-  2026-08-29 决定**不换**("只是开发测试")。当前版本的文档里已经没有明文。
-  **不要再提这条**;只有当这台机器开始承载真实数据或真实用户时才重新评估。
-  背景和真要换时的步骤见
-  [troubleshooting](../operations/troubleshooting.md#cloud-full-的-keycloak-admin-密码)。
+- **开发环境的凭据在承载真实数据之前必须整体轮换一次** —— 这是上生产的
+  硬门禁,记在
+  [production-readiness-gaps](production-readiness-gaps.md)。开发测试阶段
+  按既定安排不处理。轮换步骤见
+  [troubleshooting](../operations/troubleshooting.md#凭据轮换)。
 
 ## 结束一段工作前必须确认(照着过一遍,不要跳)
 

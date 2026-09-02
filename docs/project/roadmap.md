@@ -775,7 +775,7 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
   告警真的被 POST 出去过,终点是集群内的 alert-echo-sink,能回看 payload。
   **还差的只是真实渠道地址**(企微/飞书/邮件),换渠道 = 改
   `monitoring/alertmanager-webhook` 这一个 Secret 的 url。
-  按 zhenghe 明确要求,真实渠道等上生产再接。
+  按 使用方明确要求,真实渠道等上生产再接。
 - **排障知识 Runbook 化**——2026-08-20 补了第一步:按症状类别分组、带
   锚点链接的真实索引(之前 `## 索引` 这个标题底下是空的)。**还没做的**:
   每条正文条目本身的"现象→原因→处置"结构不够统一(大部分条目已经有

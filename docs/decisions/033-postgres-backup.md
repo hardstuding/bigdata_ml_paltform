@@ -62,7 +62,7 @@ exists`(`pg_dumpall` 输出本身包含重建 postgres 这个角色的语句,全
 真实场景下"恢复到已经在跑的实例"会遇到的同一种情况)。恢复后 `\l` 确认
 所有预期的库都在(keycloak/metastore/mlflow/openmetadata_db/superset),
 直接查了一张真实业务表验证不是空壳:`keycloak.user_entity` 里 3 条真实
-用户记录(admin/admin/zhenghe,和当时 Keycloak 里的真实账号对得上)。
+用户记录(admin/admin/使用方,和当时 Keycloak 里的真实账号对得上)。
 备份文件本身是真实、完整、可恢复的 SQL,不是只是"看起来传上去了"。
 
 ## 2026-08-13 补充:一次真实的"备份静默失败"事故

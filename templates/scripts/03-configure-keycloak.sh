@@ -185,7 +185,7 @@ echo "==> superset client"
 create_client_if_absent superset '["{{EXTERNAL_SCHEME}}://superset.{{DOMAIN_SUFFIX}}/oauth-authorized/keycloak","{{EXTERNAL_SCHEME}}://superset.{{DOMAIN_SUFFIX}}{{HTTP_PORT_SUFFIX}}/oauth-authorized/keycloak"]' superset superset-oidc-secret clientSecret
 
 echo "==> airflow client"
-# 2026-08-19 新增,zhenghe 反馈 Airflow 一直没接 SSO。Airflow 3.x 默认
+# 2026-08-19 新增,使用方反馈 Airflow 一直没接 SSO。Airflow 3.x 默认
 # auth_manager 还是 FabAuthManager(和 Superset 同一个 Flask-AppBuilder),
 # 回调路径同样是 /oauth-authorized/<provider name>——但 Airflow 3.x 的
 # api-server 是 FastAPI 套壳,FAB 这个 Flask 子应用整个被挂在 `/auth` 这个

@@ -57,7 +57,7 @@ DAY/HOUR 内新增了多少行"。
 出口有两条路,都卡在同一件事上:
 
 - OpenMetadata 自带 Alerts & Notifications(支持 webhook / 邮件 / Slack)
-- Alertmanager 已经部署,但**没有配置任何外部通知渠道**——zhenghe 明确说过
+- Alertmanager 已经部署,但**没有配置任何外部通知渠道**——使用方明确说过
   "等后面上生产来测试,暂时不测试,留好配置项,能够生效就好"
 
 所以这一条的真实阻塞不是技术,是没有真实的通知凭据。等有渠道时,

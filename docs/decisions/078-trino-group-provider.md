@@ -34,7 +34,7 @@ is_platform_admin if { "platform-team" in input.context.identity.groups }
 
 ADR-074 打开 impersonation 之后,Trino 看到的是真实的人而不是那个无条件
 放行的服务账号。如果 Trino 不知道这个人属于哪个组,**platform-team 的人也会
-被当成普通用户拦下**——正好和 zhenghe 那句"admin 应该有全权限"相反。
+被当成普通用户拦下**——正好和使用方 那句"admin 应该有全权限"相反。
 
 也就是说:不修这条,ADR-074 一上线就会砸到管理员自己头上。
 
@@ -92,7 +92,7 @@ jvm/config/resources)。**YAML 重复键后面覆盖前面,`additionalConfigFile
 
 ## 后续
 
-- `memberships.csv` 目前只有 2 行(admin / zhenghe,都在 platform-team)。
+- `memberships.csv` 目前只有 2 行(admin / 使用方,都在 platform-team)。
   其它三个组(data-analysts / algorithm-team / viewers)**在这份 CSV 里一个
   成员都没有**——Keycloak 那边可能有,但 Trino 这条路上看不到。真要用起来
   得把成员补全,否则那些组的人在 Trino 里同样是"无组"状态。

@@ -137,7 +137,7 @@ delete/资源类操作,没有覆盖"改 reclaim policy + 删 PV + 去 finalizer"
 
 ## 2026-08-27:凭据文件里 62% 是死密码
 
-zhenghe 问"secrets 里是不是很多是旧的没有用的账号密码了"。**是的,而且比
+使用方问"secrets 里是不是很多是旧的没有用的账号密码了"。**是的,而且比
 想的多。**
 
 `scripts/00-generate-secrets.sh` 每次运行都往

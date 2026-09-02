@@ -48,7 +48,7 @@ Superset 用**一个共享的** `superset_service` 账号连 Trino
   `ImpersonateUser`。
 
 之后 Trino 看到的是真实的人,所有按人判断的规则自然生效:grant、列级脱敏、
-行级过滤,以及 `is_platform_admin` —— **zhenghe 那句"admin 应该有全权限"
+行级过滤,以及 `is_platform_admin` —— **使用方那句"admin 应该有全权限"
 就是靠这条成立的**,platform-team 的人在 Superset 里以自己的身份查,照常
 全放行,审计表的看板也就做得出来了。
 

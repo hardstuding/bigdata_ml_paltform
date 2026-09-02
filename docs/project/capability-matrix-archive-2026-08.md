@@ -169,7 +169,7 @@ Kafka 已部署并真实验证(2026-08-19,建 topic/发消息/收消息全链路
 |---|---|---|
 | **交互式开发(Notebook)** | ✅ | JupyterHub 已部署并真实登录验证通过(2026-08-19)。**"打开就自动连好 Trino"这个差距 2026-08-19 晚已由 ADR-058 补上**:singleuser 用的是平台统一镜像(`apps/platform-image/`),自带 `platform_sdk`,notebook 里 `from platform_sdk import query` 直接可用,`query()`/`mlflow_setup()` 都在真实 notebook pod 里验证过成功——不用自己装 client、不用自己拼连接串(`docs/usage-guide.md` 已同步更新)。*2026-08-21 修正:这一行之前还写着"仍然没有这个体验",是过期信息。* |
 | 特征工程 | ✅ | Feast 全链路真实重新验证(2026-08-19):Iceberg → Spark 离线读取 → feast apply → materialize → Redis 在线存储 → Feature Server 在线查询,Alice/Bob 的 region/product/amount 都查出正确值。过程中修了两个真实 bug(见下面"当前最高性价比"那段),不只是组件都在 |
-| 训练执行 | ✅ | **Argo Workflows 编排训练已实现并真实验证**(2026-08-19,`apps/argo-workflows-training-image/`)——不是照抄参考项目 ysb/algo 的 notebook+papermill 模式,评估后改用纯 Python 脚本 + 专门镜像,复用 `scripts/train_demo_model.py`。真实提交 Workflow 跑通,Model Registry 查询确认 version READY。目前只有训练一步,没有 Spark 特征工程步骤 |
+| 训练执行 | ✅ | **Argo Workflows 编排训练已实现并真实验证**(2026-08-19,`apps/argo-workflows-training-image/`)——不是照抄参考项目 使用方现有平台 的 notebook+papermill 模式,评估后改用纯 Python 脚本 + 专门镜像,复用 `scripts/train_demo_model.py`。真实提交 Workflow 跑通,Model Registry 查询确认 version READY。目前只有训练一步,没有 Spark 特征工程步骤 |
 | **实验跟踪 / 模型注册** | ✅ | MLflow 已部署并真实登录验证通过(2026-08-19,含按组授权)。部署时修了两个真实 bug:内存限制太小导致启动 36 秒内 OOMKill、oauth2-proxy 配置的后端 Service 名字写错(chart 生成的真实名字是 `mlflow-mlflow` 不是 `mlflow`) 。**2026-08-27 补记**:黄金链路探针(ADR-079)第一次跑就发现 **MLflow 注册表是空的**——08-22 推倒重建后训练脚本再没跑过,这一格的 ✅ 依据是 08-19 那次验证,而验证的产物早没了。重跑 `scripts/09` 恢复。**能力表记的是「某天验证过」,探针答的是「现在还成不成立」** |
 | 模型部署 | ✅ | KServe 已部署(CRD + ServingRuntime),V2 协议推理验证过(ADR-027) |
 | 推理可观测 | ✅ | **2026-08-29 做完并实机验证**:PodMonitor 抓 predictor 的 MLServer 指标,`platform-inference` 看板 6 个 panel(QPS、错误率、端到端 P50/P95/P99、模型层平均耗时、按状态码、以及一个「有没有在抓」的自检面板)。每条查询都在真集群上确认返回了数(实测 P95 9.7ms、模型层平均 4.4ms)。**特征漂移监控仍然没有**——那需要先把推理输入留痕,是另一件事 |
@@ -254,7 +254,7 @@ accuracy 只可能是 0 或 1,拿它当阈值是自欺欺人;改成校验"模型
      Redis→在线查询真实跑通,过程中修了 DAG 默认暂停、本地构建镜像在
      远程节点拉不到这两个真实 bug)。**"Argo Workflows 编排训练"这段
      空白也已经补上**(2026-08-19 晚些时候,新写了 WorkflowTemplate,
-     不是照抄 ysb/algo 的 notebook+papermill,过程中修了 4 个真实 bug:
+     不是照抄使用方现有平台的 notebook+papermill,过程中修了 4 个真实 bug:
      mlflow-skinny 缺 pandas、MinIO NetworkPolicy 漏了 argo-workflows
      命名空间、WorkflowTemplate 没指定 serviceAccountName、chart 建了
      RoleBinding 但没建对应 ServiceAccount)。剩下真正的空白是"notebook

@@ -95,7 +95,7 @@ data:
     #
     # 现在改成:Superset 打开 impersonation,把登录用户的身份透传给 Trino,
     # Trino 看到的是真实的人,后面所有按人判断的规则(grant / 脱敏 / 行过滤 /
-    # platform-team 全权)就都自然生效了。zhenghe 2026-08-26 提的
+    # platform-team 全权)就都自然生效了。2026-08-26 提出的
     # "admin 应该有全权限" 也随之成立——platform-team 的人在 Superset 里就是
     # 以自己的身份查,`is_platform_admin` 那条规则照常放行。
     #

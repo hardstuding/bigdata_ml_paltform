@@ -31,10 +31,10 @@ Superset / OpenMetadata 都已部署并登录验证过)之后,提出了一组连
 这三点合起来定义了这份 ADR 的约束:**要简化使用、要保住本地 AI 编程
 工具的能力、要少写代码**。三者中任何一条被牺牲,方案就是错的。
 
-### 参考系一:zhenghe 自己的生产项目 `ysb/algo`
+### 参考系一:使用方现有的生产数据平台
 
 这不是假想的需求,是一套真实跑了几年的工作方式。读代码确认的事实
-(`/Users/zhenghe/my_work/ysb/algo`,不是凭印象):
+(对着真实代码核对过,不是凭印象):
 
 - `utils` 是**独立 git repo**(`git@remote.ysbang.cn:algo/utils.git`),
   clone 到 `~/git/algo/utils`,靠 `PYTHONPATH` 生效——没有打包流程、
@@ -122,7 +122,7 @@ algo 那套的地基是"大家共用服务器上同一批 conda 环境"。在 K8
 
 #### 关于 Hera(Argo 官方 Python SDK):第二批用,第一批不用
 
-2026-08-19 zhenghe 追问"有没有更好的开发管理方案",重新核实了一轮
+2026-08-19 使用方追问"有没有更好的开发管理方案",重新核实了一轮
 现成方案,结论记在这里,避免以后重复调研:
 
 `hera`(argoproj-labs 维护,当前 7.1.0)是 Argo Workflows 的 Python SDK,

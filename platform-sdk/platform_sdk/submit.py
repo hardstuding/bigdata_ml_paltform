@@ -1,10 +1,10 @@
 """作业提交:把一个本地 Python 脚本变成集群里跑的 Argo Workflow。
 
-对应 ysb/algo 里 `$EXECUTENOTEBOOK` + `pydolphinscheduler` 那一层——
+对应使用方现有平台里 `$EXECUTENOTEBOOK` + `pydolphinscheduler` 那一层——
 用户不用写 Argo Workflow YAML,也不用懂 Kubernetes。
 
 **为什么脚本走 ConfigMap 而不是 git clone**(这是有意的取舍,不是偷懒):
-git 拉代码更贴近 ysb/algo 现在的做法,长期也确实该支持;但开发循环里
+git 拉代码更贴近 使用方现有平台的做法,长期也确实该支持;但开发循环里
 "改一行就要 commit+push 一次才能试跑"是很重的摩擦,而 notebook 里迭代
 恰恰是改动最频繁的场景。ConfigMap 上传让"本地改完直接提交试跑"成立,
 和 apps/argo-workflows-training-image/ 已经在用的挂载方式也是同一个模式。

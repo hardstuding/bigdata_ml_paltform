@@ -439,7 +439,7 @@ Secret 永远补不上、groups scope 从建realm起就没配过)本可以在"�
   只顾一头。
 
 **2026-08-19 晚些时候:"Argo Workflows 编排训练"这段空白补上了**——参考了
-`/Users/zhenghe/my_work/ysb/algo`(zhenghe 真实生产团队的项目)里
+使用方现有的生产数据平台项目里
 DolphinScheduler + notebook + papermill 的既有模式,评估之后**没有照抄**:
 那边团队日常在 notebook 里交互式开发,notebook 是原生工作产物;这个平台
 自己的 notebook 交互式开发体验还是明确记录在案的差距(`docs/usage-guide.md`
@@ -478,7 +478,7 @@ Model Registry 查询确认 `demo-rf-classifier` version 3、
 以后扩展准备好),也没有"notebook 里触发"这条腿——这两个仍然是真实的
 未做项,记在 `docs/project/roadmap.md`。
 
-**2026-08-19 当晚,重开 cloud-full 云主机给 zhenghe 现场看效果时,又发现并
+**2026-08-19 当晚,重开 cloud-full 云主机给使用方 现场看效果时,又发现并
 修好三个真实问题**(不是主动排查出来的,是他实际点开页面才暴露的):
 1. **给错密码**:一开始把 Keycloak 自己控制台(master realm)的 admin
    密码当成了 platform realm 里给各应用 SSO 用的账号——两个刚好都叫
@@ -514,7 +514,7 @@ superset.yaml`、`apps/superset/manifests/create-db-job.yaml`、
 `scripts/03-configure-keycloak.sh` 都已经改成声明式/脚本化,不是手动改了
 一下集群就完事——下次从空环境重新部署也会带上这些修复,不需要重新踩一遍。
 
-**第四个:OpenMetadata SSO 登录报 "Account already exists"**。zhenghe 当场
+**第四个:OpenMetadata SSO 登录报 "Account already exists"**。使用方当场
 指出不应该接受"换个账号绕过去"这种处理方式(原话:"如果一开始给
 openmetadata 适配好 keycloak,应该不会出现你现在这个问题……因为人员是会
 流动的,所以确实需要一个 admin 的管理员账号"),追问之后确认他说得对

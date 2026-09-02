@@ -8,7 +8,7 @@ ADR-044 做完了分级审批的核心机制,用户反馈"太玩具化"(测试�
 `zhenghe`/`admin` 两个真实账号),要求补齐大厂常见的配套能力。展开后
 确认要:①能对接公司已有的 OA 系统(可插拔,不强制自建到底);②企业微信
 通知;③审批人超时不处理要能提醒/升级;④权限交接(参考用户公司真实项目
-`ysb/algo/big_data/common_tool/authorize.ipynb` 的 `transfer_*` 设计);
+使用方现有平台里那个权限管理 notebook 的 `transfer_*` 设计);
 ⑤请求审计数据完整可查;⑥界面更完整。
 
 用户同时提醒:如果这些功能设计不好会直接变成"臃肿",宁可不做;通知/
@@ -59,7 +59,7 @@ EXTERNAL_OA_WEBHOOK_URL` 把这一步的信息发出去,状态改成
 
 ### 权限交接:参考用户公司真实实现的模式,不是抄代码
 
-`ysb/algo/big_data/common_tool/authorize.ipynb` 用 DolphinScheduler API
+使用方现有平台里那个权限管理 notebook 用 DolphinScheduler API
 做 `transfer_user_basic_objects`/`transfer_user_alerts`,交接完发企微
 通知。这边技术栈完全不同(SQLite + git,不是 DolphinScheduler),但"一次
 操作转移全部未决事项 + 批量转移组成员关系 + 通知接手人具体转移了什么"

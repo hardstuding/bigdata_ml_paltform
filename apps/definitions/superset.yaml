@@ -214,7 +214,7 @@ spec:
                 f"{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/superset_examples"
             )
           chinese_ui: |
-            # 界面汉化(zhenghe 2026-08-16 提出,08-26 确认"不是一个配置的
+            # 界面汉化(2026-08-26 落地)。**确实就是一个配置的
             # 事吗"——**是的,确实就是一个配置**,Superset 自带简体中文翻译,
             # 不需要自己翻译或者打补丁)。
             #

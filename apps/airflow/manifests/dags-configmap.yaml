@@ -803,7 +803,7 @@ data:
     # examples/hello-job/job.py 保持同步——同一个模式见
     # apps/argo-workflows-training-image/manifests/script-configmap.yaml)。
     #
-    # 2026-08-19 晚些时候新增,回应 zhenghe 之前的追问"同时 airflow 里也能用
+    # 2026-08-19 晚些时候新增,回应 使用方之前的追问"同时 airflow 里也能用
     # 等同的环境吗"——当时只是设计上承诺了"是同一个镜像,不是等同",这个 DAG
     # 才是真正把这条承诺落地验证。
 

@@ -5,7 +5,7 @@
 #
 # 背景:`platform/alertmanager-notification/` 那套外部通知配置结构早就写好了,
 # 但 cloud-full 一直是 `alert_notification_mode: none`——因为没有真实的企业微信/
-# 飞书 webhook 地址(zhenghe 2026-08-22:"等后面上生产来测试")。结果是:
+# 飞书 webhook 地址(按既定安排,真实渠道等上生产再接)。结果是:
 # **告警规则、Alertmanager、路由配置全都在,而"告警能不能送出去"从来没有被
 # 验证过一次**。真到上生产那天配上 webhook,是第一次跑这条路,那时候出问题
 # 才最麻烦。
