@@ -329,9 +329,22 @@ spec:
             # 代价会高一个量级,而且很可能就此不升了。
             #
             # **Superset 的通知是一个插件系统**:`BaseNotification` 的
-            # `__init_subclass__` 会把子类自动注册进 `plugins`,后定义的同
-            # `type` 子类覆盖先定义的。所以只要在这里定义一个子类就生效,
-            # 不需要碰镜像里的任何文件。
+            # `__init_subclass__` 会把子类自动注册进 `plugins`,不用碰镜像里
+            # 的任何文件。
+            #
+            # **但光定义子类是不够的 —— 这一点第一版写错了,而且完全静默。**
+            # `create_notification()` 是这么选实现的:
+            #
+            #     for plugin in BaseNotification.plugins:
+            #         if plugin.type == recipient.type:
+            #             return plugin(...)
+            #
+            # 返回的是**第一个**匹配的,不是最后一个。上游的
+            # WebhookNotification 在 import 时就 append 进去了,子类排在它
+            # 后面,于是永远轮不到。2026-09-02 实测:告警确实发出去了,
+            # 接收端收到的却是 Superset 默认的 payload 形状 —— 二开代码一行
+            # 没跑,而日志里没有任何异常。所以下面显式把父类从 plugins 里
+            # 摘掉、把子类插到最前面。
             #
             # **为什么是继承 WebhookNotification 而不是新增一个通知类型**:
             # `ReportRecipientType` 是一个固定的 StrEnum(Email/Slack/
@@ -385,6 +398,17 @@ spec:
                         # 代价:图表截图/CSV 发不出去,只能靠上面那个链接跳回
                         # Superset 看 —— 这是企微机器人本身的限制,不是实现问题。
                         return None
+
+                # 见上面那段注释:注册顺序决定谁生效,只定义子类是不够的。
+                from superset.reports.notifications.base import BaseNotification
+
+                BaseNotification.plugins = [
+                    p for p in BaseNotification.plugins
+                    if p is not WebhookNotification
+                ]
+                if WeComWebhookNotification in BaseNotification.plugins:
+                    BaseNotification.plugins.remove(WeComWebhookNotification)
+                BaseNotification.plugins.insert(0, WeComWebhookNotification)
 
             # ---- 特性开关 ----
             #
