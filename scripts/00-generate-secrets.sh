@@ -453,7 +453,12 @@ echo "==> 复制 MinIO 凭据到需要连它的命名空间"
 # Flink 流式作业的 JobManager/TaskManager 直连 MinIO(S3A)写 Iceberg
 # warehouse,和 spark-operator 是同一个坑——SparkApplication 当初就是这么
 # 发现漏配的(ADR-036),这次照着同一个模式提前加上,不用等实测报错。
-MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt argo-workflows platform-sdk-demo flink"
+# jupyterhub(2026-09-03 新增):notebook 里用 MLflow 记实验时,模型产物
+# 直接写 MinIO(MLFLOW_S3_ENDPOINT_URL + AWS_* 三个环境变量,见
+# apps/components/jupyterhub.yaml 的 singleuser.extraEnv)。不复制的话
+# spawn 时 secretKeyRef 找不到,**整个 notebook 起不来**,而不是"记不了
+# 实验" —— 缺一个 Secret 引用,pod 直接卡在 CreateContainerConfigError。
+MINIO_CONSUMER_NAMESPACES="trino data mlflow spark-operator seatunnel feast dbt argo-workflows platform-sdk-demo flink jupyterhub"
 for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done

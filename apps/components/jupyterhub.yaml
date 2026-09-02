@@ -340,6 +340,24 @@ spec:
             # platform_sdk/config.py 里的默认值兜着,而那个默认值和这里的
             # singleuser 镜像是两个独立写死的字符串,谁也不保证一致。
             PLATFORM_JOB_IMAGE: "{{PLATFORM_JOB_IMAGE}}"
+            # **不注入这个,notebook 里 `import mlflow` 之后记的东西全进了
+            # 本地文件,不是平台的 MLflow。** mlflow 的默认 tracking uri 是
+            # 本地 `./mlruns` 目录 —— 不会报错、不会警告,代码跑得好好的,
+            # 只是实验记录在 pod 里,pod 一回收就没了。
+            #
+            # 服务名是 `mlflow-mlflow`(chart 的 fullname 拼出来的),不是
+            # `mlflow` —— 直觉上写 `http://mlflow.mlflow...` 会连接超时。
+            # 2026-09-03 实测踩到,而 Argo 的训练模板里一直写的是正确的那个,
+            # 只有 notebook 这条路没配。
+            MLFLOW_TRACKING_URI: "http://mlflow-mlflow.mlflow.svc.cluster.local:5000"
+            # 模型产物直接写 MinIO,和训练作业走同一条路。
+            MLFLOW_S3_ENDPOINT_URL: "http://minio.minio.svc.cluster.local:9000"
+            AWS_ACCESS_KEY_ID:
+              valueFrom:
+                secretKeyRef: {name: minio-root, key: rootUser}
+            AWS_SECRET_ACCESS_KEY:
+              valueFrom:
+                secretKeyRef: {name: minio-root, key: rootPassword}
           memory:
             # 这两个字段最终传进 KubeSpawner 自己的 mem_guarantee/mem_limit
             # traitlet(ByteSpecification),只认 K/M/G/T(十进制)后缀,不认
