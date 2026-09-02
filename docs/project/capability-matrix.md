@@ -95,7 +95,7 @@ impersonation 没验过、说作业发布没有多文件和晋级路径,而详�
 
 | 环节 | 状态 | 验证级别 | 最后验证 | 证据 |
 |---|---|---|---|---|
-| 登录 / 统一入口 | ✅ | 集成验证 | 2026-08-30 | Keycloak SSO + platform-portal([ADR-047](../decisions/047-platform-portal.md))。**2026-08-30 实机验证按角色显示**:`data-analysts` 身份看不到 ArgoCD/Keycloak、看得到 SQL 工作台;`platform-team` 全部可见;三个自建应用都读得到 groups claim(此前 permission-request-app 读不到,导致组权限审批对所有人 403) |
+| 登录 / 统一入口 | ✅ | 集成验证 | 2026-09-02 | Keycloak SSO + platform-portal([ADR-047](../decisions/047-platform-portal.md))。**2026-08-30 实机验证按角色显示**:`data-analysts` 身份看不到 ArgoCD/Keycloak、看得到 SQL 工作台;`platform-team` 全部可见;三个自建应用都读得到 groups claim(此前 permission-request-app 读不到,导致组权限审批对所有人 403)。**2026-09-02 补上真正走浏览器/HTTP 的端到端 SSO 登录验证**:此前所有验证都是程序化的(impersonation 用 override_user、按角色显示用伪造请求头),**没有一次真的走完一遍登录**,于是 Superset 的 SSO 从 08-29 起就是坏的却没人发现(userinfo 相对路径少一段,FAB 把异常吞掉、静默回登录页)。修完实测:登录后落在 /superset/welcome/,用户自动建出来并按 platform-team 映射到 Admin |
 | 找数据(有哪些表) | ✅ | 集成验证 | 2026-08-23 | 采集自动发现,目录里 100+ 张表,字段和 Trino 真实表结构一致 |
 | 申请表权限 | 🟡 | demo | 2026-08-30 | [ADR-044](../decisions/044-tiered-approval-workflow.md)/[045](../decisions/045-approval-backend-notifications-escalation.md)。2026-08-30 实机验证:审批链算得对、拒绝接口不返回 500、时区换算和 groups 提示都在。2026-08-30 补验:**组权限申请的批准按钮**用真 access token 验过(platform-team 看得到按钮、批准返回 302 且待审批清零;非 platform-team POST 同一接口 403);**从数据目录跳去申请**([ADR-086](../decisions/086-approval-belongs-to-oa.md))也验过 —— OpenMetadata 表详情页上的 `accessRequest` 是可点的 markdown 链接,`/api/table-governance` 两种表名写法都返回治理属性。**这个功能之前部署了但从来没工作过**(公网地址读一个从没人建过的 secret key),现在改成按环境渲染 |
 | 权限真正生效 | ✅ | 集成验证 | 2026-08-26 | Trino 接 OPA([ADR-051](../decisions/051-trino-opa-access-control.md)) |
