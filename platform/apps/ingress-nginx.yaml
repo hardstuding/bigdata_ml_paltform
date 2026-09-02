@@ -25,12 +25,29 @@ spec:
           config:
             proxy-buffer-size: "16k"
             proxy-buffers-number: "4"
+            # **nginx 默认 worker_processes=auto,也就是 CPU 核数。** 这台
+            # 节点 16 核 → 16 个 worker 进程,每个都带自己的连接池和缓冲区。
+            # 这个平台的流量是"十几个人偶尔点几下页面",4 个 worker 绰绰
+            # 有余,而 16 个的内存占用是实打实的。
+            #
+            # 这和同一天在 Superset 的 celery worker 上撞到的是**同一个
+            # 模式**:组件默认按 CPU 核数起并发,而这台机器核多、负载轻,
+            # 默认值反而成了内存压力的来源。
+            worker-processes: "4"
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
             limits:
-              memory: 256Mi
+              # 2026-09-03:256Mi → 512Mi。**在 256Mi 上被 OOMKilled 了
+              # 40 次**,而且后果不是"偶尔慢一下" —— controller 被杀之后
+              # readiness 探针失败,**整个平台的外部访问全断**(所有域名
+              # 都连不上,包括 SSH 之外的一切)。发现时它已经在
+              # `Running 0/1` 的状态下转了几个小时,CPU 1960m 全耗在 GC 上。
+              #
+              # 这是集群级组件,和另一个项目共享同一个 k3s —— 它 OOM 的
+              # 时候两边一起断。调大上限对两边都只有好处。
+              memory: 512Mi
           # 2026-08-16 云端要开公网访问时试过 hostNetwork(绑定宿主机
           # 80/443,绕开 kube-proxy NodePort 这层)——**行不通,已回退**:
           # 这台节点是和 Codex 的 bigdata_ai_platform_v2 共享的同一个
