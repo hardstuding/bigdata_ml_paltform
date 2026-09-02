@@ -453,9 +453,10 @@ spec:
 # 没人会从里面读出"少了个用户名";而且失败是渐进的(数据质量只是 6 条坏
 # 1 条,目录本身照常能查),很容易被当成"某条测试写错了"放着。
 #
-# 结构照抄 goldenpath-catalog —— **它需要 OPENMETADATA_TOKEN**,
-# 第一版抄的是 goldenpath-audit(不需要 token),结果探针直接报
-# "没有 OPENMETADATA_TOKEN"。
+# 结构照抄 goldenpath-catalog(它需要 OPENMETADATA_TOKEN)。
+# **探针名写在 command 的最后一个元素,不是 args** —— 这两个字段这里都存在,
+# 第一版改了 args,结果 CronJob 跑的还是 catalog 这条探针、还"通过"了,
+# 日志里写着 `链路 [catalog] 通` 才看出来。
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -489,7 +490,7 @@ spec:
             command:
             - python3
             - /probe/probe.py
-            - catalog
+            - catalog-connection
             env:
             - name: TRINO_USER
               value: goldenpath_probe
@@ -512,8 +513,6 @@ spec:
             volumeMounts:
             - name: probe
               mountPath: /probe
-            args:
-            - catalog-connection
           volumes:
           - name: probe
             configMap:
