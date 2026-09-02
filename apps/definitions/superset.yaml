@@ -465,9 +465,9 @@ spec:
           resources:
             requests:
               cpu: 300m
-              memory: 768Mi
-            limits:
               memory: 1536Mi
+            limits:
+              memory: 3Gi
         supersetCeleryBeat:
           # beat 是**单例**:它负责按 beat_schedule 把到期的告警投进队列。
           # 多副本会导致同一个告警被投多次(收件人收到重复消息),chart 这里
@@ -478,9 +478,9 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 768Mi
-            limits:
               memory: 1536Mi
+            limits:
+              memory: 3Gi
   destination:
     server: https://kubernetes.default.svc
     namespace: superset

@@ -57,8 +57,8 @@ local-lite:
   # 没有 Redis/Celery broker,worker 起来也没用,见 superset.yaml 里的注释
   superset_worker_replicas: 1
   superset_worker_cpu: "200m"
-  superset_worker_memory_request: "512Mi"
-  superset_worker_memory_limit: "1Gi"
+  superset_worker_memory_request: "1Gi"
+  superset_worker_memory_limit: "2Gi"
 
   airflow_apiserver_replicas: 1
   airflow_apiserver_cpu: "150m"
@@ -257,8 +257,8 @@ cloud-full:
   superset_node_memory_limit: "1024Mi"
   superset_worker_replicas: 1
   superset_worker_cpu: "300m"
-  superset_worker_memory_request: "768Mi"
-  superset_worker_memory_limit: "1536Mi"
+  superset_worker_memory_request: "1536Mi"
+  superset_worker_memory_limit: "3Gi"
 
   airflow_apiserver_replicas: 1
   airflow_apiserver_cpu: "150m"
@@ -473,8 +473,8 @@ prod:
   # prod 这一档也保持 0,不是漏配。等以后真的接 Redis/Celery 才有必要调大。
   superset_worker_replicas: 2
   superset_worker_cpu: "500m"
-  superset_worker_memory_request: "1Gi"
-  superset_worker_memory_limit: "2Gi"
+  superset_worker_memory_request: "2Gi"
+  superset_worker_memory_limit: "4Gi"
 
   # apiServer/scheduler/dagProcessor/triggerer 都是无状态或者靠 DB 锁协调
   # 的组件,Airflow 官方文档明确支持多副本(包括多 scheduler),6 台物理机

@@ -37,6 +37,18 @@ spec:
     requests.memory: 4Gi
     limits.memory: 6Gi
 ---
+# 2026-09-02 调大(2Gi/3Gi → 4Gi/7Gi)。**这个命名空间的组件构成变了**:
+# 原来只有 superset 本体一个 Deployment,现在还有 Celery worker、beat 和
+# 一个 Redis(ADR-091,告警与报表要靠它们才真的能跑)。
+#
+# **这是这个仓库第四次栽在同一个坑上**(前三次记在下面 openmetadata 那段
+# 的注释里)。表现每次都一样阴险:Deployment 期望 1 副本、实际 0 个 Pod,
+# `kubectl get pods` 里**什么都看不到** —— 不是 Pending、不是 CrashLoop,
+# 是压根没建出来。只有 `describe deploy` 的 Conditions 里那句
+# `ReplicaFailure / FailedCreate` 和事件里的 `exceeded quota` 能看出来。
+#
+# **判据**:往一个命名空间加新组件时,把新增的 requests/limits 加进去算一遍,
+# 不要等它建不出 Pod 才发现。
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -44,9 +56,9 @@ metadata:
   namespace: superset
 spec:
   hard:
-    requests.cpu: "1"
-    requests.memory: 2Gi
-    limits.memory: 3Gi
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.memory: 7Gi
 ---
 # 2026-08-28 调大一次(6Gi → 9Gi)。这个命名空间不只跑 OpenMetadata 本体,
 # 还要跑它派生出来的采集/数据质量 Job(每个 limits.memory 1.5Gi)。常驻部分
