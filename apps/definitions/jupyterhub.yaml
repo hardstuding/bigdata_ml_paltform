@@ -55,9 +55,25 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://hub.jupyter.org/helm-chart/
-    chart: jupyterhub
-    targetRevision: 4.4.2
+    # **chart 是 vendor 进仓库的,不是让 ArgoCD 去外网拉**
+    # (platform/jupyterhub-chart/,见 ADR-061 和 scripts/28-vendor-helm-chart.sh)。
+    #
+    # 2026-09-02 实测:从境内云主机拉 hub.jupyter.org 的 index.yaml
+    # (881KB)速度只有 22KB/s,40 秒都下不完,而 **helm 自己有一个写死的
+    # HTTP 超时,先于 ARGOCD_EXEC_TIMEOUT 触发** —— 调大 ArgoCD 的超时没用。
+    # 症状是 Application 卡在 `Unknown`/ComparisonError,而集群里的 Pod
+    # 其实一直正常跑着(所以很容易被忽略)。
+    #
+    # **这不是升级引入的**:回头验过 4.4.1(升级前那个版本)现在同样拉不到。
+    # 是这条链路本来就脆,升级只是把它暴露出来。和 grafana/loki/kueue
+    # 踩的是同一个坑,解法也一样。
+    #
+    # 换版本的做法:
+    #   ./scripts/28-vendor-helm-chart.sh https://hub.jupyter.org/helm-chart/ \
+    #     jupyterhub <新版本> platform/jupyterhub-chart
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/jupyterhub-chart
     helm:
       valuesObject:
         hub:

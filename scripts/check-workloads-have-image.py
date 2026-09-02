@@ -33,11 +33,25 @@ REPO = Path(__file__).resolve().parent.parent
 # 占位符,本来就不是合法 YAML。渲染产物覆盖了同样的内容,而且那才是真正
 # 部署上去的东西。
 SCAN_DIRS = [REPO / "apps", REPO / "platform"]
-SKIP_PARTS = {".git", "__pycache__", "loki-chart", "alloy-chart", "kueue-chart",
+SKIP_PARTS = {".git", "__pycache__",
               # apps/components/ 是**源文件**不是渲染产物,里面有 {{RES:xxx}}
               # 这类未加引号的占位符,本来就不是合法 YAML。对应的渲染产物
               # 是 apps/definitions/,那里才是真正部署上去的。
               "components"}
+
+
+def is_vendored_chart_dir(d: Path) -> bool:
+    """这个目录是不是一个 vendor 进来的第三方 Helm chart。
+
+    **不再手写目录名清单。** 原来这里列着 loki-chart / alloy-chart /
+    kueue-chart —— 每 vendor 一个新 chart 就得记得回来加一行,而
+    2026-09-02 vendor jupyterhub 时就忘了,这个检查当场报出 45 个"没有镜像
+    的工作负载"(其实是 helm 模板里的 `{{ }}`,本来就不是合法 YAML)。
+    **一个需要人记得维护的排除清单,迟早会漏。**
+
+    判据用 chart 自己的结构特征:目录下有 Chart.yaml,且有 templates/ 子目录。
+    """
+    return (d / "Chart.yaml").is_file() and (d / "templates").is_dir()
 
 # kind -> 取到容器列表的路径。只列这个仓库真实用到的。
 POD_SPEC_PATHS = {
@@ -83,6 +97,10 @@ def main() -> int:
             continue
         for f in sorted(root.rglob("*.yaml")):
             if SKIP_PARTS & set(f.parts):
+                continue
+            # vendor 进来的 chart 整个跳过(它的 templates/ 里是 helm 语法)
+            if any(is_vendored_chart_dir(parent) for parent in f.parents
+                   if parent != REPO and REPO in parent.parents or parent == REPO):
                 continue
             try:
                 docs = list(yaml.safe_load_all(f.read_text()))
