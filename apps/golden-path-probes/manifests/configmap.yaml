@@ -132,6 +132,42 @@ data:
         return f"最新审计记录 {age} 分钟前"
 
 
+    def probe_catalog_connection():
+        """数据目录里那份 Trino 连接配置是不是完整的。
+
+        **为什么单独探这一条,而不是靠采集 Job 自己失败暴露。**
+
+        这个配置上的 `username` 掉过两次(2026-08-30、2026-09-02),而它掉了
+        之后的表现是:OpenMetadata 拿这份配置去挨个匹配几十种数据库连接类型,
+        吐出 **483 条 pydantic 校验错误**,真正那一句
+        `[TrinoConnection].username Field required` 夹在中间,最后以一句毫不
+        相干的 `AttributeError: 'NoneType' object has no attribute 'root'`
+        收尾 —— **没人会从那 483 行里读出"少了个用户名"**。
+
+        更麻烦的是它的失败是**渐进的**:数据质量任务只是"6 条里坏 1 条"
+        (Success 83.33%),CronJob 变红,而目录本身照常能查、页面照常能开。
+        很容易被当成"某条测试写错了"放着。
+
+        `scripts/47` 里有同样的检查,但那只在跑那个脚本的时候查一次 ——
+        拦不住"配置在运行期丢失"。这里每 10 分钟查一次。
+        """
+        token = os.environ.get("OPENMETADATA_TOKEN", "")
+        if not token:
+            raise RuntimeError("没有 OPENMETADATA_TOKEN,先跑 scripts/27-configure-openmetadata-bot.sh")
+        try:
+            svc = _req(f"{OM}/api/v1/services/databaseServices/name/trino",
+                       headers={"Authorization": f"Bearer {token}"})
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"查不到 trino 这个 DatabaseService(HTTP {e.code})")
+        cfg = (svc.get("connection") or {}).get("config") or {}
+        missing = [f for f in ("username", "authType", "hostPort") if not cfg.get(f)]
+        if missing:
+            raise RuntimeError(
+                f"trino 的连接配置缺了 {missing} —— 数据质量/血缘采集会以 483 条 "
+                f"pydantic 校验错误失败,真正的原因埋在里面。"
+                f"处置:./scripts/29-configure-openmetadata-trino-ingestion.sh")
+        return f"连接配置完整(username={cfg.get('username')})"
+
     def probe_catalog():
         """链路三:数据目录。Trino 元数据 -> OpenMetadata 采集 -> 目录可查。
 
@@ -254,7 +290,8 @@ data:
     PROBES = {"query": probe_query, "streaming": probe_streaming,
               "catalog": probe_catalog, "authz": probe_authz,
               "model": probe_model, "inference": probe_inference,
-              "audit": probe_audit}
+              "audit": probe_audit,
+              "catalog-connection": probe_catalog_connection}
 
     if __name__ == "__main__":
         name = sys.argv[1]
