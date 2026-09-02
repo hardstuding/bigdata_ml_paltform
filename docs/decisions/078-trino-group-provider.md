@@ -34,7 +34,7 @@ is_platform_admin if { "platform-team" in input.context.identity.groups }
 
 ADR-074 打开 impersonation 之后,Trino 看到的是真实的人而不是那个无条件
 放行的服务账号。如果 Trino 不知道这个人属于哪个组,**platform-team 的人也会
-被当成普通用户拦下**——正好和使用方 那句"admin 应该有全权限"相反。
+被当成普通用户拦下**——正好和平台负责人那句"admin 应该有全权限"相反。
 
 也就是说:不修这条,ADR-074 一上线就会砸到管理员自己头上。
 

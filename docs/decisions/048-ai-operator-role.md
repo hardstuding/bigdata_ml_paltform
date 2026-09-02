@@ -20,7 +20,7 @@
    页面手动输密码"。这条不需要改设计,是 Claude Code 自身的安全规则(禁止
    交互式凭据输入,允许程序化使用已授权的 token),这个项目从头到尾都是
    这么运作的。
-2. **平台要不要给 AI 一个正式的、和使用方 本人分开的身份/权限边界**——
+2. **平台要不要给 AI 一个正式的、和运维人员本人分开的身份/权限边界**——
    这个目前是空白:AI 复用的是执行操作那台机器上已有的 kubeconfig,没有
    独立的 K8s ServiceAccount,权限边界等于"这台 colima 集群的 admin
    kubeconfig 能做什么",没有和"人类账号"区分开,也没有"阶段性收紧"这个
@@ -59,7 +59,7 @@ ai-operator-ops:
 
 两档角色对应两个 ClusterRoleBinding,同一个 ServiceAccount,`kubectl
 apply` 哪一个 Binding 决定当前生效哪一档——阶段切换是一次性的
-`kubectl delete/apply`,由使用方 手动执行(这本身就是一个"危险操作
+`kubectl delete/apply`,由运维人员手动执行(这本身就是一个"危险操作
 边界收紧"的动作,不该由 AI 自己触发)。
 
 ### "危险命令需要人类介入" = 复用已经建好的审批链,不新起一套机制

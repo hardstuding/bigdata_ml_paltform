@@ -478,7 +478,7 @@ Model Registry 查询确认 `demo-rf-classifier` version 3、
 以后扩展准备好),也没有"notebook 里触发"这条腿——这两个仍然是真实的
 未做项,记在 `docs/project/roadmap.md`。
 
-**2026-08-19 当晚,重开 cloud-full 云主机给使用方 现场看效果时,又发现并
+**2026-08-19 当晚,重开 cloud-full 云主机现场演示时时,又发现并
 修好三个真实问题**(不是主动排查出来的,是他实际点开页面才暴露的):
 1. **给错密码**:一开始把 Keycloak 自己控制台(master realm)的 admin
    密码当成了 platform realm 里给各应用 SSO 用的账号——两个刚好都叫

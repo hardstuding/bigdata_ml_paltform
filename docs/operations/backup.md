@@ -59,7 +59,7 @@ scripts/restore-postgres-backup.sh          # 不带参数 = 只列出可用备�
 **触发条件**:线上数据真的坏了 / 丢了。
 
 **影响**:**Keycloak、Hive Metastore、MLflow、Airflow、Superset 全部中断。**
-Keycloak 一停,所有走 SSO 的组件跟着登不进去。**必须先和使用方 约窗口。**
+Keycloak 一停,所有走 SSO 的组件跟着登不进去。**必须先和使用方约停机窗口。**
 
 **前置检查**:
 
