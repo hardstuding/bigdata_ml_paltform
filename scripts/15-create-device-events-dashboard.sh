@@ -27,7 +27,14 @@ mkdir -p logs
 LOG_FILE="logs/create-device-events-dashboard.log"
 echo "=== create-device-events-dashboard $(date -u +%FT%TZ) ===" >> "$LOG_FILE"
 
-SUPERSET_POD=$(kubectl get pod -n superset -l app.kubernetes.io/name=superset -o jsonpath='{.items[0].metadata.name}')
+# **选择器必须带 component=web。** 2026-09-02 打开 Celery worker/beat
+# 之后,`-l app.kubernetes.io/name=superset` 会同时匹配到 worker 和 beat,
+# 而那两个 pod 里的容器名不是 `superset`,`kubectl exec` 直接报
+# "container superset is not valid for pod ..."。加上 Running 过滤是因为
+# 滚动更新期间会有 Terminating 的旧 pod 排在前面。
+SUPERSET_POD=$(kubectl get pod -n superset \
+  -l app.kubernetes.io/name=superset,app.kubernetes.io/component=web \
+  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
 if [ -z "$SUPERSET_POD" ]; then
   echo "找不到 superset pod,先确认它在跑" >&2
   exit 1

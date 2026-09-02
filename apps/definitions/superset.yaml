@@ -175,20 +175,33 @@ spec:
             #     也一样看不到没 grant 的表。
             #   - 产品层(能不能建看板、能不能改数据源):就是下面这张表。
             AUTH_ROLES_SYNC_AT_LOGIN = True
+            #
+            # **映射到的是两个自建角色,不是内置的 Alpha/Gamma。**
+            # 原因:内置角色里没有一个是"只能看"的 —— Gamma 的 92 条权限里
+            # 含 `can_write|Chart` 和 `can_write|Dashboard`,也就是 Gamma
+            # 能建图表、建看板。2026-09-02 使用方问"业务角色仅查看、开发
+            # 角色能开发报表,现在怎么授权的",查下来当时 viewers 映射到
+            # Gamma,等于根本没有"仅查看"这一档。
+            #
+            # 两个角色由 scripts/54-configure-superset-roles.sh 建,定义:
+            #   业务查看 = Gamma 减掉"能产出内容"的写权限(但保留看板筛选器、
+            #              分享链接这些**交互必需**的写接口,详见那个脚本)
+            #   报表开发 = Alpha ∪ sql_lab
             AUTH_ROLES_MAPPING = {
                 # 平台组:维护这套东西的人,需要改数据源、装插件
                 "platform-team": ["Admin"],
                 # 分析师:建看板、用 SQL Lab 是他们的本职工作
-                "data-analysts": ["Alpha", "sql_lab"],
-                # 算法工程组:主要在 notebook 里干活,这里只需要看板 + 查数
-                "algorithm-team": ["Gamma", "sql_lab"],
-                # 只读访客:只能看别人做好的看板
-                "viewers": ["Gamma"],
+                "data-analysts": ["报表开发"],
+                # 算法工程组:一样要建图表和查数,和分析师同档
+                "algorithm-team": ["报表开发"],
+                # 业务方:只能看别人做好的看板
+                "viewers": ["业务查看"],
             }
             # 不在上面任何一个组里的人,落到最小权限,**不是 Admin**。
-            # Gamma 在 Superset 里本身看不到任何数据源,要显式授权才行 ——
-            # 对一个"没被分进任何组"的账号,这是正确的默认。
-            AUTH_USER_REGISTRATION_ROLE = "Gamma"
+            # 注意这里给的是"业务查看"而不是 Gamma —— 一个没被分进任何组的
+            # 账号不该能建内容。数据层还有 Trino + OPA 挡着(它按登录用户判,
+            # 和 Superset 角色无关),所以这个默认值是安全的。
+            AUTH_USER_REGISTRATION_ROLE = "业务查看"
 
             def _superset_groups(sm, provider, response=None):
                 """从 id_token 里取 groups —— Superset 的通用 OAuth provider
@@ -243,6 +256,37 @@ spec:
                 f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASS']}@"
                 f"{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/superset_examples"
             )
+          fab_group_filter_fix: |
+            # ---- 修「分组」列表页的 `Filter column: users not allowed to filter` ----
+            #
+            # 现象:安全 → 分组(Groups)页面一打开就红条报错
+            # 「抓取出错:分组s: Filter column: users not allowed to filter」,
+            # 列表一条都出不来。2026-09-02 使用方抽查时报的。
+            #
+            # 根因是 FAB 5.0.2 自己的前后端对不上:GroupApi 的 search_columns
+            # 里写的是 `users.id` / `users.username` / `roles.name` /
+            # `roles.id`(带关系字段的点号形式),而前端那个页面发的过滤条件
+            # 用的是裸的 `users` / `roles`。ModelRestApi 校验时找不到这两个
+            # 列名,直接 400。
+            #
+            # **这不算二开** —— 只是在配置里给上游这个类补两个列名,没有改
+            # 镜像、没有 fork。升级到修好这个 bug 的 FAB 之后,这几行是
+            # 无害的(重复加的列名会被去重)。删不删都行,所以不会变成升级
+            # 时的包袱(ADR-090 那条判据)。
+            #
+            # 顶层 import 在这里是安全的:GroupApi 只依赖 flask_appbuilder
+            # 自己的模块,不会连锁加载 superset.models —— 后者在 app 初始化
+            # 之前 import 会直接抛异常(同一个文件下面 FLASK_APP_MUTATOR
+            # 那段注释里记了这个坑)。
+            #
+            # 时机也是对的:superset_config.py 在 app 创建之前被导入,而
+            # search_columns 是 appbuilder.add_api(GroupApi) 时才读的。
+            from flask_appbuilder.security.sqla.apis.group.api import GroupApi as _GroupApi
+
+            for _col in ("users", "roles"):
+                if _col not in _GroupApi.search_columns:
+                    _GroupApi.search_columns = _GroupApi.search_columns + [_col]
+
           celery_and_alerts: |
             # ---- Celery:告警与报表的执行引擎(ADR-091)----
             #
@@ -251,32 +295,18 @@ spec:
             # 链:ALERT_REPORTS 没开 → 因为没有 worker → 因为没有 broker。
             # 只补最上面那一层(开个开关)会让问题从"看不见"变成"看得见但
             # 不工作",更难查。
-            from celery.schedules import crontab
-
-            REDIS = "redis://superset-redis.superset.svc.cluster.local:6379"
-
-            class CeleryConfig:
-                broker_url = f"{REDIS}/0"
-                result_backend = f"{REDIS}/1"
-                imports = ("superset.sql_lab", "superset.tasks.scheduler")
-                worker_prefetch_multiplier = 1
-                task_acks_late = False
-                beat_schedule = {
-                    # **每分钟检查一次到期的告警。** Superset 的告警粒度就是
-                    # 靠这个 —— 给大了(比如 5 分钟)所有告警的实际延迟都会
-                    # 被它拉平,而这个任务本身很轻(只查 DB 里到期的记录)。
-                    "reports.scheduler": {
-                        "task": "reports.scheduler",
-                        "schedule": crontab(minute="*", hour="*"),
-                    },
-                    # 清理执行日志,不清的话 report_execution_log 表会无限长。
-                    "reports.prune_log": {
-                        "task": "reports.prune_log",
-                        "schedule": crontab(minute=10, hour=0),
-                    },
-                }
-
-            CELERY_CONFIG = CeleryConfig
+            # **broker/beat 本身不用在这里配。** chart 自带的
+            # `superset_config.py` 里已经有一份完整的 CeleryConfig
+            # (broker_url = CELERY_REDIS_URL,来自 REDIS_HOST 环境变量;
+            # beat_schedule 里 reports.scheduler 已经是每分钟一次),而且
+            # 它的 imports 比手写的更全 —— 多了 `superset.tasks.thumbnails`
+            # 和 `superset.tasks.cache`,**告警要带图表截图就靠前者**。
+            #
+            # 2026-09-02 这里一度自己又写了一份 CeleryConfig,结果是同一个
+            # 文件里两个同名 class,后一个静默覆盖前一个,thumbnails 的
+            # import 就此丢掉。功能上没当场报错,但"告警带截图"会在某天
+            # 突然不工作,而现场看不出任何线索。**同一份配置不要写两遍**,
+            # 需要的只是把 REDIS_HOST 指对(见 00-generate-secrets.sh)。
 
             # 告警判定查数据源的超时。默认 300 秒对这台机器偏长 ——
             # 一个卡住的查询会占着 worker,后面的告警全排队。
