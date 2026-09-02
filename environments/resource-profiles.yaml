@@ -60,6 +60,8 @@ local-lite:
   superset_worker_memory_request: "1Gi"
   superset_worker_memory_limit: "2Gi"
   superset_worker_concurrency: "1"
+  superset_beat_memory_request: "192Mi"
+  superset_beat_memory_limit: "512Mi"
 
   airflow_apiserver_replicas: 1
   airflow_apiserver_cpu: "150m"
@@ -261,6 +263,8 @@ cloud-full:
   superset_worker_memory_request: "1536Mi"
   superset_worker_memory_limit: "3Gi"
   superset_worker_concurrency: "2"
+  superset_beat_memory_request: "256Mi"
+  superset_beat_memory_limit: "768Mi"
 
   airflow_apiserver_replicas: 1
   airflow_apiserver_cpu: "150m"
@@ -478,6 +482,8 @@ prod:
   superset_worker_memory_request: "2Gi"
   superset_worker_memory_limit: "4Gi"
   superset_worker_concurrency: "4"
+  superset_beat_memory_request: "384Mi"
+  superset_beat_memory_limit: "1Gi"
 
   # apiServer/scheduler/dagProcessor/triggerer 都是无状态或者靠 DB 锁协调
   # 的组件,Airflow 官方文档明确支持多副本(包括多 scheduler),6 台物理机

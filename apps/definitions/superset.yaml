@@ -512,6 +512,14 @@ spec:
           # 现在 broker 有了(apps/superset-redis/),见 ADR-091。
           replicas:
             replicaCount: 1
+          # **单副本的 worker 用 Recreate,不要滚动更新。** 默认的
+          # RollingUpdate 会在旧 Pod 还在时先起一个新的,于是滚动那一刻
+          # 命名空间里同时存在两份 worker —— 每份 3Gi 上限,直接把配额顶穿,
+          # 新 Pod 建不出来、更新永远卡住(2026-09-02 实测)。
+          # celery 的 task_acks_late 保证了短暂中断不会丢任务,而告警最小
+          # 粒度本来就是 1 分钟,这点不可用完全可接受。
+          strategy:
+            type: Recreate
           # **必须限并发。** celery 默认 `--concurrency` = CPU 核数,这台机器
           # 16 核 → 起 16 个 prefork 子进程,每个都要完整加载一份 Superset
           # (几百 MB),内存瞬间打满被 OOMKill。2026-09-02 实测:给到 1536Mi
@@ -537,13 +545,16 @@ spec:
           # 没有 replicaCount,保持 enabled 即可。
           enabled: true
           # 同上:不给配额会落到 LimitRange 的 128Mi 然后 OOMKilled。
-          # beat 只做调度、不执行任务,给 worker 的一半就够。
+          # **但 beat 不该跟着 worker 的配额走** —— 它只是每分钟查一次
+          # 数据库、把到期的任务投进队列,不执行任何查询。一度让它复用
+          # `superset_worker_memory_*`,结果是一个只做调度的进程占着 3Gi
+          # 上限,直接把命名空间配额吃掉、worker 滚动更新时新 Pod 建不出来。
           resources:
             requests:
               cpu: 100m
-              memory: 1536Mi
+              memory: 256Mi
             limits:
-              memory: 3Gi
+              memory: 768Mi
   destination:
     server: https://kubernetes.default.svc
     namespace: superset
