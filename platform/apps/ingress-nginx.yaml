@@ -8,9 +8,24 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://kubernetes.github.io/ingress-nginx
-    chart: ingress-nginx
-    targetRevision: 4.15.1
+    # **chart vendor 进仓库了**(ADR-061 那套做法的第 N 次应用)。
+    #
+    # 2026-09-03 发现:ArgoCD 拉不到这个 chart ——
+    #     error fetching chart: failed running helm:
+    #     `helm pull --repo https://kubernetes.github.io/ingress-nginx ...`
+    # 于是这个 Application 长期 `sync=Unknown`,**valuesObject 改了也同步
+    # 不下去**。这一点特别坑:Application 上的值是新的、git 里也是新的,
+    # 只有活着的 Deployment 是旧的,而 ArgoCD 界面上不会红成"配置没生效"。
+    #
+    # 发现它的过程:ingress-nginx 在 256Mi 上反复 OOM,把内存上限调到
+    # 512Mi 之后**活对象纹丝不动**,才回头看 Application 的 conditions。
+    #
+    # 升级 chart 版本:改 scripts/28-vendor-helm-chart.sh 的调用参数重跑,
+    # 不是改这里的 targetRevision —— 它现在指的是这个 git 仓库的分支。
+    # chart 版本记在 platform/ingress-nginx-chart/VENDORED.md。
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/ingress-nginx-chart
     helm:
       valuesObject:
         controller:
