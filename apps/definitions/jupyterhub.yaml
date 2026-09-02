@@ -57,7 +57,7 @@ spec:
   source:
     repoURL: https://hub.jupyter.org/helm-chart/
     chart: jupyterhub
-    targetRevision: 4.4.1
+    targetRevision: 4.4.2
     helm:
       valuesObject:
         hub:

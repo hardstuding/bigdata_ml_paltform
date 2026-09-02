@@ -41,6 +41,18 @@
 # (Iceberg 自带的 Hive Catalog 客户端只会发已被 Hive 4.x 删掉的 `get_table`),
 # apps/hive-metastore/manifests/deployment.yaml 里有完整论证,包括
 # "升到 Spark 4 是不是就不用锁 3.1.3" 这个问题当时查证过的否定结论。
+# **为什么停在 4.1.3,而不是上游最新的 4.2.0(2026-09-02 核实过)**:
+# 卡点不在 Spark,在 Iceberg —— `iceberg-spark-runtime` 的 artifact 名字里
+# 带 Spark 大版本(见下面那行 `-4.1_2.13`),而 Maven 中央仓库上目前只有
+# `4.0` 和 `4.1` 两个,**没有 `4.2`**。
+#
+# 升到 Spark 4.2 而 Iceberg 没有对应 runtime = Spark 读写 Iceberg 直接断,
+# 那是这个平台的核心链路。**Spark 的版本号在这里是跟着 Iceberg 走的,
+# 不是跟着 Spark 自己走的。**
+#
+# 下次评估时先查这个,再看 Spark:
+#   curl -s https://repo1.maven.org/maven2/org/apache/iceberg/ \
+#     | grep -oE 'iceberg-spark-runtime-4\.[0-9]_2\.13/'
 FROM apache/spark:4.1.3-scala2.13-java17-python3-ubuntu
 
 # 官方镜像默认以非 root 用户(spark)运行,$SPARK_HOME/jars 属主是 root,
