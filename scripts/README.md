@@ -55,18 +55,19 @@ TARGET_ENV=local-lite NEEDS_LOCAL_PROXY=1 ./scripts/bootstrap-all.sh
 | 15 | `50-configure-openbao-auth.sh` | 必需 | OpenBao 的 KV 引擎、Kubernetes auth(给 Pod 用,不分发密钥)、OIDC auth(给人用,身份源是 Keycloak)和**按人隔离的路径策略**([ADR-089](../docs/decisions/089-secret-management-openbao.md))。隔离由 OpenBao 的策略模板强制,不是调用方自觉 —— 和 ADR-051 把表级授权交给 OPA 同一条理由。前一步如果发现 `openbao-oidc-secret` 还没建(第一次拉起时 openbao 命名空间比 scripts/03 晚出现),会先补跑一次 `03` |
 | 16 | `07-fix-trino-liveness-probe.sh` | 尽力 | 修 chart 硬编码的坏探针([ADR-017](../docs/decisions/017-trino-oauth2-sso.md))。`apps/trino-liveness-fix/` 那个 CronJob 每 5 分钟也会自动修,这里跑一次是为了不等那 5 分钟 |
 | 17 | `05-configure-airflow.sh` | 尽力 | 建 Airflow 初始管理员 |
-| 18 | `06-configure-superset-datasources.sh` | 尽力 | 给 Superset 注册 Trino 数据源 |
-| 19 | `10-install-kserve-serving-runtimes.sh` | 尽力 | 装 ClusterServingRuntime(官方 chart 不带,不装的话模型上线时没有 runtime 可用) |
-| 20 | `20-configure-openmetadata-search-truststore.sh` | 尽力 | OpenMetadata 连 OpenSearch 的自签证书信任 |
-| 21 | `27-configure-openmetadata-bot.sh` | 尽力 | 取 ingestion-bot token,给建表工具 / 权限门户 / 血缘推送用 |
-| 22 | `29-configure-openmetadata-trino-ingestion.sh` | 尽力 | Trino 元数据自动采集(不配的话数据目录里只有人工录入的表) |
-| 23 | `34-configure-openmetadata-data-quality.sh` | 尽力 | 数据质量断言([ADR-065](../docs/decisions/065-data-quality-on-openmetadata.md)) |
-| 24 | `43-configure-openmetadata-dbt-ingestion.sh` | 尽力 | dbt 血缘接进目录([ADR-082](../docs/decisions/082-dbt-lineage-ingestion.md)) |
+| 18 | `54-configure-superset-roles.sh` | 尽力 | 建「业务查看」「报表开发」两个角色。不建的话 Keycloak 组映射引用的角色不存在,登录的人进得去但什么都看不到([ADR-091](../docs/decisions/091-superset-alerting-chain.md)) |
+| 19 | `06-configure-superset-datasources.sh` | 尽力 | 给 Superset 注册 Trino 数据源 |
+| 20 | `10-install-kserve-serving-runtimes.sh` | 尽力 | 装 ClusterServingRuntime(官方 chart 不带,不装的话模型上线时没有 runtime 可用) |
+| 21 | `20-configure-openmetadata-search-truststore.sh` | 尽力 | OpenMetadata 连 OpenSearch 的自签证书信任 |
+| 22 | `27-configure-openmetadata-bot.sh` | 尽力 | 取 ingestion-bot token,给建表工具 / 权限门户 / 血缘推送用 |
+| 23 | `29-configure-openmetadata-trino-ingestion.sh` | 尽力 | Trino 元数据自动采集(不配的话数据目录里只有人工录入的表) |
+| 24 | `34-configure-openmetadata-data-quality.sh` | 尽力 | 数据质量断言([ADR-065](../docs/decisions/065-data-quality-on-openmetadata.md)) |
+| 25 | `43-configure-openmetadata-dbt-ingestion.sh` | 尽力 | dbt 血缘接进目录([ADR-082](../docs/decisions/082-dbt-lineage-ingestion.md)) |
 | 22.5 | `47-configure-openmetadata-trino-lineage.sh` | 尽力 | **从 Trino 查询历史自动推血缘**(不需要人工声明 inputs/outputs)。**必须排在 `29` 之后** —— 血缘是往已存在的表实体上挂边的 |
-| 25 | `12-sync-iam.py` | 尽力 | `platform/iam/` 的组织架构/角色数据 → Keycloak |
-| 26 | `14-configure-airflow-seatunnel-variable.sh` | 尽力 | 给 SeaTunnel DAG 写 MinIO 凭据 |
-| 27 | `08-create-demo-data.sh` | 尽力 | 建 demo 数据。**不是装饰** —— 黄金链路探针依赖这几张表 |
-| 28 | `09-train-demo-model.sh` | 尽力 | 训一个 demo 模型。同样不是装饰 —— `model` 那条探针要求 MLflow 里有 READY 版本 |
+| 26 | `12-sync-iam.py` | 尽力 | `platform/iam/` 的组织架构/角色数据 → Keycloak |
+| 27 | `14-configure-airflow-seatunnel-variable.sh` | 尽力 | 给 SeaTunnel DAG 写 MinIO 凭据 |
+| 28 | `08-create-demo-data.sh` | 尽力 | 建 demo 数据。**不是装饰** —— 黄金链路探针依赖这几张表 |
+| 29 | `09-train-demo-model.sh` | 尽力 | 训一个 demo 模型。同样不是装饰 —— `model` 那条探针要求 MLflow 里有 READY 版本 |
 | 29 | *(报告)* | 必需 | 检查必需能力、出部署报告(`logs/bootstrap-report.json`)。**必需项没达标会非零退出** |
 
 **完整日志**在 `logs/bootstrap-all.log`(不进 git)。

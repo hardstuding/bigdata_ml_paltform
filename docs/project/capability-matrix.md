@@ -103,7 +103,8 @@ impersonation 没验过、说作业发布没有多文件和晋级路径,而详�
 | **SQL 工作台** | ✅ | 集成验证 | 2026-08-30 | [ADR-084](../decisions/084-analyst-sql-workbench.md)。从「Trino Web UI」(**那里根本没有 SQL 编辑器**)改成 Superset SQL Lab。**2026-08-30 实机验证四条**:这条连接上 `current_user` 是登录者本人(不是 superset_service)、有 grant 的表查得到、没 grant 的被 `PERMISSION_DENIED` 拒、列级脱敏生效(`138****5678`)。由 `scripts/46-verify-p15.sh sqllab` 可重复跑 |
 | 建表 | ✅ | 集成验证 | 2026-08-30 | [ADR-043](../decisions/043-table-registration-tool.md)。2026-08-29 补完:字段说明、分区、质量断言(建真的 OpenMetadata testCase)、提交前预览、按等级的审批分流、负责人不能冒充。**2026-08-30 实机验证**:提交一张带字段说明和分区的表,`SHOW CREATE TABLE` 里 COMMENT 和 partitioning 都在;非平台组提交 2 级表被挡住并落了说明去哪的记录;预览返回的 DDL 和实际执行的一致 |
 | SQL 数据转换(dbt) | 🟡 | 集成验证 | 2026-08-29 | [ADR-082](../decisions/082-dbt-lineage-ingestion.md),血缘查得到 `orders → stg_orders → daily_order_totals`。**缺**:`schedule=None`,只能手动触发 |
-| 看板 / BI | ✅ | 集成验证 | 2026-08-30 | 组映射实测:`data-analysts` → `Alpha/Gamma/sql_lab`,未分组 → `Gamma`。**修之前所有人都是 Admin**(`AUTH_USER_REGISTRATION_ROLE="Admin"` + scope 里没有 groups) |
+| 看板 / BI | ✅ | 集成验证 | 2026-09-02 | **两个自建角色**「业务查看」(只读)/「报表开发」(Alpha ∪ sql_lab),由 `scripts/54-configure-superset-roles.sh` 建、按 Keycloak 组映射([ADR-091](../decisions/091-superset-alerting-chain.md))。**内置角色顶不上这一档**:Gamma 看着像只读,实际带 `can_write|Chart` 和 `can_write|Dashboard`。**看板定向分享实测成立**(含反向证伪:改成分享给另一个角色后可见性跟着反转),`scripts/56-verify-dashboard-sharing.sh` 可重复跑 |
+| 看板告警 / 定时报表 | 🟡 | 集成验证 | 2026-09-02 | beat + Redis + worker 全部补齐,**收件端拿到的字节核对过**(企微 markdown 形状),`scripts/55-verify-superset-alerting.sh` 可重复跑([ADR-091](../decisions/091-superset-alerting-chain.md))。**🟡 是因为只能发文本**:镜像里没有无头浏览器,PNG/PDF 的告警会静默卡在 Working,见 [production-readiness-gaps](production-readiness-gaps.md) 第 8 条 |
 | 中文界面 | 🟡 | 集成验证 | 2026-08-28 | Superset 4054 条译文([ADR-077](../decisions/077-superset-chinese-ui.md))。**Airflow/Grafana/OpenMetadata 仍是英文** |
 
 ## 大数据开发

@@ -323,6 +323,16 @@ else
   log "--> airflow 命名空间/Deployment 不存在(还是 park 状态),跳过"
 fi
 
+step "建 Superset 的两个业务角色(业务查看 / 报表开发)"
+# 不跑这一步的话,Keycloak 组映射里引用的两个角色不存在,登录的人会落到
+# 一个空角色 —— 界面能进,什么都看不到。内置的 Alpha/Gamma 顶不上:
+# Gamma 带 can_write|Chart 和 can_write|Dashboard,不是"只能看"。见 ADR-091。
+if kubectl get deploy superset -n superset >/dev/null 2>&1; then
+  run_optional "scripts/54-configure-superset-roles.sh" ./scripts/54-configure-superset-roles.sh
+else
+  log "--> superset 还没起来,跳过"
+fi
+
 step "给 Superset 注册 Trino 数据源"
 if kubectl get deploy superset -n superset >/dev/null 2>&1 && kubectl get deploy trino-coordinator -n trino >/dev/null 2>&1; then
   run_optional "scripts/06-configure-superset-datasources.sh" ./scripts/06-configure-superset-datasources.sh
