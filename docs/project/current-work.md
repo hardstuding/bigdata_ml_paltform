@@ -13,7 +13,43 @@
 > 想知道"以前某个问题怎么解决的" → [`docs/journal/`](../journal/) 和
 > [`docs/operations/troubleshooting.md`](../operations/troubleshooting.md)
 
-## CURRENT:P1.5 + 后续七项全部实机验收通过(2026-08-30),下一条主线待定
+## CURRENT:按「配了但没打通」这条线索逐个组件排查(2026-09-02 起)
+
+起因是一句抽查意见:"完全达不到生产可用,核心 demo 没跑通,业务的基本流程
+和环节没验证过",并且预判"其他很多组件可能也类似"。这个预判是对的。
+
+**做完的(每一条都有可重复的脚本,判据都不是 HTTP 200 / 状态 Success)**
+
+| 问题 | 之前的表现 | 现在 |
+|---|---|---|
+| Superset 没有"只能看"的角色 | Gamma 看着像只读,实际带 `can_write\|Chart` | 两个自建角色,`scripts/54-` 建、按组映射 |
+| 看板没法分享给指定的人 | `DASHBOARD_RBAC` 没开,`roles` 存了不生效 | `scripts/56-` 验证成立,含反向证伪 |
+| 告警菜单不存在 | 开关没开 → 因为没 worker → 因为没 broker | 整条链补齐,`scripts/55-` 核对收件端拿到的字节 |
+| 企微二开一行没跑过 | 插件按注册顺序取第一个,子类永远轮不到 | 修好,payload 形状核对过 |
+| 分组页报错 | FAB 5.0.2 前后端列名对不上 | 在配置里补两个列名,不改镜像 |
+| Airflow 谁登录谁是 Admin | 能进 Connections 看到所有数据库密码 | 按组映射;实测 connections 返回 403 |
+| Airflow 任务失败查不到原因 | task pod 跑完即删,日志跟着没 | 远程日志写 MinIO(ADR-092) |
+| 血缘整个是坏的 | OpenSearch demo 证书 SAN 里没有服务名 | ADR-093;DAG 全绿,血缘 API 查得到那条边 |
+| 查询审计停了 33 小时 | event listener 根本没注册,且无任何报错 | 修好;offset 会涨,审计表最新记录 0 分钟前 |
+| 镜像 tag 指向拉不到的镜像 | 同步下去就起不了 notebook | 停回存在的 tag + 加检查 |
+| JupyterHub 卡死整个 Application | prePuller hook 拉不到镜像就永远 Pending | 关掉 hook |
+
+**顺带确认的**:10 个对人暴露的组件全部真的带账号密码走完了登录
+(`scripts/52-` 扩到全部),Superset 那次不是普遍现象。
+
+### 卡在这里,需要使用方拍板
+
+**ingress-nginx 反复 OOMKilled,平台外部整个访问不通。** 内存上限 256Mi,
+已重启 40 次,当前 255Mi/256Mi、CPU 1960m(在疯狂 GC)。节点本身还有余量
+(内存用了 51%)。
+
+改法很直接:`templates/platform-apps/ingress-nginx.yaml` 里把
+`limits.memory` 提上去。**但它是集群级组件,和另一个项目共享同一个 k3s**,
+按 CLAUDE.md 的硬约束,这类改动必须先问过再动。
+
+---
+
+## 上一轮:P1.5 + 后续七项全部实机验收通过(2026-08-30)
 
 **2026-08-30 下半场**:`docs/project/next-boot-checklist.md` 里 15~20 项
 (audit 探针 / Trino 查询血缘 / 推理留痕 / OA 治理接口 / Iceberg 表维护 /
