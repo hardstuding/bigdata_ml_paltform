@@ -66,7 +66,12 @@ backup_s3_secret: minio-root
 # 和这个仓库其它四个自建镜像同一套做法。
 # 升级方式:改了 apps/platform-image/ 或 platform-sdk/ 之后,等 CI 构建完
 # 那个 commit,把这里的 SHA 换掉。
-platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:996dab804e354719e62da280970434997c7cbdf4
+# image-tag-exempt: 2026-09-02 有意停在 d805b030。996dab80 那次提交动了
+# platform-sdk/(在 build-images.yml 的触发路径里),CI 应该建出对应的
+# platform-runtime,但 ACR 上拉不到那个 tag(实测起 pod 超时) —— 构建没成功。
+# 在确认新镜像真的推上去之前,配置停在最后一个**确实存在**的 tag 上:
+# 指向一个拉不到的镜像,后果是用户起不了 notebook、submit_job() 也拉不到镜像。
+platform_job_image: crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf
 
 # ---------------------------------------------------------------- 凭据托管
 #

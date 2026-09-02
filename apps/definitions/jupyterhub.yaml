@@ -218,7 +218,7 @@ spec:
           # 也不会拿到过期的东西。
           image:
             name: "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime"
-            tag: "996dab804e354719e62da280970434997c7cbdf4"
+            tag: "d805b030dd0427a40a24cc22212221e3372ec9bf"
             pullPolicy: IfNotPresent
           # 2026-08-19 真实踩坑(镜像/RBAC 都配好之后,platform_sdk.query()
           # 报 ConnectionRefused,一开始怀疑是 Trino/MLflow 本身没起来,
@@ -335,7 +335,7 @@ spec:
             # platform_sdk/config.py 里的默认值兜着,而那个默认值和这里的
             # singleuser 镜像是两个独立写死的字符串,谁也不保证一致。
             - name: PLATFORM_JOB_IMAGE
-              value: "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:996dab804e354719e62da280970434997c7cbdf4"
+              value: "crpi-t6h2mzjka4hzoldo.cn-hangzhou.personal.cr.aliyuncs.com/bigdata-platform/platform-runtime:d805b030dd0427a40a24cc22212221e3372ec9bf"
           memory:
             # 这两个字段最终传进 KubeSpawner 自己的 mem_guarantee/mem_limit
             # traitlet(ByteSpecification),只认 K/M/G/T(十进制)后缀,不认

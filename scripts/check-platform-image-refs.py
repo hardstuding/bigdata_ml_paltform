@@ -20,6 +20,7 @@
 (见 CLAUDE.md「状态别写两遍」那节)。这个脚本就是那道检查。
 """
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -66,6 +67,75 @@ def image_of(env: str) -> str:
 IMAGE_RE = re.compile(r"[A-Za-z0-9._/-]*platform-runtime:[A-Za-z0-9._-]+")
 
 
+# ---------------------------------------------------------------------------
+# 第二条检查:tag 指向的 commit 必须真的构建过这个镜像
+# ---------------------------------------------------------------------------
+#
+# 2026-09-02 踩到:`platform_job_image` 的 tag 被更新成了 996dab80,而那个
+# commit **只改了 platform-portal 的源码,没碰 apps/platform-image/**。
+# CI 的 build-images.yml 是按 `paths:` 触发的 —— portal 的镜像建了,
+# platform-runtime 的**没建**。于是配置指向一个从未存在过的镜像 tag。
+#
+# 后果:JupyterHub 的 singleuser 镜像和 submit_job() 用的作业镜像都指向它,
+# 一旦 ArgoCD 把这份配置同步下去,**用户起不了 notebook、提交的作业也拉不到
+# 镜像**。发现时活的集群上还是旧 tag(同步没跟上),纯属侥幸。
+#
+# 判据:tag 必须等于"最后一次改动 apps/platform-image/ 的那个 commit"。
+# 手动 workflow_dispatch 构建的例外见报错里的说明。
+
+RUNTIME_BUILD_CONTEXT = "apps/platform-image"
+
+
+def check_tag_was_built(root: Path) -> list[str]:
+    problems: list[str] = []
+    try:
+        expected = subprocess.run(
+            ["git", "log", "-1", "--format=%H", "--", RUNTIME_BUILD_CONTEXT],
+            cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:  # noqa: BLE001
+        return []          # 不在 git 工作区里(比如容器内),这条检查跳过
+    if not expected:
+        return []
+    for env_dir in sorted((root / "environments").iterdir()):
+        cfg = env_dir / "config.yaml"
+        if not cfg.exists():
+            continue
+        lines = cfg.read_text(encoding="utf-8").split("\n")
+        for idx, line in enumerate(lines):
+            if not line.startswith("platform_job_image:"):
+                continue
+            # 显式豁免:上一行写 `# image-tag-exempt: <理由>` 就跳过这一条。
+            # 存在的意义是**区分"忘了改"和"知道,而且是有意的"** —— 后者最
+            # 常见的情况是某次 CI 构建失败了,于是配置有意停在上一个真的
+            # 存在的 tag 上。没有豁免口的检查会被人整条注释掉,那更糟。
+            # 往上扫连续的注释块,不是只看紧挨着的那一行 —— 豁免理由通常
+            # 要写好几行才说得清楚,标记不一定正好落在最后一行。
+            exempt = False
+            j = idx - 1
+            while j >= 0 and lines[j].strip().startswith("#"):
+                if lines[j].strip().startswith("# image-tag-exempt:"):
+                    exempt = True
+                    break
+                j -= 1
+            if exempt:
+                continue
+            tag = line.split(":")[-1].strip()
+            if len(tag) == 40 and tag != expected:
+                problems.append(
+                    f"  - {cfg.relative_to(root)} 的 platform_job_image 指向 {tag[:12]},\n"
+                    f"    但最后一次改动 {RUNTIME_BUILD_CONTEXT}/ 的是 {expected[:12]}。\n"
+                    f"    CI 只在 {RUNTIME_BUILD_CONTEXT}/ 有变更时才构建这个镜像,\n"
+                    f"    所以 {tag[:12]} 这个 tag **很可能根本不存在**。\n"
+                    f"    改成 {expected} 即可;\n"
+                    f"    另外两种可能,处理方式不一样:\n"
+                    f"      - 那次 CI 构建**失败了**,配置有意停在上一个真的存在的 tag:\n"
+                    f"        在这一行上面加一行 `# image-tag-exempt: <理由>`\n"
+                    f"      - 镜像是手动 workflow_dispatch 建的别的 commit:同上,写清理由\n"
+                    f"    先确认 ACR 上那个 tag 到底在不在,再决定用哪种 —— 指向一个拉不到\n"
+                    f"    的镜像,后果是用户起不了 notebook、submit_job() 也拉不到镜像。")
+    return problems
+
+
 def main() -> int:
     problems = []
     for rel, env, what in REFS:
@@ -87,6 +157,8 @@ def main() -> int:
                 f"    应该是({env} 那档):{expected}\n"
                 f"    实际写着:      {', '.join(wrong)}")
 
+    built_problems = check_tag_was_built(REPO)
+
     if problems:
         print("统一运行时镜像的引用和环境配置对不上:\n", file=sys.stderr)
         for p in problems:
@@ -96,7 +168,15 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    print(f"检查了 {len(REFS)} 处硬编码引用,都和各自环境的 platform_job_image 一致。")
+    if built_problems:
+        print("有环境的 platform_job_image 指向一个很可能没被构建过的 tag:\n",
+              file=sys.stderr)
+        for b in built_problems:
+            print(b, file=sys.stderr)
+        return 1
+
+    print(f"检查了 {len(REFS)} 处硬编码引用,都和各自环境的 platform_job_image 一致;"
+          f"\ntag 也对得上最后一次改动 {RUNTIME_BUILD_CONTEXT}/ 的那个 commit。")
     return 0
 
 
