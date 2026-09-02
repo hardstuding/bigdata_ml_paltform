@@ -243,40 +243,53 @@ spec:
             # SlackV2/Webhook),**没法在配置里加新成员**。所以复用 Webhook
             # 这个类型,只把 payload 换成企微机器人要的格式 —— 二开面缩到
             # 一个方法。
-            from superset.reports.notifications.webhook import WebhookNotification
+            # **不能在这里顶层 import。**
+            #
+            # `superset_config.py` 是在 Flask app 初始化**之前**被导入的,而
+            # `superset.reports.notifications.webhook` 会连锁加载
+            # `superset.models.core`,后者在 app 还没初始化时直接抛
+            # `Exception: App not initialized yet. Please call init_app first`
+            # —— 整个 Superset 起不来(2026-09-02 实测,第一版就是这么写的,
+            # 新 pod CrashLoopBackOff)。
+            #
+            # 解法是**推迟到 app 初始化之后再定义子类**:Superset 支持在配置里
+            # 定义 `FLASK_APP_MUTATOR`,它在 app 建好之后被调用。子类只要在
+            # 第一次发通知之前定义完就行,而那必然晚于 app 初始化。
+            def FLASK_APP_MUTATOR(app):  # noqa: N802
+                from superset.reports.notifications.webhook import WebhookNotification
 
-            class WeComWebhookNotification(WebhookNotification):
-                """把 Superset 的告警内容转成企业微信机器人的 markdown 消息。
+                class WeComWebhookNotification(WebhookNotification):
+                    """把 Superset 的告警内容转成企业微信机器人的 markdown 消息。
 
-                企微机器人只认这个形状:
-                    {"msgtype": "markdown", "markdown": {"content": "..."}}
-                而 Superset 内置的 webhook 发的是它自己的 payload,字段对不上,
-                企微会直接返回 errcode != 0。
-                """
+                    企微机器人只认这个形状:
+                        {"msgtype": "markdown", "markdown": {"content": "..."}}
+                    而 Superset 内置的 webhook 发的是它自己的 payload,字段对不上,
+                    企微会直接返回 errcode != 0。
+                    """
 
-                def _get_req_payload(self):
-                    c = self._content
-                    lines = [f"**{c.name}**"]
-                    if c.description:
-                        lines.append(c.description)
-                    if c.text:
-                        # 企微 markdown 单条上限 4096 字节,留出余量截断 ——
-                        # 超长会整条发送失败,而不是被截断,那样告警就丢了。
-                        lines.append(f"```\n{c.text[:2000]}\n```")
-                    if c.url:
-                        lines.append(f"[在 Superset 里查看]({c.url})")
-                    return {
-                        "msgtype": "markdown",
-                        "markdown": {"content": "\n".join(lines)},
-                    }
+                    def _get_req_payload(self):
+                        c = self._content
+                        lines = [f"**{c.name}**"]
+                        if c.description:
+                            lines.append(c.description)
+                        if c.text:
+                            # 企微 markdown 单条上限 4096 字节,留出余量截断 ——
+                            # 超长会整条发送失败,而不是被截断,那样告警就丢了。
+                            lines.append(f"```\n{c.text[:2000]}\n```")
+                        if c.url:
+                            lines.append(f"[在 Superset 里查看]({c.url})")
+                        return {
+                            "msgtype": "markdown",
+                            "markdown": {"content": "\n".join(lines)},
+                        }
 
-                def _get_files(self):
-                    # **企微机器人的 webhook 不接受 multipart 附件。**
-                    # 父类在有 files 时会改用 multipart 发送,那样企微直接
-                    # 拒收;返回空让它始终走 JSON 那条分支。
-                    # 代价:图表截图/CSV 发不出去,只能靠上面那个链接跳回
-                    # Superset 看 —— 这是企微机器人本身的限制,不是实现问题。
-                    return None
+                    def _get_files(self):
+                        # **企微机器人的 webhook 不接受 multipart 附件。**
+                        # 父类在有 files 时会改用 multipart 发送,那样企微直接
+                        # 拒收;返回空让它始终走 JSON 那条分支。
+                        # 代价:图表截图/CSV 发不出去,只能靠上面那个链接跳回
+                        # Superset 看 —— 这是企微机器人本身的限制,不是实现问题。
+                        return None
 
             # Webhook 通知默认是关的。
             FEATURE_FLAGS = {**globals().get("FEATURE_FLAGS", {}),
