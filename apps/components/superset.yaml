@@ -96,9 +96,22 @@ spec:
         postgresql:
           enabled: false
         redis:
+          # chart 自带的 redis 子 chart 是 Bitnami 的,不用(ADR-008)。
+          # 我们自己起一个官方镜像的,见 apps/superset-redis/(ADR-091)。
           enabled: false
         cache:
-          enabled: false
+          # **必须 enabled: true,即使不用 chart 自带的 redis。**
+          #
+          # 关掉它的话 chart 会把 redis host 渲染成字面量 `unused`,而
+          # worker/beat 的 init 容器会一直等 `unused:6379` —— 卡在
+          # Init:0/1 永远起不来(2026-09-02 实测,日志里就是
+          # "waiting for redis at unused:6379")。
+          #
+          # 这个开关的语义是"要不要用 Redis 这一类功能",不是"要不要装
+          # chart 自带的那个 redis"。后者是上面 redis.enabled 管的。
+          enabled: true
+          host: superset-redis.superset.svc.cluster.local
+          port: 6379
         # 【可插拔基础设施,见 ADR-030】chart 默认从 DB_USER/DB_PASS/
         # DB_HOST/DB_PORT/DB_NAME 这几个环境变量拼连接串,这几个键都在
         # superset-db-secrets 这个 Secret 里(scripts/00-generate-
