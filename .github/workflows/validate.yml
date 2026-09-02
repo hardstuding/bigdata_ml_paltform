@@ -169,6 +169,14 @@ jobs:
       - name: 文档里的命令真的存在
         run: python3 scripts/check-doc-commands.py
 
+      # 按组做权限判断的组件,它的 Keycloak client 必须挂 groups scope。
+      # 漏一个的后果是**完全静默的**:登录正常、功能正常,只有权限判断永远
+      # 走"拿不到组 → 用默认值"那条分支。这个模式在这个仓库里发生过四次
+      # (Grafana/JupyterHub、Superset、Trino、Airflow),四次都是靠别的事情
+      # 顺带发现的,没有一次是主动查出来的。
+      - name: 按组授权的组件都拿得到 groups
+        run: python3 scripts/check-groups-claim-clients.py
+
       # 文档教人去改生成物 —— 照着做会白改一遍,而且是**静默**的:下一次
       # 渲染直接覆盖,没有冲突、没有报错。这个仓库自己撞过 4 次(CLAUDE.md
       # 里记着),2026-08-30 又发现两处**教别人这么做**的文档。

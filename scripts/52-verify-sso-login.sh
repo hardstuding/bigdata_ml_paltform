@@ -63,6 +63,8 @@ success_of() { case "$1" in
 
 # 登录成功后页面里**不该**出现的东西(出现就说明又被弹回登录页)
 LOGIN_MARKERS='Sign in with Keycloak|login-actions/authenticate|oauth2/start|用 Keycloak 登录'
+# 被授权层拒绝的标志。oauth2-proxy 的拒绝页固定带这几个词。
+DENIED_MARKERS='Forbidden|You do not have permission|not authorized|403 '
 
 # **SPA 的组件不能靠看页面判断。** Airflow 3.x / Grafana / OpenMetadata
 # 的首页是个空壳,内容全由 JS 渲染 —— 登录成功和失败拿到的 HTML 一模一样
@@ -136,6 +138,16 @@ for app in "${TARGETS[@]}"; do
       echo "✗ 没登进去 —— ${API} 返回 ${CODE}(不带 cookie 时是 401)"
       fail=$((fail+1))
     fi
+  elif grep -qiE "$DENIED_MARKERS" "$OUT"; then
+    # **被 403 不等于登录坏了,恰恰相反。** oauth2-proxy 的 allowed_groups
+    # 生效时就是这个结果:认证过了、身份和组都拿到了,只是这个账号不在
+    # 允许的组里。这条链是通的,所以算通过 —— 但要和"真的登进去了"区分
+    # 开,否则会把一个正确的拒绝读成"能用"。
+    #
+    # 2026-09-02 第一版没有这一档,把 MLflow 和 Spark History 的 403 页面
+    # 判成了登录成功(它确实"最终落在了本站、页面里没有登录入口")。
+    echo "⊘ 认证通过但被拒 —— 这个账号不在 allowed_groups 里(授权生效,符合预期)"
+    passed=$((passed+1))
   elif [[ "$FINAL" == *"$(success_of "$app")"* ]] \
      && ! grep -qiE "$LOGIN_MARKERS" "$OUT"; then
     echo "✓ 登录成功 → ${FINAL}"
