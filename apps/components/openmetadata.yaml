@@ -65,7 +65,11 @@ spec:
           config:
             elasticsearch:
               host: opensearch-cluster-master
-              scheme: https
+              # http:OpenSearch 的 HTTP 层 TLS 关掉了,原因见
+              # apps/components/opensearch.yaml 里那段注释(一句话:demo
+              # 证书的 SAN 里没有集群内服务名,主机名校验过不去,导致写血缘
+              # 直接 500)。ADR-093。
+              scheme: http
               # OpenSearch 官方镜像自带自签名 demo 证书,Java 客户端默认不
               # 信任,报 PKIX path building failed。用
               # scripts/20-configure-openmetadata-search-truststore.sh
@@ -73,7 +77,11 @@ spec:
               # extraVolumes 挂载(见下面 pod 级别的 extraVolumes/
               # extraVolumeMounts)。
               trustStore:
-                enabled: true
+                # 关掉:HTTP 层已经不是 TLS 了,再挂 truststore 没有意义。
+                # scripts/20-configure-openmetadata-search-truststore.sh
+                # 那一步也随之退休(它解决的是"证书不被信任",而真正拦路的
+                # 是"主机名对不上",两件事)。
+                enabled: false
                 path: /opt/openmetadata-ssl/truststore.jks
                 password:
                   secretRef: openmetadata-search-truststore-password

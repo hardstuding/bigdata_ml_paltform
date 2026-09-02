@@ -44,6 +44,33 @@ spec:
               secretKeyRef:
                 name: opensearch-admin
                 key: password
+          # **关掉 HTTP 层的 TLS(传输层的照旧开着)。** ADR-093。
+          #
+          # 镜像自带的是 demo 证书:CN=node-0.example.com,SAN 里只有
+          # node-0.example.com / localhost / 127.0.0.1 —— **没有集群内的
+          # 服务名 `opensearch-cluster-master`**。OpenMetadata 用服务名连
+          # 它,Java 的主机名校验直接拒:
+          #     No subject alternative DNS name matching
+          #     opensearch-cluster-master found
+          #
+          # 后果不是"搜索慢一点",是**写血缘直接 500** —— OpenMetadata 在
+          # PUT /api/v1/lineage 时要更新搜索索引,连不上就整个请求失败。
+          # 2026-09-02 seatunnel_device_events 这条 DAG 的 push_lineage
+          # 任务每天失败,查出来就是这个。
+          #
+          # 之前那个 truststore(scripts/20-...)只解决了"证书不被信任",
+          # 解决不了"主机名对不上" —— 这两件事是分开的,加多少信任也没用。
+          #
+          # 为什么不签一张正确的证书:那要替换镜像里的 demo 证书、重做
+          # truststore、改 security 插件的一整段配置,而这一跳是**同一个
+          # 命名空间内、只有 OpenMetadata 一个客户端、还有 NetworkPolicy
+          # 挡着**的内部通信。生产环境应该签(记在 production-readiness-gaps)。
+          #
+          # OpenSearch 支持用同名环境变量覆盖 opensearch.yml 里的任何设置,
+          # 所以不用整个替换那个文件 —— 覆盖式地提供 config.opensearch.yml
+          # 会把镜像里 security 插件那一整段 demo 配置也顶掉,那才是真危险。
+          - name: plugins.security.ssl.http.enabled
+            value: "false"
         resources:
           requests:
             cpu: 300m
