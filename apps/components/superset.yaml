@@ -46,9 +46,26 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://apache.github.io/superset
-    chart: superset
-    targetRevision: 0.22.4
+    # **chart 是 vendor 进仓库的,不是让 ArgoCD 去外网拉**
+    # (platform/superset-chart/,见 ADR-061 和 scripts/28-vendor-helm-chart.sh)。
+    #
+    # 2026-09-02 撞到:`helm pull` 拉 apache.github.io/superset 的 index.yaml
+    # 超时,Application 卡在 `Unknown`/ComparisonError。和同一天 jupyterhub
+    # 那次、以及更早 grafana/loki/kueue 是**完全同一个模式**:境内云主机拉
+    # 这些 GitHub Pages 上的大 index.yaml 只有几十 KB/s,而 **helm 自己有一个
+    # 写死的 HTTP 超时,先于 ARGOCD_EXEC_TIMEOUT 触发** —— 调大 ArgoCD 的
+    # 超时没用。
+    #
+    # 症状有欺骗性:集群里的 Superset 一直正常跑着,只有 ArgoCD 状态是
+    # Unknown,而且**新的配置改动推不上去**(这次就是发现企微告警的配置
+    # 同步不过去才查出来的)。
+    #
+    # 换版本的做法:
+    #   ./scripts/28-vendor-helm-chart.sh https://apache.github.io/superset \
+    #     superset <新版本> platform/superset-chart
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/superset-chart
     helm:
       valuesObject:
         # 2026-08-19 从"运行时 bootstrapScript 现装依赖"改成"构建时镜像
