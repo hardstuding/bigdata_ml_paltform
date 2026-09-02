@@ -458,6 +458,39 @@ for ns in $MINIO_CONSUMER_NAMESPACES; do
   copy_secret minio "$ns" minio-root
 done
 
+echo "==> Airflow 远程日志的 MinIO 连接(ADR-092)"
+# **不配这个,Airflow 任务一失败就查不到原因** —— KubernetesExecutor 的
+# task pod 跑完即删,日志跟着没,界面上只剩一句 `Could not read served
+# logs: ... Name or service not known`(它去连一个已经不存在的 pod)。
+#
+# Airflow 的连接可以用 `AIRFLOW_CONN_<名字大写>` 环境变量声明,值是一整串
+# JSON。走这条路而不是在数据库里建 Connection 记录,是因为环境变量形式
+# 是声明式的:从空环境拉起时不用额外跑一步命令式配置,也不会因为有人在
+# 界面上改过而漂移。
+#
+# 里面有 MinIO 的密码,所以得在这里拼(组件的 values 里不能写密码)。
+MINIO_ROOT_USER=$(kubectl -n minio get secret minio-root -o jsonpath='{.data.rootUser}' 2>/dev/null | base64 -d || true)
+MINIO_ROOT_PASSWORD=$(kubectl -n minio get secret minio-root -o jsonpath='{.data.rootPassword}' 2>/dev/null | base64 -d || true)
+if [ -n "$MINIO_ROOT_USER" ] && [ -n "$MINIO_ROOT_PASSWORD" ]; then
+  AIRFLOW_MINIO_CONN=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "conn_type": "aws",
+    "login": sys.argv[1],
+    "password": sys.argv[2],
+    "extra": {"endpoint_url": "http://minio.minio.svc.cluster.local:9000"},
+}))' "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD")
+  # 这一份**每次都覆盖**,不走 ensure_secret 的"已存在就跳过":MinIO 的
+  # 密码轮换之后,一份对不上的连接串会让远程日志静默失效(任务照常跑完,
+  # 只是日志写不上去),那比报错难发现得多。
+  kubectl -n airflow create secret generic airflow-remote-logging \
+    --from-literal=connection="$AIRFLOW_MINIO_CONN" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  echo "  已写入 airflow/airflow-remote-logging"
+else
+  echo "  !! 取不到 minio-root,跳过(Airflow 的远程日志会不生效)"
+fi
+
 echo "==> 复制 Postgres 管理员凭据到需要建库的命名空间"
 # 各组件的 create-db-job 都是"在自己的命名空间里跑,通过网络连
 # postgres.data.svc.cluster.local",但要用 postgres-root 的密码建库/建用户,

@@ -114,6 +114,15 @@ spec:
           - name: spark-logs
             policy: none
             purge: false
+          # Airflow 任务日志(ADR-092)。**不配远程日志的话,任务一失败就
+          # 查不到原因** —— KubernetesExecutor 的 task pod 跑完就被删,
+          # 日志跟着没,界面上只剩一句
+          # `Could not read served logs: ... Name or service not known`
+          # (它去连一个已经不存在的 pod 的 8793 端口)。2026-09-02 排查
+          # dbt_demo 为什么失败时撞到,那次失败的原因就此再也查不到了。
+          - name: airflow-logs
+            policy: none
+            purge: false
         # 2026-08-21:光有 bucket 不够,还要**建出 events/ 这个前缀**,否则
         # Spark 和 History Server 两边都起不来:
         #   - Spark driver:eventLog.dir 指向不存在的目录,报

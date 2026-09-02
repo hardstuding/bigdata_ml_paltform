@@ -23,7 +23,8 @@ set -euo pipefail
 USER_NAME="${1:-}"; PASSWORD="${2:-}"; shift 2 2>/dev/null || true
 TARGETS=("$@")
 [ ${#TARGETS[@]} -gt 0 ] || TARGETS=(portal superset airflow openmetadata mlflow \
-  grafana argo-workflows permission-request table-registration spark-history)
+  grafana argo-workflows permission-request table-registration spark-history \
+  jupyterhub)
 [ -n "$USER_NAME" ] && [ -n "$PASSWORD" ] || {
   echo "用法: $0 <用户名> <密码> [组件...]"; exit 1; }
 
@@ -51,6 +52,7 @@ entry_of() { case "$1" in
   # 首页 `/` 是直接 200 的空壳,不会自己弹去登录,所以不能拿它当入口。
   openmetadata) echo "/api/v1/auth/login?redirectUri=${EXTERNAL_SCHEME:-http}://openmetadata.${DOMAIN}${PORT}/callback";;
   grafana) echo "/login/generic_oauth";;
+  jupyterhub) echo "/hub/oauth_login";;
   argo-workflows) echo "/oauth2/redirect";;
   # oauth2-proxy 挡着的:访问首页就会被弹去登录
   portal|mlflow|permission-request|table-registration|spark-history) echo "/";;
@@ -78,6 +80,7 @@ DENIED_MARKERS='Forbidden|You do not have permission|not authorized|403 '
 authcheck_of() { case "$1" in
   airflow) echo "/api/v2/dags";;
   grafana) echo "/api/user";;
+  jupyterhub) echo "/hub/api/user";;
   *) echo "";; esac; }
 
 # **OpenMetadata 这一条 curl 走不完,而且不是它坏了。**

@@ -37,6 +37,23 @@ spec:
         env:
           - name: AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE
             value: "False"
+          # ---- 远程日志(ADR-092)----
+          # **不开这个,任务一失败就查不到原因。** KubernetesExecutor 的
+          # task pod 跑完即删,日志跟着没;界面上只剩一句
+          # `Could not read served logs: ... Name or service not known`
+          # —— Airflow 去连那个已经不存在的 pod 的 8793 端口。
+          # 2026-09-02 排查 dbt_demo 为什么失败时撞到:那次失败的原因就此
+          # 再也查不到了,只能重跑一次看它还失不失败。
+          #
+          # 用 env 而不是 `config.logging.*`:这个 chart 的 `config:` 合并
+          # 只认预置在模板里的固定键,新加的键会被**静默丢掉**(上面
+          # proxy_fix_x_port 那段注释里记着实测结果)。
+          - name: AIRFLOW__LOGGING__REMOTE_LOGGING
+            value: "True"
+          - name: AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER
+            value: "s3://airflow-logs"
+          - name: AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID
+            value: "minio_s3"
           - name: AIRFLOW__FAB__PROXY_FIX_X_PORT
             value: "0"
             # 2026-08-19 真实踩坑:接 SSO 之后,OAuth 登录能正确跳到
@@ -68,6 +85,16 @@ spec:
               secretKeyRef:
                 name: airflow-oidc-secret
                 key: clientSecret
+          # 远程日志用的 MinIO 连接。**用 AIRFLOW_CONN_* 环境变量而不是在
+          # 数据库里建 Connection 记录**:环境变量形式的连接是声明式的,
+          # 从空环境拉起时不需要额外跑一步命令式配置,也不会因为有人在
+          # 界面上改了它而漂移。整串 JSON 由 scripts/00-generate-secrets.sh
+          # 拼好放进 Secret(里面有 MinIO 的密码,不能写在这)。
+          - name: AIRFLOW_CONN_MINIO_S3
+            valueFrom:
+              secretKeyRef:
+                name: airflow-remote-logging
+                key: connection
         postgresql:
           enabled: false
         redis:
