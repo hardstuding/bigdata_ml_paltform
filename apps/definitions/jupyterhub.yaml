@@ -365,6 +365,23 @@ spec:
         # 数分/算法工程师留够思考/开会中途不动的余量)、every=600(每 10
         # 分钟检查一次,chart 默认值)。
         # 【可调参数,见 docs/operations/tuning.md】
+        prePuller:
+          # **关掉升级时那个一次性的 image puller。** 它是 helm 的 pre-upgrade
+          # hook,而 ArgoCD 会**等它完成**才认为这次同步做完 —— 于是只要
+          # singleuser 镜像有一刻拉不到,这个 hook 就永远 Pending,
+          # 整个 Application 卡在 `waiting for completion of hook
+          # apps/DaemonSet/hook-image-puller`,**新配置再也同步不进去**。
+          #
+          # 2026-09-02 实测撞到这个死锁:配置里的镜像 tag 指向一个 ACR 上
+          # 不存在的 commit,于是 hook 卡住;而"把 tag 改回一个存在的值"
+          # 这个修复本身,也因为同一个 hook 卡着而同步不下去。**修复被它
+          # 自己要修的问题挡住了。**
+          #
+          # 代价很小:continuous(常驻的那个 DaemonSet)还开着,它一样会在
+          # 每个节点上预拉镜像,只是不阻塞同步 —— 拉不到就是拉不到,不会
+          # 把整个 Application 一起拖住。
+          hook:
+            enabled: false
         cull:
           enabled: true
           timeout: 7200
