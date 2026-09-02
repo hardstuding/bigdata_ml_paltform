@@ -758,6 +758,17 @@ statefulset/argocd-application-controller` 清缓存,再删掉那个孤立的
 
 ## P3:打磨已有角色能力(不需要新组件,是体验问题)
 
+- **Hive Metastore 占着 40 个 idle 的 Postgres 连接**(2026-09-02 发现):
+  它的 datanucleus 连接池只借不还,单副本就吃掉全库 100 个连接里的 40 个。
+  撞出来的场景是滚动更新 OpenMetadata 时新 pod 起不来
+  (`remaining connection slots are reserved for SUPERUSER`)——**任何一次
+  新旧 pod 同时在线的滚动更新都可能再撞一次**。
+  已经把 `max_connections` 调到 200 先兜住,但那是缓解不是修:真正的修法
+  是给 metastore 的 datanucleus 配连接池上限
+  (`datanucleus.connectionPool.maxPoolSize` 一类)。
+  **没有一起做,是因为动 metastore 的连接池要重启它,而它挂了 Trino/Spark/
+  Flink 全部读不了表** —— 该单独排一次,有回滚预案再动。
+
 - **两条链路的 Iceberg warehouse 前缀不一致**(2026-08-30 做 iceberg-backup
   时发现):审计 sink(`scripts/flink_trino_audit_sink.py`、
   `streams/device-events/job.py`)配的是 `s3a://lakehouse/warehouse`,推理
