@@ -39,3 +39,24 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+  # 升到 strimzi 1.2.0 之后 `kafkas.kafka.strimzi.io` 这个 CRD 一直 OutOfSync,
+  # 而 `argocd app diff` 显示差异只有一行:
+  #
+  #     >                 properties: {}
+  #
+  # 是 **K8s 的 API server 给一个空的 schema 节点补上了 `properties: {}`**,
+  # chart 里没写。也就是说这个 OutOfSync **不代表任何真实漂移** ——
+  # 同步每次都报 Succeeded,状态却回不到 Synced。
+  #
+  # 留着它的代价不是"看着难受",是**训练所有人忽略 OutOfSync**,下次真出
+  # 漂移时没人当回事(和 flink-kubernetes-operator 那条同一个理由,那里
+  # 的注释写得更细)。
+  #
+  # **只忽略这一条具体路径,不做整个 CRD 的 blanket ignore** —— 后者会把
+  # 真实的 schema 变更(比如上游改了字段校验)一起吞掉。
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      name: kafkas.kafka.strimzi.io
+      jqPathExpressions:
+        - '.. | select(has("properties")?) | select(.properties == {}) | .properties'

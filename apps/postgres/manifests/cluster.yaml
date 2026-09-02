@@ -63,24 +63,6 @@ spec:
   postgresql:
     parameters:
       ssl_min_protocol_version: "TLSv1.2"
-      # **连接数。CNPG 默认 100,对这个平台不够。**
-      #
-      # 2026-09-02 实测撞到:滚动更新 OpenMetadata 时新 pod 起不来,报
-      # `FATAL: remaining connection slots are reserved for roles with the
-      # SUPERUSER attribute` —— 当时 97/100,而其中 **Hive Metastore 一家
-      # 占 40 个,全部是 idle**(它的 datanucleus 连接池只借不还)。
-      #
-      # 这不是 OpenMetadata 的问题,是**平台级的容量问题**,只是被滚动更新
-      # (新旧 pod 同时在线,连接数翻倍)撞出来了。任何一次这样的滚动更新
-      # 都可能再撞一次。
-      #
-      # 200 的依据:当前稳态约 100,滚动更新时最坏翻倍。每个连接的开销主要
-      # 是 work_mem 级别的栈空间(几 MB),200 个对这台 64G 的机器可以忽略。
-      #
-      # **真正的修法是让 Hive Metastore 别占着 40 个 idle 连接**(调它的
-      # datanucleus 连接池上限),那是独立一件事,记进 roadmap;调大这里是
-      # 让平台先不因为一次滚动更新就掉链子。
-      max_connections: "200"
   storage:
     size: 5Gi
   resources:
