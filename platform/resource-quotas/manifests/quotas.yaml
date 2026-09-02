@@ -34,7 +34,7 @@ metadata:
 spec:
   hard:
     requests.cpu: "2"
-    requests.memory: 4Gi
+    requests.memory: 5Gi
     limits.memory: 6Gi
 ---
 # 2026-09-02 调大(2Gi/3Gi → 4Gi/7Gi)。**这个命名空间的组件构成变了**:
@@ -57,8 +57,11 @@ metadata:
 spec:
   hard:
     requests.cpu: "2"
-    requests.memory: 4Gi
-    limits.memory: 7Gi
+    requests.memory: 5Gi
+    # 9Gi 不是常驻用量(常驻约 4.5Gi),留的是**上限之和**的余量:
+    # superset 1Gi + worker 3Gi + beat 768Mi + redis 128Mi,再加上
+    # superset-init-db 那个 Job(1Gi)和偶尔并存的一次性 pod。
+    limits.memory: 9Gi
 ---
 # 2026-08-28 调大一次(6Gi → 9Gi)。这个命名空间不只跑 OpenMetadata 本体,
 # 还要跑它派生出来的采集/数据质量 Job(每个 limits.memory 1.5Gi)。常驻部分
