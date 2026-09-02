@@ -468,8 +468,20 @@ fi
 # 自己那一段路径,组共享完全不生效 —— 而且**不会报错**,只表现为"看不到"。
 # 这正是 2026-08-29 连修三处(Superset 全员管理员、权限门户全员 403、
 # Trino 的 is_platform_admin 是摆设)的同一个形态。
+# 2026-09-02 再补 airflow:同一个模式的第四次。它的 webserver_config.py
+# 里有 AUTH_ROLES_MAPPING(按组给 Admin/User/Viewer),但这个 client 从来
+# 没挂过 groups scope —— 于是 role_keys 永远是空,**每个登录的人都落到
+# AUTH_USER_REGISTRATION_ROLE**。而那个值当时是 "Admin"。
+# 实测:数据分析师账号登录一次就成了 Airflow 管理员,能进 Connections 页面
+# 看到所有数据库的连接串。
+#
+# **这个名单漏一个,后果是静默的**:组件照常登录、照常工作,只是权限判断
+# 那一层永远走"拿不到组 → 用默认值"。所以现在有
+# scripts/check-groups-claim-clients.py 兜着,它从各组件的配置里反查谁在用
+# groups,和这个名单比对。
 for gc in grafana jupyterhub mlflow spark-history-server argo-workflows superset \
-          permission-request-app platform-portal table-registration-app openbao; do
+          permission-request-app platform-portal table-registration-app openbao \
+          airflow; do
   gcid=$(kcadm get clients -r platform -q clientId="$gc" --fields id 2>/dev/null | grep -o '"[a-f0-9-]*"' | head -1 | tr -d '"' || true)
   if [ -z "$gcid" ]; then
     echo "client ${gc} 还不存在,跳过挂 groups scope"
