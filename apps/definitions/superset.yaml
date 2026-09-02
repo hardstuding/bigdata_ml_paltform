@@ -213,6 +213,68 @@ spec:
                 f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASS']}@"
                 f"{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/superset_examples"
             )
+          wecom_alert: |
+            # 企业微信告警(二开示例)。**这是「层次一」的二开:不改镜像、
+            # 不改上游源码,只在 configOverrides 里注入一段 Python。**
+            #
+            # 为什么走这条路,而不是像以前那样改 Superset 源码重新打包:
+            # 见 ADR-090。一句话是**升级代价** —— 这个平台 2026-08-26 把
+            # OpenMetadata 从 1.13.3 升到 2.0.0、09-02 升到 2.0.1,都是逐条
+            # 核对 breaking changes 做的;如果组件是分叉版本,这两次升级的
+            # 代价会高一个量级,而且很可能就此不升了。
+            #
+            # **Superset 的通知是一个插件系统**:`BaseNotification` 的
+            # `__init_subclass__` 会把子类自动注册进 `plugins`,后定义的同
+            # `type` 子类覆盖先定义的。所以只要在这里定义一个子类就生效,
+            # 不需要碰镜像里的任何文件。
+            #
+            # **为什么是继承 WebhookNotification 而不是新增一个通知类型**:
+            # `ReportRecipientType` 是一个固定的 StrEnum(Email/Slack/
+            # SlackV2/Webhook),**没法在配置里加新成员**。所以复用 Webhook
+            # 这个类型,只把 payload 换成企微机器人要的格式 —— 二开面缩到
+            # 一个方法。
+            from superset.reports.notifications.webhook import WebhookNotification
+
+            class WeComWebhookNotification(WebhookNotification):
+                """把 Superset 的告警内容转成企业微信机器人的 markdown 消息。
+
+                企微机器人只认这个形状:
+                    {"msgtype": "markdown", "markdown": {"content": "..."}}
+                而 Superset 内置的 webhook 发的是它自己的 payload,字段对不上,
+                企微会直接返回 errcode != 0。
+                """
+
+                def _get_req_payload(self):
+                    c = self._content
+                    lines = [f"**{c.name}**"]
+                    if c.description:
+                        lines.append(c.description)
+                    if c.text:
+                        # 企微 markdown 单条上限 4096 字节,留出余量截断 ——
+                        # 超长会整条发送失败,而不是被截断,那样告警就丢了。
+                        lines.append(f"```\n{c.text[:2000]}\n```")
+                    if c.url:
+                        lines.append(f"[在 Superset 里查看]({c.url})")
+                    return {
+                        "msgtype": "markdown",
+                        "markdown": {"content": "\n".join(lines)},
+                    }
+
+                def _get_files(self):
+                    # **企微机器人的 webhook 不接受 multipart 附件。**
+                    # 父类在有 files 时会改用 multipart 发送,那样企微直接
+                    # 拒收;返回空让它始终走 JSON 那条分支。
+                    # 代价:图表截图/CSV 发不出去,只能靠上面那个链接跳回
+                    # Superset 看 —— 这是企微机器人本身的限制,不是实现问题。
+                    return None
+
+            # Webhook 通知默认是关的。
+            FEATURE_FLAGS = {**globals().get("FEATURE_FLAGS", {}),
+                             "ALERT_REPORT_WEBHOOK": True}
+            # 企微机器人地址是 http/https 都可能(内网自建代理常见 http),
+            # 而且这里发到集群内的 echo-sink 验证机制,所以不强制 HTTPS。
+            # **上生产接真实企微地址时应该改回 True**(企微官方地址是 https)。
+            ALERT_REPORTS_WEBHOOK_HTTPS_ONLY = False
           chinese_ui: |
             # 界面汉化(2026-08-26 落地)。**确实就是一个配置的
             # 事吗"——**是的,确实就是一个配置**,Superset 自带简体中文翻译,
