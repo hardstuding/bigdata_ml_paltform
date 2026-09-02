@@ -162,7 +162,36 @@ spec:
             AUTH_ROLE_ADMIN = "Admin"
             AUTH_ROLE_PUBLIC = "Public"
             AUTH_USER_REGISTRATION = True
-            AUTH_USER_REGISTRATION_ROLE = "Admin"
+            # **按 Keycloak 的组分角色,不再是"谁登录谁是 Admin"。**
+            #
+            # 2026-09-02 之前这里是 AUTH_USER_REGISTRATION_ROLE = "Admin",
+            # 实测后果:一个数据分析师账号(analyst001)第一次登录 Airflow
+            # 就成了 Admin —— 能删所有人的 DAG、能进 Connections 页面,而
+            # **那里面存的是各个数据库的连接串和密码**。
+            #
+            # 这和 Superset 在 2026-08-29 之前是同一个问题的两个实例
+            # (见 apps/components/superset.yaml 里那段注释)。当时只修了
+            # Superset,没有回头看别的组件 —— 这次是靠"把登录验证扩到所有
+            # 组件"顺带发现的。
+            #
+            # Airflow 内置角色的实际分界(权限条数是实测的):
+            #   Viewer(34)  只读:看 DAG、看日志
+            #   User (44)   Viewer + 触发/暂停 DAG、清除任务重跑
+            #   Op   (74)   User + **管理 Connections/Variables/Pools**
+            #   Admin(103)  Op + 用户和角色管理
+            # 分界线在 Op:能进 Connections 就等于能拿到所有数据源的凭据。
+            AUTH_ROLES_SYNC_AT_LOGIN = True
+            AUTH_ROLES_MAPPING = {
+                "platform-team": ["Admin"],
+                # 分析和算法的人要能触发和重跑作业,但不该碰连接凭据
+                "data-analysts": ["User"],
+                "algorithm-team": ["User"],
+                "viewers": ["Viewer"],
+            }
+            # 不在任何组里的人落到只读,**不是 Admin**。这个方向很重要:
+            # 万一 groups claim 因为什么原因取不到,失败的结果是"权限太小"
+            # 而不是"权限太大"。
+            AUTH_USER_REGISTRATION_ROLE = "Viewer"
         scheduler:
           # **DAG 内容的哈希,不是装饰。**
           # DAG 是用 subPath 挂 ConfigMap 的(理由见下面 extraVolumes 那段
