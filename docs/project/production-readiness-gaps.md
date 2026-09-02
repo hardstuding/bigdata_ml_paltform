@@ -307,6 +307,17 @@ git 提交邮箱是个人邮箱 —— 于是作业的 `owner_group` 身份对�
 镜像,所以是加一层构建,不是引入新机制)。**没有把这条掩盖成"已支持"**:
 能力矩阵里那一格写的就是"仅文本"。
 
+### 9. OpenSearch 用的还是镜像自带的 demo 证书
+
+`CN=node-0.example.com`,SAN 里只有 `node-0.example.com` / `localhost` /
+`127.0.0.1`。因为集群内服务名不在 SAN 里,HTTP 层的 TLS 已经关掉了
+([ADR-093](../decisions/093-opensearch-http-tls.md)) —— 传输层(节点间)
+还开着,用的也是同一套 demo 证书。
+
+上生产要签一张真证书(平台已经有 cert-manager 和 `platform-issuer`),
+SAN 覆盖 `opensearch-cluster-master` 和它的 headless/FQDN 形式,然后把
+HTTP 层的 TLS 打开、把 OpenMetadata 那边的 truststore 一起恢复。
+
 ---
 
 ## 明确不建议现在做的

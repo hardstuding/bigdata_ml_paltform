@@ -142,6 +142,7 @@
 | [090](090-customization-layers.md) | 组件二开分三层,优先用上游扩展点;企微告警作为样例 | **已实现(企业微信告警作为第一个样例)** |
 | [091](091-superset-alerting-chain.md) | Superset 告警是一整条链(开关+broker+beat+worker+通知实现),不是一个开关 | **已实现并实机验证(通知已真实投递,收到的 payload 逐字段核对过)** |
 | [092](092-airflow-remote-logging.md) | Airflow 任务日志写 MinIO —— task pod 跑完即删,不配远程日志就等于没有排障能力 | **已实现并实机验证(重跑一次失败任务,日志从 MinIO 读得到)** |
+| [093](093-opensearch-http-tls.md) | OpenSearch 的 HTTP 层不启用 TLS —— demo 证书的 SAN 里没有集群内服务名,主机名校验过不去导致血缘整个坏掉 | **已实现并实机验证(血缘推送恢复,产物核对过)** |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 已实现;ACME 那一档**还没有在真实环境验证过**(缺真实域名和 ICP 备案) |
 

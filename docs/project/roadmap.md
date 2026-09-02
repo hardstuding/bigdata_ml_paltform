@@ -379,6 +379,30 @@ get_model_version()` 查询确认 `status: READY`。
 ---
 ## P2:交付方式的可靠性(角色能开工之后,立刻做这一批)
 
+### 各组件的连接池上限之和,远大于 Postgres 的 max_connections
+
+2026-09-02 实测一次:总共 91/100,其中 **hive 40 个、openmetadata_user
+30 个,全部是 `idle`**。这些是连接池里的常驻连接 —— "当前有没有人在查"
+和占不占连接槽没有关系。
+
+那一刻 OpenMetadata 的 DB 迁移容器起不来,报
+`remaining connection slots are reserved for roles with the SUPERUSER
+attribute`,反复重启。**现场看到的是"某个组件 Init:0/1 起不来",完全指
+不到"连接槽被另一个组件占满了"。**
+
+`max_connections` 已经提到 200(写进了声明式配置,见
+[ADR-093](../decisions/093-opensearch-http-tls.md) 末尾),但那是把上限往上
+抬,不是解决问题:
+
+- Hive Metastore 那 40 个尤其可疑 —— 它的 `datanucleus` 连接池配置
+  从来没调过,用的是默认值
+- 每加一个组件,这个和就往上涨一次,而 max_connections 不会自己跟着涨
+- 组件数量还会增加
+
+要做的是**逐个把连接池上限配成和实际并发匹配的值**,并且加一条检查:
+各组件配置里声明的池子上限之和,不能超过 max_connections 的某个比例。
+
+
 ADR-057 认定的结构性债务。不做的话,上面 P1 拉起来的东西会以同样脆弱的
 方式继续堆叠。
 
