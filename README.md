@@ -246,7 +246,7 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 ## 文档地图
 
 - **想知道"这个平台现在到底能用来干什么" → [`docs/project/capability-matrix.md`](docs/project/capability-matrix.md)** —— 五个角色(分析师/大数据开发/算法/运维/管理)× 完整工作链路 × 每一环今天的真实状态。**这是"我们做到哪了"的唯一权威入口**,衡量标准是"某个岗位能不能独立完成一件真实工作",不是"部署了哪些组件"(见 [ADR-057](docs/decisions/057-architecture-review-2026-08-19.md))
-- **接手这个项目的 AI/人类,先看 [`CLAUDE.md`](CLAUDE.md) 和 [`docs/project/current-work.md`](docs/project/current-work.md)**——协作规则和"现在唯一的主线任务是什么、下一步做什么",不用依赖对话记忆或者猜
+- **参与开发** → [`CONTRIBUTING.md`](CONTRIBUTING.md);仓库自身的工程约定(包括给 AI 助手的协作规则)在 [`CLAUDE.md`](CLAUDE.md)
 - **实际使用这套平台,先打开 `http://portal.local-lite.test`**(ADR-047)—— 统一门户,现在有哪些工具、分别是干什么的、点哪里进去,一个页面看完;各工具共用同一个 Keycloak SSO,登录一次到处能用,不用重复输密码
 - [`docs/usage-guide.md`](docs/usage-guide.md) —— 按角色和任务组织的使用指南,
   每节统一成**前置条件 → 操作 → 预期结果 → 常见失败**。不是运维文档
@@ -272,25 +272,18 @@ kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy applicat
 每一行带**验证级别**(生产验证 / 集成验证 / demo / 未验证)、最后验证时间
 和证据链接,并且有 CI 检查拦着"没验就标已完成"。
 
-一句话现状(2026-08-30):**五个角色里四个能独立开工** —— 运维、数据分析师、
+一句话现状:**五个角色里四个能独立开工** —— 运维、数据分析师、
 大数据开发、算法工程师;管理角色只有第一版驾驶舱。**没有任何一格是"生产
 验证"** —— 这套东西还没上过生产,门禁条件写在
 [`docs/project/production-readiness-gaps.md`](docs/project/production-readiness-gaps.md)。
-
-> **2026-08-30 更正**:这段原来写着"数据分析师卡在找数据(OpenMetadata
-> 未部署)""大数据开发和算法工程师是结构性缺失(Spark Operator /
-> SeaTunnel / JupyterHub / MLflow 都还没启用)" —— 那是 2026-08-19 之前的
-> 状态,这些组件早就部署并端到端验证过了。
->
-> **README 是任何人和 AI 第一眼看到的文件**,它上面的过期状态比别处更贵:
-> 会让接手的人对整个项目的判断从第一分钟就是错的。这也是为什么这里只留
-> 一句话 + 一个指针,不再展开。
 
 底座部分已经比较扎实:GitOps 单一变更入口、从空集群一键拉起(真的推倒
 重建跑通过,ADR-039)、企业级权限治理全链路(分级审批/到期回收/权限交接,
 ADR-044/045/050)、Trino 细粒度访问控制已正式生效(ADR-051)、指标+日志+
 告警+每日备份(含恢复演练)都在。
 
-主要债务(见 [`docs/project/roadmap.md`](docs/project/roadmap.md) P1/P2):环境抽象只做了
-"取值"层,"哪些组件在哪个环境启用"仍靠人工挪目录;没有镜像构建流程,
-8 个地方在容器启动时现装 Python 依赖。
+**最大的一条债务是"没上过生产"** —— 所有结论都来自一台单节点云主机,
+门禁条件逐条列在
+[`production-readiness-gaps.md`](docs/project/production-readiness-gaps.md)。
+其余待办按优先级排在
+[`roadmap.md`](docs/project/roadmap.md)。
