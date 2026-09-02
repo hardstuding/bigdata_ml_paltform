@@ -159,6 +159,7 @@ enabled_components:
   - spark-history-server.yaml
   - spark-operator.yaml
   - superset-db-init.yaml
+  - superset-redis.yaml
   - superset.yaml
   - table-registration-app-oauth2-proxy.yaml
   - table-registration-app.yaml

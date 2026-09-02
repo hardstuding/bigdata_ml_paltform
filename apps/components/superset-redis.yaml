@@ -1,0 +1,30 @@
+# Superset 的 Celery broker(ADR-091)。
+#
+# **它是"告警能不能真的发出去"的前置**:Superset 的告警与报表靠 Celery
+# beat 定时判定 + worker 执行,两者都要一个 broker。没有它的话,即使
+# ALERT_REPORTS 开着、菜单出来了,建的告警也永远不会触发 ——
+# **那比没有菜单更糟**,因为使用者以为配好了。
+#
+# 部署在 superset 命名空间里,和它服务的那个组件同域,不单开一个。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: superset-redis
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: apps/superset-redis/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: superset
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,60 @@
+# Superset 的 Celery broker(ADR-091)。
+#
+# **为什么不复用 feast-redis**:那是 Feast 的在线特征存储,推理链路每次
+# 取特征都要读它。Superset 的告警队列是另一种负载(短时大量小消息、
+# 偶尔刷队列),混在一起时任何一边的抖动都会影响另一边 —— 而"推理变慢"
+# 和"告警延迟"的排查路径完全不同,混用会让两边都难查。
+#
+# **为什么不用 chart 自带的 redis 子 chart**:那是 Bitnami 的,这个仓库
+# 明确不用(ADR-008)。这份 manifest 照抄 apps/feast/manifests/redis.yaml
+# —— 同一个官方镜像、同一个版本(已经过版本审计,8.4.5 避开了 Redis
+# 7.4.x 那段非开源许可证区间)。
+#
+# **没有持久化**:Celery 队列里是"待发送的告警",丢了最多是那一次告警没发
+# 出去,下一个调度周期会重新判定。给它挂 PVC 反而引入一个要备份、要恢复
+# 的有状态组件,不值得。
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superset-redis
+  labels:
+    app: superset-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: superset-redis
+  template:
+    metadata:
+      labels:
+        app: superset-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:8.4.5-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset-redis
+spec:
+  selector:
+    app: superset-redis
+  ports:
+  - port: 6379
+    targetPort: 6379

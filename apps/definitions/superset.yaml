@@ -230,6 +230,51 @@ spec:
                 f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASS']}@"
                 f"{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/superset_examples"
             )
+          celery_and_alerts: |
+            # ---- Celery:告警与报表的执行引擎(ADR-091)----
+            #
+            # **没有这一段,告警菜单是个摆设** —— 建了告警永远不触发。
+            # 2026-09-02 使用方抽查时发现"告警菜单没有",查下来是一条完整的
+            # 链:ALERT_REPORTS 没开 → 因为没有 worker → 因为没有 broker。
+            # 只补最上面那一层(开个开关)会让问题从"看不见"变成"看得见但
+            # 不工作",更难查。
+            from celery.schedules import crontab
+
+            REDIS = "redis://superset-redis.superset.svc.cluster.local:6379"
+
+            class CeleryConfig:
+                broker_url = f"{REDIS}/0"
+                result_backend = f"{REDIS}/1"
+                imports = ("superset.sql_lab", "superset.tasks.scheduler")
+                worker_prefetch_multiplier = 1
+                task_acks_late = False
+                beat_schedule = {
+                    # **每分钟检查一次到期的告警。** Superset 的告警粒度就是
+                    # 靠这个 —— 给大了(比如 5 分钟)所有告警的实际延迟都会
+                    # 被它拉平,而这个任务本身很轻(只查 DB 里到期的记录)。
+                    "reports.scheduler": {
+                        "task": "reports.scheduler",
+                        "schedule": crontab(minute="*", hour="*"),
+                    },
+                    # 清理执行日志,不清的话 report_execution_log 表会无限长。
+                    "reports.prune_log": {
+                        "task": "reports.prune_log",
+                        "schedule": crontab(minute=10, hour=0),
+                    },
+                }
+
+            CELERY_CONFIG = CeleryConfig
+
+            # 告警判定查数据源的超时。默认 300 秒对这台机器偏长 ——
+            # 一个卡住的查询会占着 worker,后面的告警全排队。
+            ALERT_REPORTS_QUERY_EXECUTION_MAX_TRIES = 1
+            SQLLAB_ASYNC_TIME_LIMIT_SEC = 600
+
+            # 告警里那个"在 Superset 里查看"的链接要拼绝对地址,
+            # 没有它链接会拼成 http://localhost:8088/... 发给收件人。
+            WEBDRIVER_BASEURL = "http://superset.superset.svc.cluster.local:8088/"
+            WEBDRIVER_BASEURL_USER_FRIENDLY = "http://superset.local-lite.test:32460/"
+
           wecom_alert: |
             # 企业微信告警(二开示例)。**这是「层次一」的二开:不改镜像、
             # 不改上游源码,只在 configOverrides 里注入一段 Python。**
@@ -298,9 +343,35 @@ spec:
                         # Superset 看 —— 这是企微机器人本身的限制,不是实现问题。
                         return None
 
-            # Webhook 通知默认是关的。
-            FEATURE_FLAGS = {**globals().get("FEATURE_FLAGS", {}),
-                             "ALERT_REPORT_WEBHOOK": True}
+            # ---- 特性开关 ----
+            #
+            # **这几个不开,对应的功能在界面上根本不存在** —— 而"功能不存在"和
+            # "功能坏了"从使用者角度是一样的:菜单里没有、按钮点不到。
+            # 2026-09-02 使用方抽查时发现的就是这类:
+            #   - 告警菜单没有       → ALERT_REPORTS 没开
+            #   - 没法分享给指定的人 → DASHBOARD_RBAC 没开,看板上的角色
+            #                          授权字段不生效(所以所有看板都是 roles=[])
+            FEATURE_FLAGS = {
+                **globals().get("FEATURE_FLAGS", {}),
+                # 告警与报表。**它还需要 Celery worker + beat**(见下面
+                # supersetWorker/supersetCeleryBeat)——只开这个开关的话
+                # 菜单出来了、但建的告警永远不会触发,那比没有菜单更糟。
+                "ALERT_REPORTS": True,
+                "ALERT_REPORT_WEBHOOK": True,
+                # **看板级授权**:开了之后每个看板可以指定"哪些角色能看"。
+                # 这是"把某个看板分享给指定的人/组"的官方机制 ——
+                # 不开的话 Dashboard.roles 存了也没用。
+                #
+                # 语义要说清楚:看板上**指定了角色**时,只有那些角色能看;
+                # **没指定**时回退到按数据源权限判断(也就是原来的行为)。
+                # 所以开这个开关不会让现有看板突然对谁都不可见。
+                "DASHBOARD_RBAC": True,
+                # 告警要截图发出去就需要缩略图(Celery + 无头浏览器)。
+                # **这一档不开**:它要额外装 Chrome/Firefox 进镜像,而当前
+                # 告警走企微 webhook 是纯文本的(企微机器人也不收 multipart,
+                # 见 ADR-090)。留在这里是为了说明"为什么没开",不是漏配。
+                # "THUMBNAILS": True,
+            }
             # 企微机器人地址是 http/https 都可能(内网自建代理常见 http),
             # 而且这里发到集群内的 echo-sink 验证机制,所以不强制 HTTPS。
             # **上生产接真实企微地址时应该改回 True**(企微官方地址是 https)。
@@ -368,14 +439,17 @@ spec:
             limits:
               memory: 1024Mi
         supersetWorker:
-          # 没有 Redis/Celery broker,worker 起来也没用。replicaCount 压到 0
-          # (Deployment 对象还在,但不占资源,比强行让 enabled:false 生效更可靠)。
-          # 三个环境都是 0(见 resource-profiles.yaml 里的注释——prod 也一样,
-          # 这次分档没有一并把 Celery/Redis 接上,不是漏配)。
+          # **2026-09-02 从 0 打开。** 在这之前三个环境都是 0,理由是"没有
+          # Redis/Celery broker,worker 起来也没用" —— 那是事实,但代价是
+          # **告警与报表这条功能整条不存在**,而这在能力表上没有体现。
+          # 现在 broker 有了(apps/superset-redis/),见 ADR-091。
           replicas:
-            replicaCount: 0
+            replicaCount: 1
         supersetCeleryBeat:
-          enabled: false
+          # beat 是**单例**:它负责按 beat_schedule 把到期的告警投进队列。
+          # 多副本会导致同一个告警被投多次(收件人收到重复消息),chart 这里
+          # 没有 replicaCount,保持 enabled 即可。
+          enabled: true
   destination:
     server: https://kubernetes.default.svc
     namespace: superset
