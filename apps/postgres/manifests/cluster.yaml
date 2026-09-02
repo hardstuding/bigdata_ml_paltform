@@ -63,6 +63,24 @@ spec:
   postgresql:
     parameters:
       ssl_min_protocol_version: "TLSv1.2"
+      # **默认的 100 不够。** 这个 Postgres 是平台里所有组件的共用元数据库
+      # (Airflow / Superset / Keycloak / MLflow / OpenMetadata / Hive
+      # Metastore),而且它们各自都带连接池 —— 池子里的连接是**常驻**的,
+      # 不是按需建的,所以"当前有多少人在用"和占了多少连接槽没关系。
+      #
+      # 2026-09-02 实测一次:总共 91/100,其中 hive 40 个、openmetadata 30 个,
+      # **全部是 idle**。这时候 OpenMetadata 的 DB 迁移 init 容器起不来,
+      # 报 `FATAL: remaining connection slots are reserved for roles with
+      # the SUPERUSER attribute` —— 一个组件重启就再也起不来了,而现场看
+      # 到的是"Init:0/1 反复重启",完全指不到"连接槽被别人占满了"。
+      #
+      # **这条之前在活实例上改过一次,没写进这里,于是被 ArgoCD 的 selfHeal
+      # 打回了 100** —— 同一个问题原地复发。这就是为什么它现在在这。
+      #
+      # 真正的根因是各组件的连接池上限之和远大于 max_connections
+      # (hive metastore 那 40 个尤其可疑),记在 roadmap 里;在那之前,
+      # 200 是让共用元数据库不成为单点故障的实际下限。
+      max_connections: "200"
   storage:
     size: 5Gi
   resources:
