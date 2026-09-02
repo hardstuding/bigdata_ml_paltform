@@ -127,8 +127,21 @@ data:
         if age is None or int(age) > max_age_min:
             raise RuntimeError(
                 f"audit.query_events 最新一条是 {age} 分钟前,超过阈值 {max_age_min} 分钟。"
-                "审计事件还在往 Kafka 写,但没人在消费落库 —— **Kafka 保留期一到就永久丢失**,"
-                "补不回来。查:kubectl -n flink get flinkdeployment trino-audit-sink")
+                "**审计没法事后补,没记就是没记。** 这条链有两个完全不同的断法,"
+                "先分清是哪一个再动手 —— 原来这里直接断言是第二种,"
+                "2026-09-02 真出事时把排查方向带偏了:\n"
+                "  1) 源头没产生事件:发一条 Trino 查询,再看 Kafka 的 offset 动没动\n"
+                "     kubectl -n kafka exec platform-kafka-dual-role-0 -- \\\n"
+                "       /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 \\\n"
+                "       --topic trino-query-events\n"
+                "     offset 不动 = Trino 的 event listener 没工作(它坏掉时**没有任何"
+                "报错**,插件照常加载、配置文件也对)\n"
+                "  2) 事件在 Kafka 里但没落库:看消费组 LAG\n"
+                "     kubectl -n kafka exec platform-kafka-dual-role-0 -- \\\n"
+                "       /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 \\\n"
+                "       --describe --group flink-trino-audit-sink\n"
+                "     LAG 大 = 消费端的问题,查 kubectl -n flink get flinkdeployment "
+                "trino-audit-sink")
         return f"最新审计记录 {age} 分钟前"
 
 

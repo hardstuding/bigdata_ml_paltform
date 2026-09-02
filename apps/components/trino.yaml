@@ -115,6 +115,27 @@ spec:
           - kafka-event-listener.excluded-fields=payload,plan,jsonPlan,statistics
         additionalConfigProperties:
           - http-server.http.enabled=false
+          # **必须显式注册 event listener 的配置文件,不能只写
+          # eventListenerProperties。** chart 的 eventListenerProperties
+          # 只负责把 /etc/trino/event-listener.properties 这个文件生成
+          # 出来,Trino **不会自动去加载它** —— 启动日志里
+          # `event-listener.config-files  []` 就是空的。
+          #
+          # 表现有多隐蔽:插件正常加载(日志里有
+          # `Registering event listener kafka`)、文件内容也完全正确、
+          # Trino 一切正常,**只是一条审计事件都不产生**。
+          #
+          # 2026-09-02 发现时,审计已经停了 33 小时。查的过程:
+          #   golden-path 探针报 audit.query_events 最新一条太旧
+          #   → 探针给的诊断是"事件还在往 Kafka 写,没人消费落库",
+          #     **这句是错的** —— Flink 消费组的 LAG 是 0
+          #   → 主动发一条 Trino 查询,Kafka 的 offset 纹丝不动
+          #   → 也就是说源头就没有事件
+          # 探针那句诊断措辞已经改掉了(它把两种完全不同的故障说成一种)。
+          #
+          # **审计这条没法事后补**:没记就是没记,这 33 小时的查询记录
+          # 永久缺失。
+          - event-listener.config-files=/etc/trino/event-listener.properties
           # http-server.authentication.type 管的是"接受哪些认证方式"
           # (OAUTH2 给人用、PASSWORD 给服务账号用),不等于"网页界面默认
           # 用哪个"——Web UI 自己另外认 web-ui.authentication.type,不设
