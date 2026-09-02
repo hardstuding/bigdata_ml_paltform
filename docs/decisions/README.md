@@ -139,6 +139,7 @@
 | [087](087-feature-drift-monitoring.md) | 特征漂移:训练时把基线存进 MLflow tag,一个 jobs/ 作业算 PSI | **已实现,2026-09-01 实机验证通过** |
 | [088](088-minio-console-sso.md) | MinIO 控制台接 Keycloak;策略只给 platform-team(读桶=绕过 OPA) | **已部署验证 —— 但 SSO 登录这一半没成立,见文末「实机验证的结果」** |
 | [089](089-secret-management-openbao.md) | 用户凭据托管用 OpenBao(不是 Vault:许可证);开发档自动解封的代价写清楚 | **第一阶段完成,2026-09-01 实机验证通过** |
+| [090](090-customization-layers.md) | 组件二开分三层,优先用上游扩展点;企微告警作为样例 | **已实现(企业微信告警作为第一个样例)** |
 | [061](061-vendor-grafana-charts.md) | helm 有个改不掉的 120s 超时:alloy/loki 的 chart vendor 进仓库 | 已实现并在 cloud-full 验证 |
 | [060](060-conditional-rendering-and-tls-issuer.md) | 条件生成(`render-if`)+ TLS 签发方 / 告警通知渠道按环境切换 | 已实现;ACME 那一档**还没有在真实环境验证过**(缺真实域名和 ICP 备案) |
 
