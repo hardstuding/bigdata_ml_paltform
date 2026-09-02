@@ -288,7 +288,13 @@ else
     --from-literal=DB_PORT=5432 \
     --from-literal=DB_NAME=superset \
     --from-literal=SUPERSET_SECRET_KEY="$SUPERSET_SECRET_KEY" \
-    --from-literal=REDIS_HOST=unused \
+    # **不是 unused。** 2026-09-02 之前这里写死 `unused`,理由是"没有
+    # Celery,worker 压到 0 副本" —— 但 chart 的 worker/beat init 容器
+    # 会拿这个值去 wait_for,于是打开 Celery 之后它们**永远卡在
+    # Init:0/1**,日志里写着 "waiting for redis at unused:6379"。
+    # 排查时特别容易被误导:configOverrides 里 CELERY_CONFIG 的地址是对的,
+    # 而 init 容器读的是这个 Secret,两个来源。
+    --from-literal=REDIS_HOST=superset-redis.superset.svc.cluster.local \
     --from-literal=REDIS_PORT=6379 \
     --from-literal=REDIS_USER= \
     --from-literal=REDIS_PASSWORD= \

@@ -451,11 +451,29 @@ spec:
           # 现在 broker 有了(apps/superset-redis/),见 ADR-091。
           replicas:
             replicaCount: {{RES:superset_worker_replicas}}
+          # **必须显式给配额。** 不给的话落到命名空间 LimitRange 的默认值
+          # (128Mi),而 Superset 的 worker 起步就要几百 MB —— 直接 OOMKilled,
+          # 而且**表现是 CrashLoop 而不是「内存不够」**,要 describe 才看得到
+          # OOMKilled。2026-09-02 实测踩到。
+          resources:
+            requests:
+              cpu: {{RES:superset_worker_cpu}}
+              memory: {{RES:superset_worker_memory_request}}
+            limits:
+              memory: {{RES:superset_worker_memory_limit}}
         supersetCeleryBeat:
           # beat 是**单例**:它负责按 beat_schedule 把到期的告警投进队列。
           # 多副本会导致同一个告警被投多次(收件人收到重复消息),chart 这里
           # 没有 replicaCount,保持 enabled 即可。
           enabled: true
+          # 同上:不给配额会落到 LimitRange 的 128Mi 然后 OOMKilled。
+          # beat 只做调度、不执行任务,给 worker 的一半就够。
+          resources:
+            requests:
+              cpu: 100m
+              memory: {{RES:superset_worker_memory_request}}
+            limits:
+              memory: {{RES:superset_worker_memory_limit}}
   destination:
     server: https://kubernetes.default.svc
     namespace: superset
