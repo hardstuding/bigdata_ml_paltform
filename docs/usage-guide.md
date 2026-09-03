@@ -330,6 +330,25 @@ run_workflow_template("train-demo-model")            # 触发已部署的工作�
 多步骤流水线(特征物化 → 训练 → 模型门禁)的样例在
 `apps/argo-workflows-training-image/manifests/workflow-template-ml-pipeline.yaml`。
 
+## 记实验、存模型
+
+**操作**:在 notebook 里直接用 MLflow,不用配地址。
+
+```python
+import mlflow
+mlflow.set_experiment("我的实验")
+with mlflow.start_run():
+    mlflow.log_metric("auc", 0.87)
+    mlflow.sklearn.log_model(model, "model")
+```
+
+**预期结果**:门户点「MLflow」能看到这次 run 和模型产物。
+
+**要知道的一件事**:`MLFLOW_TRACKING_URI` 是 notebook 环境自带的
+(还有存模型产物用的 MinIO 地址和凭据)。**不要自己 `set_tracking_uri`
+指到别处** —— mlflow 的默认值是本地 `./mlruns` 目录,写错了不会报错、
+不会警告,只是实验记录留在容器里,notebook 一回收就没了。
+
 ## 上线一个模型
 
 **前置条件**:模型已经注册进 MLflow Model Registry,**并且被批准过**
