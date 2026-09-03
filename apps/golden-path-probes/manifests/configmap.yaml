@@ -325,10 +325,20 @@ data:
         ctx = ssl.create_default_context(
             cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
         apps = json.loads(_u.urlopen(req, timeout=30, context=ctx).read())["items"]
-        bad = [(a["metadata"]["name"],
-                (a.get("status", {}).get("sync", {}) or {}).get("status", "?"))
-               for a in apps
-               if (a.get("status", {}).get("sync", {}) or {}).get("status") == "Unknown"]
+
+        # **判据是 ComparisonError,不是"此刻 sync==Unknown"。**
+        # 一个 Application 在**正常刷新的那几秒**里 sync 也是 Unknown ——
+        # 第一版按 Unknown 判,上线第一次跑就误报了一个正在刷新的组件。
+        # 一个会误报的探针没人会信,和没有探针差不多。
+        # 真正"读不到源"时,ArgoCD 会挂一条 ComparisonError condition 上去,
+        # 里面就是 helm pull 的原始报错,而且它会一直挂着直到恢复。
+        bad = []
+        for a in apps:
+            errs = [c for c in (a.get("status", {}).get("conditions") or [])
+                    if c.get("type") in ("ComparisonError", "UnknownError")]
+            if errs:
+                bad.append((a["metadata"]["name"],
+                            (errs[0].get("message") or "")[:60]))
         if bad:
             names = ", ".join(f"{n}({st})" for n, st in bad[:6])
             raise RuntimeError(
