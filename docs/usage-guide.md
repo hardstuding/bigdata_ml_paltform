@@ -362,6 +362,32 @@ with mlflow.start_run():
 
 **预期结果**:KServe InferenceService 就绪,V2 协议推理返回预测。
 
+**发一次推理**(照抄能跑,别自己猜格式):
+
+```bash
+kubectl -n kserve-demo port-forward svc/demo-rf-classifier-predictor 8081:80 &
+
+python3 - <<'PY' | curl -s -X POST -H "Content-Type: application/json" -d @- \
+  http://127.0.0.1:8081/v2/models/demo-rf-classifier/infer
+import json
+n = 20   # demo 模型是 20 维,取决于训练用的数据集
+print(json.dumps({
+    "inputs": [{"name": "input-0", "shape": [1, n], "datatype": "FP32",
+                "data": [0.1] * n, "parameters": {"content_type": "np"}}],
+    "parameters": {"content_type": "np"},
+}))
+PY
+```
+
+**格式上有三个地方容易错,而且错了之后的报错完全指不到原因** —— 三种错法
+拿到的都是同一句 `builtins.TypeError: float() argument must be a string or
+a real number, not 'InferenceRequest'`:
+
+- `data` 是**一维数组**(`[0.1, 0.1, ...]`),不是按 shape 嵌套的 `[[...]]`
+- **顶层也要有** `"parameters": {"content_type": "np"}`,不只是 inputs 里那个
+- 维度要和模型对上(这个 demo 是 20,不是 iris 的 4)
+
+
 **要知道的两件事**([ADR-080](decisions/080-model-approval-and-rollback.md)):
 
 - **上线单位是"注册表里被批准过的版本"**,不是"MinIO 里最新的目录"。存在
