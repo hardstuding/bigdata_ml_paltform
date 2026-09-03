@@ -60,6 +60,10 @@
 **操作**:门户点「权限申请门户」发起申请。**不要手改
 `platform/iam/table-access-grants.csv`** —— 那份文件是这个门户自动写的。
 
+**表名要带 catalog**:`iceberg.demo.orders`(从 Superset 或 Trino 里看到的
+那个写法),或者完整的 `trino.iceberg.demo.orders`。只写 `demo.orders` 会
+拿到"数据目录里查不到这张表" —— 那句话听起来像表不存在,实际是少了一层。
+
 **预期结果**:审批通过后能查到。审批链按表的安全等级逐级叠加(直属上级 →
 上级的上级 → 表负责人 → 指定管理员),等级越高链越长
 ([ADR-044](decisions/044-tiered-approval-workflow.md))。
@@ -71,6 +75,10 @@
 
 **常见失败**:
 
+- **申请当场被拒,理由是"查不到这张表的安全等级"** —— 这张表没登记过
+  等级。**采集器自动发现的表都没有**(等级是建表注册工具在建表那一刻写的),
+  接入一个已有数仓时会成片出现。管理员跑
+  `./scripts/58-backfill-security-levels.sh <schema>` 补登记。
 - **权限"突然没了"** —— 授权默认 180 天过期,到期自动回收
   ([ADR-050](decisions/050-grant-expiry-reclamation.md))。重新申请,不是 bug。
 - **审批显示通过但还是查不到** —— 看申请单状态是不是
