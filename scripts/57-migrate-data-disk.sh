@@ -149,7 +149,18 @@ step "核对两边的大小"
 sshvm "du -sh /data /mnt/newdata 2>/dev/null | sed 's/^/    /'"
 
 step "切换挂载点(fstab 用 UUID,带 nofail —— 万一盘出问题机器还能起来)"
-sshvm "umount /mnt/newdata && umount /data
+# **必须 set -e。** 第一版没有,于是 `umount /data` 因为 containerd 还占着
+# 文件而失败时,**后面几行照常执行**,把新盘挂到了旧盘之上 —— /data 变成
+# 叠加挂载(上层是新盘,数据是对的,但旧盘还挂在下面被进程占着)。
+# 而 sshvm 的退出码取的是最后一条命令(df)的,是 0,本地的 set -e 也没拦住。
+#
+# 顺带把占用 /data 的进程先杀干净:停 docker/k3s 之后 containerd 的
+# shim 进程可能还活着,它握着 /data 下的文件描述符。
+sshvm "set -e
+       fuser -km /data 2>/dev/null || true
+       sleep 3
+       umount /mnt/newdata
+       umount /data
        cp /etc/fstab /etc/fstab.bak-\$(date +%s)
        sed -i '/[[:space:]]\\/data[[:space:]]/d' /etc/fstab
        echo 'UUID=$NEW_UUID /data ext4 defaults,nofail 0 2' >> /etc/fstab
