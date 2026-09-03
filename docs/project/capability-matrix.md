@@ -83,7 +83,7 @@ impersonation 没验过、说作业发布没有多文件和晋级路径,而详�
 | 排障知识 | ✅ | — | 2026-08-22 | [Runbook](../operations/troubleshooting.md):59 条症状索引,66 个条目 |
 | 黄金链路探针 | ✅ | 集成验证 | 2026-09-02 | [ADR-079](../decisions/079-golden-path-probes.md)。**八条**各一个 CronJob。2026-08-30 加 audit(查询留痕断了补不回来,必须有人立刻知道);2026-09-02 加 catalog-connection —— 数据目录的 Trino 连接配置掉过两次 username,而它的失败是渐进的(数据质量 6 条坏 1 条、目录照常能查),报错是 483 条 pydantic 噪音包着真正那一句。**反证跑过**:摘掉 username 探针立刻报错并给出处置命令,补回后恢复 |
 | 统一服务目录 | ✅ | 集成验证 | 2026-08-29 | [service-catalog.md](../reference/service-catalog.md)。关键是 `scripts/check-service-catalog.py` —— 漏登记/owner 不存在/依赖悬空/生成物漂移,CI 都会红 |
-| 容量看板 | 🟡 | 未验证 | — | `platform/grafana-capacity-dashboard/` 6 个 panel 写好了,**没部署验证过** |
+| 容量看板 | ✅ | 集成验证 | 2026-09-03 | `platform/grafana-capacity-dashboard/` 6 个 panel。**2026-09-03 逐条把 PromQL 拿去 Prometheus 跑过**,全部出数:各组配额用量/上限(3 个队列)、排队和在跑的作业数、CPU 和内存的配额使用率、节点剩余可分配 |
 | Argo Workflows 授权 | ✅ | 集成验证 | 2026-08-19 | curl+cookie-jar:登录 → 列 → 建 → 查到 → 删 |
 | 凭据托管(平台自己的) | 🟡 | 集成验证 | 2026-08-27 | `scripts/00-generate-secrets.sh` 生成 → 裸 K8s Secret。**能用,但没有轮换、没有审计**(谁读过查不出来)、etcd 里是 base64 不是加密。`scripts/show-credentials.sh` 直接读活集群 —— 加它是因为 `secrets/generated-credentials.txt` 那份快照实测 42 条里 26 条已失效。迁进 OpenBao 是第二阶段,见 [ADR-089](../decisions/089-secret-management-openbao.md) |
 | 凭据托管(用户自己的) | ✅ | 集成验证 | 2026-09-01 | [ADR-089](../decisions/089-secret-management-openbao.md)。**这条在 2026-08-31 之前是「计划中」都算不上 —— 压根不存在**:用户要连自己的库,只能把密码写死在代码里或每次手动 export。OpenBao + 按人隔离的策略 + `platform_sdk.secret()`。**2026-09-01 实机验证**:analyst001 登录后自动拿到组策略;自己的凭据能写能读能列;**连 platform-team 都读不到别人的个人凭据(403)** —— 隔离由 OpenBao 强制,不是代码里的 if;组共享 platform-team 能写、组员只读、别的组读不到 |
@@ -157,7 +157,7 @@ impersonation 没验过、说作业发布没有多文件和晋级路径,而详�
 | 平台管理组全权限 | ✅ | 集成验证 | 2026-08-26 | [ADR-078](../decisions/078-trino-group-provider.md)。**在这之前一直是摆设**:Trino 没配 group provider,传给 OPA 的 groups 永远是空的,而 `opa test` 全过(测试 input 是手写的、带着 groups) |
 | 敏感字段列级脱敏 | ✅ | 集成验证 | 2026-08-23 | [ADR-063](../decisions/063-trino-column-row-level-security.md)。验的是**分级真的在起作用**:2 级 grant 下 phone/email 恢复明文而 id_card 仍打码 |
 | 敏感字段行级过滤 | ✅ | 集成验证 | 2026-08-26 | 同上。判据不只是"行数变少",还要求看到的部门集合正好等于预期 |
-| 管理驾驶舱 | 🟡 | 未验证 | — | `platform/grafana-overview-dashboard/`。看板里写明了它够不着什么 |
+| 管理驾驶舱 | ✅ | 集成验证 | 2026-09-03 | `platform/grafana-overview-dashboard/` 7 个 panel,同样逐条跑过 PromQL。**「各组花费」那两个 panel 一开始是空的,查下来不是表达式坏了** —— 它按 pod 的 queue 标签 join OpenCost 的用量指标,而带 queue 标签的记录当时全是已结束的作业(kube_pod_labels 会保留一段时间),OpenCost 只算运行中的 pod,交集为空。起一个带 `kueue.x-k8s.io/queue-name` 标签的 pod 之后立刻出数(algorithm-team 0.0336 元/小时)。**也就是说没有作业在跑时它本来就该是空的** |
 | 成本视图(管理视角) | ❌ | 计划中 | — | 现有成本面板是给运维看的。按月聚合的前提(Prometheus 15d 保留 + 持久卷)2026-08-28 才补上,数据要自己攒 |
 
 ---
