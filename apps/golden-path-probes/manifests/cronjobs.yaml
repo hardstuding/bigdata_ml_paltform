@@ -517,3 +517,91 @@ spec:
           - name: probe
             configMap:
               name: golden-path-probes
+
+---
+# GitOps 本身还通不通(2026-09-03 加)。
+#
+# **为什么值得单独一条探针。** 一个 Application 拉不到 chart 时会停在
+# `sync=Unknown`,而 `health` 仍然是 Healthy —— 活对象好好跑着,只是 git 里
+# 改的任何配置都同步不下去了,而 ArgoCD 界面上不会红。
+#
+# 2026-09-03 一天之内在三个组件上撞到(trino / minio / ingress-nginx,都是
+# 境外 helm repo 拉不动)。其中 ingress-nginx 那次的代价最直观:它因为内存
+# 上限太小反复 OOM,把整个平台的外部访问搞断了,而"把上限调大"这个修复
+# **同步不下去** —— 改完之后活对象纹丝不动,回头看 conditions 才发现。
+#
+# 这条探针需要读 argocd 命名空间的 Application 对象,所以有自己的
+# ServiceAccount 和一条只读的 ClusterRole(下面)。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: goldenpath-gitops
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: goldenpath-gitops-read
+rules:
+  # 只读,而且只读 Application 这一种资源 —— 探针不需要别的
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: goldenpath-gitops-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: goldenpath-gitops-read
+subjects:
+  - kind: ServiceAccount
+    name: goldenpath-gitops
+    namespace: monitoring
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: goldenpath-gitops
+  namespace: monitoring
+  labels:
+    platform/golden-path: "gitops"
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    metadata:
+      labels:
+        platform/golden-path: "probe"
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 180
+      template:
+        metadata:
+          labels:
+            platform/golden-path: "probe"
+        spec:
+          priorityClassName: batch
+          restartPolicy: Never
+          serviceAccountName: goldenpath-gitops
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              # 探针名是 command 的最后一个元素,不是 args —— 这两个字段
+              # 这里都存在,改错了会静默跑成另一条探针还"通过"。
+              command: ["python3", "/probe/probe.py", "gitops"]
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - name: probe
+                  mountPath: /probe
+          volumes:
+            - name: probe
+              configMap:
+                name: golden-path-probes

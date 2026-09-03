@@ -23,6 +23,7 @@ data:
     """
     import json
     import os
+    import pathlib
     import ssl
     import sys
     import time
@@ -300,11 +301,53 @@ data:
         return f"返回预测 {outputs[0]['data'][:3]}"
 
 
+    def probe_gitops():
+        """每个 ArgoCD Application 都还能读到自己的源。
+
+        **为什么这条值得单独探。** 一个 Application 拉不到 chart 时会停在
+        `sync=Unknown`,而 `health` 仍然是 Healthy —— 活对象好好跑着,只是
+        **git 里改的任何配置都同步不下去了**,而 ArgoCD 界面上不会红。
+
+        2026-09-03 一天之内在三个组件上撞到(trino / minio / ingress-nginx,
+        都是境外 helm repo 拉不动)。其中 ingress-nginx 那次的代价最直观:
+        它因为内存上限太小反复 OOM,把整个平台的外部访问搞断了,而"把上限
+        调大"这个修复**同步不下去** —— 改完之后活对象纹丝不动,回头看
+        Application 的 conditions 才发现根本没同步。
+
+        判据是 sync 状态,不是 health。健康的活对象说明不了配置是新的。
+        """
+        import urllib.request as _u
+        token = pathlib.Path(
+            "/var/run/secrets/kubernetes.io/serviceaccount/token").read_text().strip()
+        url = ("https://kubernetes.default.svc/apis/argoproj.io/v1alpha1"
+               "/namespaces/argocd/applications")
+        req = _u.Request(url, headers={"Authorization": f"Bearer {token}"})
+        ctx = ssl.create_default_context(
+            cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+        apps = json.loads(_u.urlopen(req, timeout=30, context=ctx).read())["items"]
+        bad = [(a["metadata"]["name"],
+                (a.get("status", {}).get("sync", {}) or {}).get("status", "?"))
+               for a in apps
+               if (a.get("status", {}).get("sync", {}) or {}).get("status") == "Unknown"]
+        if bad:
+            names = ", ".join(f"{n}({st})" for n, st in bad[:6])
+            raise RuntimeError(
+                f"{len(bad)} 个 Application 读不到自己的源:{names}。"
+                "**它们的 health 多半还是 Healthy,活对象也在跑** —— 但 git 里改的"
+                "配置同步不下去了,而且界面上不会红。"
+                "看具体原因:kubectl -n argocd get app <名字> "
+                "-o jsonpath='{.status.conditions[0].message}'。"
+                "常见原因是境外 helm repo 拉不动,做法是把 chart vendor 进仓库"
+                "(scripts/28-vendor-helm-chart.sh,见 ADR-061)")
+        return f"{len(apps)} 个 Application 都读得到源"
+
+
     PROBES = {"query": probe_query, "streaming": probe_streaming,
               "catalog": probe_catalog, "authz": probe_authz,
               "model": probe_model, "inference": probe_inference,
               "audit": probe_audit,
-              "catalog-connection": probe_catalog_connection}
+              "catalog-connection": probe_catalog_connection,
+              "gitops": probe_gitops}
 
     if __name__ == "__main__":
         name = sys.argv[1]

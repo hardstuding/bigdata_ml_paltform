@@ -17,9 +17,16 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://charts.min.io/
-    chart: minio
-    targetRevision: 5.4.0
+    # chart vendor 进仓库(ADR-061)。2026-09-03 和 trino、ingress-nginx
+    # 一起撞到:这台云主机拉境外 helm repo 时好时坏,拉不到的时候
+    # Application 卡在 `sync=Unknown` 而 health 还是 Healthy —— **改了配置
+    # 同步不下去,界面上却不会红**。
+    #
+    # 升级 chart 版本:改 scripts/28-vendor-helm-chart.sh 的调用参数重跑。
+    # chart 版本记在 platform/minio-chart/VENDORED.md。
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/minio-chart
     helm:
       valuesObject:
         # 这台机器的网络到 quay.io 老是连不上(TLS handshake timeout/EOF,
