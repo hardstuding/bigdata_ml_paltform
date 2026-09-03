@@ -39,9 +39,22 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://trinodb.github.io/charts
-    chart: trino
-    targetRevision: 1.42.2
+    # **chart vendor 进仓库了(ADR-061 那套做法)。** 2026-09-03:
+    #     `https://trinodb.github.io/charts/index.yaml`: context deadline
+    #     exceeded (Client.Timeout exceeded while awaiting headers)
+    # 这台云主机拉不到境外的 helm repo,Application 卡在 `sync=Unknown`。
+    #
+    # **这个状态最坑的地方是它看着没事**:health 还是 Healthy(活对象好好
+    # 跑着),只有 sync 是 Unknown —— 也就是**改了配置根本同步不下去**,
+    # 而界面上不会红。同一天在 ingress-nginx 上就是这么吃的亏:内存上限
+    # 改完之后活对象纹丝不动,回头看 conditions 才发现。
+    #
+    # 升级 chart 版本:改 scripts/28-vendor-helm-chart.sh 的调用参数重跑,
+    # 不是改 targetRevision —— 它现在指的是这个 git 仓库的分支。
+    # chart 版本记在 platform/trino-chart/VENDORED.md。
+    repoURL: https://github.com/hardstuding/bigdata_ml_paltform.git
+    targetRevision: main
+    path: platform/trino-chart
     helm:
       valuesObject:
         # 2026-08-15 版本审计时曾经把 image.tag 显式覆盖成 483(chart
