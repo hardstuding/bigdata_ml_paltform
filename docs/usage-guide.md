@@ -184,7 +184,8 @@ schedule: "30 1 * * *"      # UTC
 **操作**:`streams/<名字>/` 下放 `stream.yaml` + PyFlink 脚本,push。
 照抄 `streams/device-events-stream/`。
 
-**预期结果**:门户「流作业」一栏出现它,状态是 RUNNING。
+**预期结果**:门户**首页**的「流作业」那一栏里出现它,状态是 RUNNING。
+(是首页上的一栏,不是单独的页面 —— 门户没有 `/streams` 这个地址。)
 
 **常见失败**(都是这个平台实测踩过的,完整清单见
 [ADR-062](decisions/062-flink-streaming-pipeline.md)):
