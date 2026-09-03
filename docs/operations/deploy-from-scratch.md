@@ -47,6 +47,23 @@ ingress-nginx)、把 kubeconfig 弄回本机。
 > 里,不是 containerd 的 `k8s.io` 命名空间,`registries.yaml` 也不会被读。
 > 这个细节坑过好几次,记在这里免得再查一遍。
 
+### 买机器时怎么选云盘(选错了很贵,而且改不回来)
+
+数据盘选 **ESSD PL0**,别选 ESSD AutoPL(`cloud_auto`)。
+
+同样 200G,AutoPL 是 0.42 元/小时(约 302 元/月),PL0 是 0.21(约 151)——
+**贵一倍**,而这个平台的 I/O 压力(demo 规模的数据 + 容器镜像读写)离 PL0
+的上限还远。AutoPL 还带突发 IOPS 计费,账单上会冒出一笔对不上号的
+`ioburst`。
+
+**而且 AutoPL 换不回来**:`ModifyDiskSpec` 不支持把它转成任何其他类型
+(实测 ESSD Entry / 高效云盘报 `InstanceTypeUnsupported` —— 新一代规格
+只认 ESSD 系列;普通 ESSD 报 `DiskCategory not valid`)。只能新建一块盘
+把数据拷过去,见 `scripts/57-migrate-data-disk.sh`。
+
+容量按"实际用量 + 60G 左右余量"选。用量的大头是容器镜像(2026-09 实测
+86G 里绝大部分是在用的镜像,清不掉多少),不是业务数据。
+
 ## 2. 选环境
 
 三档:`local-lite`(本机 colima)、`cloud-full`(单台云主机)、`prod`。
