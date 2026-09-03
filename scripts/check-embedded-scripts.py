@@ -44,6 +44,17 @@ PAIRS = [
     # scripts/ 那份少 6 行。差的全是注释(功能一样),但丢掉的恰恰是"为什么
     # 用 query 不用 table""ttl 为什么给这么大"这类只有当时那个人知道的东西。
     ("apps/feast/manifests/feature-repo-configmap.yaml", "definitions.py", "scripts/feast_feature_repo/definitions.py"),
+    # 2026-09-03 补:人员名册也是"同一份数据写两遍" —— platform/iam/employees.csv
+    # 是权威源(iam-sync 按它建 Keycloak 账号),而权限门户从自己 ConfigMap 里
+    # 挂的另一份读上下级关系来算审批链。
+    #
+    # **漂移的后果不是"显示不一致",是审批走不完**:2026-09-03 实测,集群里
+    # 那份还停在一次改名之前,E003 的 username 被写成了 `使用方` 这个字符串,
+    # 于是审批链第一级指向一个 Keycloak 里根本不存在的账号 —— 申请卡在
+    # "等待审批",而**没有任何一个人的待办里能看到它**。
+    #
+    # 那份旧拷贝里还留着真实姓名和邮箱,而仓库里的权威源早就换成虚构数据了。
+    ("apps/permission-request-app/manifests/app-configmap.yaml", "employees.csv", "platform/iam/employees.csv"),
     ("apps/argo-workflows-training-image/manifests/feast-feature-repo-configmap.yaml", "definitions.py", "scripts/feast_feature_repo/definitions.py"),
     # 2026-08-29 补:OPA 的 Rego 策略也是两份拷贝(`apps/opa/policy/trino.rego`
     # 是源、有单元测试跟着;`apps/opa/manifests/policy-configmap.yaml` 是
