@@ -96,6 +96,37 @@ aliyun ecs DescribeAvailableResource --RegionId cn-wulanchabu \
 
 ## 症状索引
 
+### 非正常关机之后 Airflow scheduler 起不来(2026-09-03 追加)
+
+**症状**:scheduler 反复 CrashLoopBackOff,堆栈固定停在同一个地方:
+
+```
+scheduler_job_runner.py ... adopt_or_reset_orphaned_tasks
+taskinstance.py ... __repr__
+sqlalchemy.orm.exc.DetachedInstanceError: Parent instance <TaskInstance ...>
+is not bound to a Session; deferred load operation of attribute 'state'
+cannot proceed
+```
+
+**成因**:机器被强制停机(或者 executor 被杀)时,正在跑的 TaskInstance
+停在 `running`/`queued`,而执行它的 Pod 已经不存在了。scheduler 启动时要
+接管这些孤儿任务,Airflow 3.2.2 在给它们打日志时踩到 SQLAlchemy 的
+`DetachedInstanceError`,**在接管阶段就崩掉,永远起不来**。
+
+**一次非正常关机会让整个调度器卡死**,而且现象上完全看不出和关机有关 ——
+报错里全是 SQLAlchemy 的词,没有一个字提到那两条卡住的任务。
+
+**处理**:
+
+```bash
+DRY_RUN=1 ./scripts/59-clear-orphaned-airflow-tasks.sh   # 先看会动哪些
+./scripts/59-clear-orphaned-airflow-tasks.sh
+```
+
+它把 `running`/`queued`/`restarting`/空状态的 TaskInstance 标成 failed
+(scheduler 挂着的时候这些状态里不可能有真在跑的任务),然后重启 scheduler。
+
+
 ### ArgoCD / GitOps 层(2026-08-23 追加)
 
 ### OPA 策略改了、ConfigMap 同步了、ArgoCD 全绿,但活的策略还是老的
