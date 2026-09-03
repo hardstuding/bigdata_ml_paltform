@@ -122,8 +122,19 @@ step "拷数据(rsync,增量,断了重跑不会从头来)"
 sshvm "mkdir -p /mnt/newdata && mountpoint -q /mnt/newdata || mount $NEW_DEV /mnt/newdata"
 # 在远端后台跑,本地按**产物**判断完成(不是判断进程 —— pgrep -f 会匹配到
 # 等待循环自己,这个坑这个仓库栽过 5 次)。
+# **退出码写进文件时的转义层数很容易错。** 第一版写的是 `echo \\\$?`,
+# 穿过本地 shell → ssh → 远端 sh -c 三层之后,落进文件的是字面量 `$?`
+# 而不是数字 —— 于是"rsync 明明拷完了(to-chk=0、两边 du 一样大),脚本却
+# 报没有正常结束"。改成把那段脚本写成远端的一个文件再执行,不再让退出码
+# 穿过多层引号。
 sshvm "rm -f /tmp/rsync-data.done /tmp/rsync-data.log
-       nohup sh -c 'rsync -aHAX --numeric-ids --delete --info=progress2 /data/ /mnt/newdata/ > /tmp/rsync-data.log 2>&1; echo \\\$? > /tmp/rsync-data.done' >/dev/null 2>&1 &" || true
+       cat > /tmp/rsync-data.sh <<'RSH'
+#!/bin/sh
+rsync -aHAX --numeric-ids --delete --info=progress2 /data/ /mnt/newdata/ > /tmp/rsync-data.log 2>&1
+echo \$? > /tmp/rsync-data.done
+RSH
+       chmod +x /tmp/rsync-data.sh
+       nohup /tmp/rsync-data.sh >/dev/null 2>&1 &" || true
 echo "    拷贝已在后台开始,等它写出 /tmp/rsync-data.done"
 for i in $(seq 1 240); do   # 最多等 2 小时
   sleep 30
