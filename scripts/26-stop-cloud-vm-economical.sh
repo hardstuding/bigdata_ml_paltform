@@ -5,19 +5,25 @@
 # StopInstance API 的这一刻指定**,不是能一次设置永久生效的实例属性,
 # 更不是虚拟机内部 `shutdown -h now` 能带得上的参数。
 #
-# 2026-08-16 已经补上了 RAM 实例角色方案:`cloud-full-vm-self-stop`
-# (仅有 ecs:StopInstance/DescribeInstances/DescribeInstanceStatus 权限,
-# scope 到这一台实例的 ARN)挂在实例上,看门狗脚本
-# (scripts/24-install-idle-shutdown-watchdog.sh 安装的
-# /usr/local/bin/idle-shutdown-watchdog.sh,不进 git)自己会用
-# `aliyun ecs StopInstance --mode EcsRamRole ... --StoppedMode
-# StopCharging` 从虚拟机内部调这个 API,不再依赖本地 `shutdown -h now`
-# ——所以自动空闲关机现在本来就是经济模式,不需要人/Claude 守在这台 Mac
-# 上才能触发。
+# 空闲自动关机那条路径由 scripts/24 安装的看门狗负责,它同样调这个 API
+# 并带上 StopCharging(走 EcsRamRole 免密,实例上挂着
+# `cloud-full-vm-self-stop` 这个角色,只有 StopInstance/DescribeInstances
+# 权限、scope 到这一台)。这个脚本(26-)是**手动/立即想停机时**的快捷方式,
+# 比如不想等 30 分钟的空闲判定。
 #
-# 这个脚本(26-)的用途因此收窄成:**手动/立即想停机时**的快捷方式(比如
-# 不想等 30 分钟空闲判定,或者看门狗那条路径万一失败需要兜底重试),不再
-# 是达成经济模式的唯一途径。
+# **这段注释 2026-09-03 更正过一次,原来写的是错的**,而且错得很贵:它当时
+# 声称看门狗"已经"走 API、"不再依赖 shutdown -h now",但实际装到机器上的
+# 脚本从头到尾都是 `/sbin/shutdown -h now`。后果是**每一次"自动关机省钱"
+# 都没有省到** —— 从系统内部关机,阿里云记的是默认的 KeepCharging,停机
+# 期间 CPU/内存照常按运行中收费。
+#
+# 顺带发现的第二层:那个 RAM 角色**在实例上根本没挂**。迁可用区时新实例
+# 没把它带过来,所以即便脚本当初是对的,迁移之后也会静默失效。
+#
+# 教训不是"注释写错了",是**注释描述了一个没人验证过的状态**。要验证只需
+# 一条命令,停机之后:
+#     aliyun ecs DescribeInstances ... | grep StoppedMode
+# StopCharging 才是真省了,KeepCharging 等于没停。
 #
 # 用法:
 #   CLOUD_VM_INSTANCE_ID=<实例ID> CLOUD_VM_REGION=<地域> ./scripts/26-stop-cloud-vm-economical.sh
