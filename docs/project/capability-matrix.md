@@ -80,6 +80,7 @@ impersonation 没验过、说作业发布没有多文件和晋级路径,而详�
 | 网络隔离 | ✅ | 集成验证 | 2026-08-18 | [ADR-035](../decisions/035-network-policy.md) |
 | 破坏性操作防护 | ✅ | 集成验证 | 2026-08-15 | `scripts/confirm-destructive-kubectl.sh` · [事故记录](../operations/incidents.md) |
 | 计费资源门禁 | ✅ | 集成验证 | 2026-08-19 | `scripts/cloud-full-preflight.sh` + 空闲自动关机看门狗 |
+| GitOps 自身可用性 | ✅ | 集成验证 | 2026-09-03 | `probe_gitops` 每 30 分钟检查所有 Application 有没有 ComparisonError —— **一个 Application 拉不到源时 health 仍是 Healthy、界面上不会红,但 git 里改的配置同步不下去**(2026-09-03 一天内在 trino/minio/ingress-nginx 上撞到三次,其中 ingress-nginx 的 OOM 修复因此同步不下去,平台外部访问断了几小时)。判据刻意不是「此刻 sync==Unknown」—— 正常刷新的几秒里也是 Unknown,第一版按它判上线就误报了。**反证做过**:建一个指向不存在源的临时 Application,探针当场报出它和原始报错 |
 | 排障知识 | ✅ | — | 2026-08-22 | [Runbook](../operations/troubleshooting.md):59 条症状索引,66 个条目 |
 | 黄金链路探针 | ✅ | 集成验证 | 2026-09-02 | [ADR-079](../decisions/079-golden-path-probes.md)。**八条**各一个 CronJob。2026-08-30 加 audit(查询留痕断了补不回来,必须有人立刻知道);2026-09-02 加 catalog-connection —— 数据目录的 Trino 连接配置掉过两次 username,而它的失败是渐进的(数据质量 6 条坏 1 条、目录照常能查),报错是 483 条 pydantic 噪音包着真正那一句。**反证跑过**:摘掉 username 探针立刻报错并给出处置命令,补回后恢复 |
 | 统一服务目录 | ✅ | 集成验证 | 2026-08-29 | [service-catalog.md](../reference/service-catalog.md)。关键是 `scripts/check-service-catalog.py` —— 漏登记/owner 不存在/依赖悬空/生成物漂移,CI 都会红 |
