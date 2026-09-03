@@ -33,7 +33,7 @@
 > 这么写的,`current_user` 返回 `superset_service`,差点当成"impersonation
 > 坏了"报出去。Superset 读的不是 `login_user` 设的那个地方。
 
-> 这份单独成文,是因为它在 [`current-work.md`](current-work.md) 里已经涨到
+> 这份单独成文,是因为它在 [`current-work.md`](../project/current-work.md) 里已经涨到
 > 60 多行,把"现在的主线是什么"挤到看不见了 —— 而那份文件的规则是超过
 > ~150 行就说明又在写日记。
 >
@@ -509,7 +509,7 @@ CID=$(/opt/keycloak/bin/kcadm.sh get clients -r platform -q clientId=permission-
 
 ## 跑完之后
 
-把验过的项在 [`capability-matrix.md`](capability-matrix.md) 里从「未验证」
+把验过的项在 [`capability-matrix.md`](../project/capability-matrix.md) 里从「未验证」
 改掉,并写上日期和证据。`scripts/check-capability-matrix.py` 会拦住"没验
 就标 ✅"。
 

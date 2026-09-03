@@ -41,8 +41,8 @@ Keycloak 那边需要一个**单独的 client scope**(`minio-policy`),不能复�
 **MinIO 里放的是 Iceberg 的 parquet 原始文件。谁能读 `lakehouse` 桶,谁就
 绕过了整套 OPA 权限。**
 
-平台的数据权限模型([ADR-051](051-table-level-authorization.md) 的表级授权、
-[ADR-074](074-superset-trino-impersonation.md) 的行列级脱敏)有一个隐含
+平台的数据权限模型([ADR-051](051-trino-opa-access-control.md) 的表级授权、
+[ADR-074](074-superset-impersonation.md) 的行列级脱敏)有一个隐含
 前提:**数据只通过 Trino 访问**。对象存储是那层策略的下面一层,直接读文件
 就完全绕开了。分析师在 Superset 里被脱敏的手机号,从 MinIO 控制台点一下
 就能下载明文。
