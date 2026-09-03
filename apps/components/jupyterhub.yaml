@@ -121,6 +121,26 @@ spec:
             "01-oauth-secret": |
               import os
               c.GenericOAuthenticator.client_secret = os.environ["OAUTH_CLIENT_SECRET"]
+            "02-spawner-http-timeout": |
+              # **等 pod 起来 和 等 notebook server 回话,是两个不同的超时。**
+              #
+              # `singleuser.startTimeout`(chart 里配了 300)对应的是
+              # `start_timeout` —— 等 Pod 变成 Running。而 Pod Running 之后
+              # hub 还要等 jupyter server 自己起好并回应 `/api`,那个超时是
+              # `http_timeout`,**默认只有 30 秒**,chart 没有暴露这个字段。
+              #
+              # 平台镜像里装了 platform_sdk、mlflow、scikit-learn 这些,
+              # jupyter server 起来要几十秒;机器刚开机、页面缓存冷的时候更慢。
+              # 后果是**点「启动服务器」看着转一会儿然后失败**,而 Pod 其实
+              # 已经 Running 了 —— hub 判超时之后把它删掉,现场什么都不剩。
+              #
+              # 2026-09-03 实测:连续三次 spawn,pod 每次都 Running,每次都在
+              # 30 秒那一刻被判超时删掉,日志里是
+              #     TimeoutError: Server at http://10.42.x.x:8888/user/xxx/api
+              #     didn't respond in 30 seconds
+              # 也就是说**这条能力对新用户是不可用的**,只有镜像和页面缓存
+              # 都热了的时候才偶尔成功。
+              c.KubeSpawner.http_timeout = 180
             # 把用户在 Keycloak 里的组注入 notebook pod 的环境变量。
             #
             # **这是 ADR-064 那套按组配额能不能真正生效的关键一环**:
